@@ -1,0 +1,60 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix cfc: <https://w3id.org/circularfactory/Core#> .
+@prefix svc: <https://w3id.org/circularfactory/Service#> .
+@prefix ex:  <https://example.org/kapps-demo#> .
+
+#################################################################
+# Self-contained demo ontology for Scenario 1 (hello-world).
+#
+# Per ADR 0003 (ontology-as-ground-truth), the Service/Workflow/Capability
+# CLASSES a middleware references must pre-exist. This file declares them, so the
+# scenario 1 notebook / integration test can seed a clean repository with exactly
+# the ground-truth vocabulary the middleware requires — nothing more.
+#
+# Every demo class declares a DIRECT rdfs:subClassOf to the exact base the
+# middleware asserts against (svc:Service / svc:Workflow / cfc:Capability /
+# cfc:Resource), so the ground-truth check (a direct rdfs:subClassOf existence
+# query) passes without depending on a reasoner being enabled on the repository.
+#################################################################
+
+# --- Minimal Core class stubs referenced by the demo (kept local for self-containment) ---
+cfc:Resource rdf:type owl:Class .
+cfc:Capability rdf:type owl:Class .
+cfc:EquippedCapability rdf:type owl:Class ; rdfs:subClassOf cfc:Capability .
+cfc:Task rdf:type owl:Class .
+cfc:Operation rdf:type owl:Class ; rdfs:subClassOf cfc:Task .
+
+# --- Demo resource types ---
+ex:DemoResource rdf:type owl:Class ;
+    rdfs:subClassOf cfc:Resource ;
+    rdfs:label "Demo Resource" ;
+    rdfs:comment "A minimal stand-in resource for the hello-world scenario." .
+
+ex:PlannerResource rdf:type owl:Class ;
+    rdfs:subClassOf cfc:Resource ;
+    rdfs:label "Planner Resource" ;
+    rdfs:comment "The resource wrapped by the second (executing) middleware in scenario 1." .
+
+# --- Demo service types (one per resource kind) ---
+ex:HelloWorldService rdf:type owl:Class ;
+    rdfs:subClassOf svc:Service ;
+    rdfs:label "Hello World Service" .
+
+ex:PlannerService rdf:type owl:Class ;
+    rdfs:subClassOf svc:Service ;
+    rdfs:label "Planner Service" .
+
+# --- Demo capability type ---
+ex:HelloWorldCapability rdf:type owl:Class ;
+    rdfs:subClassOf cfc:EquippedCapability ,
+                    cfc:Capability ;
+    rdfs:label "Hello World Capability" ;
+    rdfs:comment "The ability to print a hello-world greeting. Declared as a direct subclass of cfc:Capability (as well as the more specific cfc:EquippedCapability) so the ground-truth check passes without a reasoner." .
+
+# --- Demo workflow type ---
+ex:HelloWorldWorkflow rdf:type owl:Class ;
+    rdfs:subClassOf svc:Workflow ;
+    rdfs:label "Hello World Workflow" ;
+    rdfs:comment "The invokable workflow realizing ex:HelloWorldCapability." .
