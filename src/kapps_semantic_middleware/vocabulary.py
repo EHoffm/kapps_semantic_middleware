@@ -60,6 +60,8 @@ class SVC:
     isStatePropertyOf = IRI("isStatePropertyOf", base=SVC_NS)  # StateProperty -> Service
     realizedByWorkflow = IRI("realizedByWorkflow", base=SVC_NS)  # Capability -> Workflow
     realizesCapability = IRI("realizesCapability", base=SVC_NS)  # Workflow -> Capability
+    providedByStateProperty = IRI("providedByStateProperty", base=SVC_NS)  # Capability -> StateProperty
+    providesCapability = IRI("providesCapability", base=SVC_NS)  # StateProperty -> Capability
     precondition = IRI("precondition", base=SVC_NS)  # Workflow -> (SHACL-described args)
     outcome = IRI("outcome", base=SVC_NS)  # Workflow -> (SHACL-described return)
 

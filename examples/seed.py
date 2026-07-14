@@ -36,6 +36,21 @@ HELLO_RESOURCE = IRI(f"{DEMO_NS}hello_resource")
 PLANNER_RESOURCE = IRI(f"{DEMO_NS}planner_resource")
 HELLO_OPERATION = IRI(f"{DEMO_NS}helloWorldOperation_1")
 
+# --- Scenario 2 (door) class IRIs ---
+DOOR_RESOURCE_CLASS = IRI(f"{DEMO_NS}DoorResource")
+DOOR_SERVICE_CLASS = IRI(f"{DEMO_NS}DoorControllerService")
+DOOR_OPEN_CAPABILITY_CLASS = IRI(f"{DEMO_NS}DoorOpenCapability")
+DOOR_CLOSE_CAPABILITY_CLASS = IRI(f"{DEMO_NS}DoorCloseCapability")
+DOOR_STATUS_CAPABILITY_CLASS = IRI(f"{DEMO_NS}DoorStatusCapability")
+DOOR_OPEN_WORKFLOW_CLASS = IRI(f"{DEMO_NS}DoorOpenWorkflow")
+DOOR_CLOSE_WORKFLOW_CLASS = IRI(f"{DEMO_NS}DoorCloseWorkflow")
+DOOR_STATUS_STATE_CLASS = IRI(f"{DEMO_NS}DoorStatusStateProperty")
+
+# --- Scenario 2 instance IRIs ---
+DOOR_RESOURCE = IRI(f"{DEMO_NS}door_042")
+DOOR_OPEN_OPERATION = IRI(f"{DEMO_NS}doorOpenOperation_1")
+DOOR_CLOSE_OPERATION = IRI(f"{DEMO_NS}doorCloseOperation_1")
+
 
 def _read_service_ontology() -> str:
     """Return the packaged ``svc:`` ontology Turtle."""
@@ -90,6 +105,18 @@ def seed_scenario1(db) -> None:
     load_scenario1_ontologies(db)
     create_resource(db, HELLO_RESOURCE, HELLO_RESOURCE_CLASS)
     create_resource(db, PLANNER_RESOURCE, PLANNER_RESOURCE_CLASS)
+
+
+def seed_scenario2(db) -> None:
+    """Full scenario 2 (door) seed: clear, load ontologies, create the door resource.
+
+    The open/close Operations are created separately (after the door middleware
+    has registered its capability instances) via :func:`create_operation`. The
+    demo ontology is shared with scenario 1, so the same loader applies.
+    """
+    clear_repository(db)
+    load_scenario1_ontologies(db)  # demo_ontology.ttl also carries the door classes
+    create_resource(db, DOOR_RESOURCE, DOOR_RESOURCE_CLASS)
 
 
 # Resource *class* IRIs (instances above are typed with these).

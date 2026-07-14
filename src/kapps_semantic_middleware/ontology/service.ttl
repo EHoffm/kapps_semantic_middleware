@@ -90,6 +90,20 @@ svc:realizesCapability rdf:type owl:ObjectProperty ;
     rdfs:range cfc:Capability ;
     owl:inverseOf svc:realizedByWorkflow .
 
+svc:providedByStateProperty rdf:type owl:ObjectProperty ;
+    rdfs:label "providedByStateProperty" ;
+    rdfs:comment "Relates a Capability to the StateProperty that provides (exposes) it as a readable value. The state-property analogue of svc:realizedByWorkflow: a Workflow realizes an invokable capability, a StateProperty provides a readable one. Lets a service consumer discover 'which readable endpoint gives me capability X'." ;
+    rdfs:domain cfc:Capability ;
+    rdfs:range svc:StateProperty ;
+    owl:inverseOf svc:providesCapability .
+
+svc:providesCapability rdf:type owl:ObjectProperty ;
+    rdfs:label "providesCapability" ;
+    rdfs:comment "Relates a StateProperty to the Capability it provides as a readable value. Inverse of svc:providedByStateProperty." ;
+    rdfs:domain svc:StateProperty ;
+    rdfs:range cfc:Capability ;
+    owl:inverseOf svc:providedByStateProperty .
+
 svc:precondition rdf:type owl:ObjectProperty ;
     rdfs:label "precondition" ;
     rdfs:comment "Points from a Workflow to the description of its arguments (input parameters). Used by the SHACL shape of a workflow subclass to describe the precondition that must be satisfied for invocation. The range is left open because the concrete SHACL shape is authored per workflow class, not defined in this vocabulary module." ;

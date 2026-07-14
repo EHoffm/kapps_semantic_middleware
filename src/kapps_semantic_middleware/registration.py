@@ -15,7 +15,7 @@ Capability) and ADR 0004 (endpoint on both Service and Workflow).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from rdflib import Literal
@@ -295,3 +295,135 @@ def record_operation_outcome(
             (operation_iri, SVC.executionResult, Literal(str(result), datatype=XSD.string))
         )
     db.triples_add(triples, check_exist=True, named_graph=named_graph)
+
+
+# --------------------------------------------------------------------------- #
+# State properties (readable, high-frequency; value never persisted).
+# --------------------------------------------------------------------------- #
+
+
+def mint_state_property_iri(service_iri: IRI, name: str) -> IRI:
+    """Mint the deterministic StateProperty IRI: ``{service_iri}_state_{name}``."""
+    return IRI(f"{service_iri}_state_{name}")
+
+
+def build_state_endpoint(address: str, state_name: str) -> str:
+    """Build the GET endpoint URL for a state property (route ``GET /state/{name}``)."""
+    return f"{address.rstrip('/')}/state/{state_name}"
+
+
+def register_state_property(
+    db: "GraphDB",
+    *,
+    resource_iri: IRI,
+    service_iri: IRI,
+    state_property_iri: IRI,
+    state_property_class: IRI,
+    capability_iri: IRI,
+    capability_class: IRI,
+    endpoint: str,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Register a StateProperty instance, its Capability instance, and their links.
+
+    Idempotent. Only the stable ``svc:endpoint`` is written — the live value is never
+    persisted (it is served on demand from the getter). Raises OntologyGroundTruthError
+    if ``state_property_class`` is not a ``svc:StateProperty`` subclass or
+    ``capability_class`` is not a ``cfc:Capability`` subclass.
+    """
+    assert_class_registered(db, state_property_class, SVC.StateProperty, named_graph)
+    assert_class_registered(db, capability_class, CFC.Capability, named_graph)
+
+    triples: List[Tuple] = [
+        (capability_iri, RDF.type, capability_class),
+        (resource_iri, CFC.hasCapability, capability_iri),
+        (state_property_iri, RDF.type, state_property_class),
+        (service_iri, SVC.hasStateProperty, state_property_iri),
+        (state_property_iri, SVC.isStatePropertyOf, service_iri),
+        (capability_iri, SVC.providedByStateProperty, state_property_iri),
+        (state_property_iri, SVC.providesCapability, capability_iri),
+    ]
+    db.triples_add(triples, check_exist=True, named_graph=named_graph)
+
+    _delete_all(db, state_property_iri, SVC.endpoint, named_graph)
+    db.triple_add(
+        (state_property_iri, SVC.endpoint, Literal(str(endpoint), datatype=XSD.anyURI)),
+        named_graph=named_graph,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Liveness: heartbeat (per-service) and watchdog sweep (centralized). ADR 0009.
+# --------------------------------------------------------------------------- #
+
+
+def update_heartbeat(
+    db: "GraphDB",
+    service_iri: IRI,
+    timestamp: Optional[datetime] = None,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Refresh a Service's ``svc:lastHeartbeat`` timestamp.
+
+    Idempotent: replaces any existing heartbeat. Called periodically by a
+    resource-mode Service to signal liveness (ADR 0009).
+    """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    _delete_all(db, service_iri, SVC.lastHeartbeat, named_graph)
+    db.triple_add(
+        (service_iri, SVC.lastHeartbeat, Literal(timestamp.isoformat(), datatype=XSD.dateTime)),
+        named_graph=named_graph,
+    )
+
+
+def find_stale_services(
+    db: "GraphDB",
+    max_age_seconds: float,
+    *,
+    now: Optional[datetime] = None,
+    named_graph: Optional[IRI] = None,
+) -> list[IRI]:
+    """Find reachable-but-silent Services whose heartbeat has gone stale.
+
+    A service is stale if it currently has an ``svc:address`` (i.e. it is registered
+    and advertised as reachable) but either has no ``svc:lastHeartbeat`` at all or its
+    latest heartbeat is older than ``max_age_seconds``. Services are identified by the
+    presence of ``svc:address`` rather than by ``rdf:type`` because real services are
+    typed with domain subclasses of ``svc:Service`` (ADR 0009).
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    cutoff_iso = (now - timedelta(seconds=max_age_seconds)).isoformat()
+
+    sparql = f"""
+    SELECT DISTINCT ?s WHERE {{
+        ?s <{SVC.address}> ?addr .
+        OPTIONAL {{ ?s <{SVC.lastHeartbeat}> ?hb . }}
+        FILTER ( !bound(?hb) || ?hb < "{cutoff_iso}"^^<http://www.w3.org/2001/XMLSchema#dateTime> )
+    }}
+    """
+    result = db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return [IRI(str(b["s"])) for b in bindings]
+
+
+def sweep_stale_services(
+    db: "GraphDB",
+    max_age_seconds: float,
+    *,
+    now: Optional[datetime] = None,
+    named_graph: Optional[IRI] = None,
+) -> list[IRI]:
+    """Deregister every stale Service (ADR 0009 watchdog sweep).
+
+    Finds reachable-but-silent Services and calls :func:`deregister_service` on each,
+    removing their ``svc:address`` and workflow/state endpoints while preserving the
+    individuals. Returns the list of swept Service IRIs.
+    """
+    stale = find_stale_services(db, max_age_seconds, now=now, named_graph=named_graph)
+    for service_iri in stale:
+        deregister_service(db, service_iri, named_graph=named_graph)
+    return stale
