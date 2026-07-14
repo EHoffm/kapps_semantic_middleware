@@ -18,6 +18,7 @@ letting someone unfamiliar with the system run it and see what happens.
 **Consequence**: every example needs its ontology/seed-data prerequisites made fully explicit
 and scripted, not just documented in prose — which also means each notebook doubles as a
 minimal, runnable specification of exactly what ground-truth ontology a given scenario
-requires (directly exercising the pre-existing-class policy from [[adr-0004]]: the clear-and-
-seed step is where a scenario's Capability/Workflow/Service classes actually get authored
-into the graph before the middleware that depends on them can start).
+requires (directly exercising the pre-existing-class policy from
+`src/kapps_semantic_middleware/docs/adr/0003-ontology-as-ground-truth-for-types.md`: the
+clear-and-seed step is where a scenario's Capability/Workflow/Service classes actually get
+authored into the graph before the middleware that depends on them can start).

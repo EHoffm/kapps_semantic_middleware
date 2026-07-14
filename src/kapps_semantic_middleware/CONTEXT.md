@@ -1,15 +1,19 @@
-# KAPPS Semantic Middleware
+# Core Middleware
+
+One of four contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others
+(SHACL Interop, Example Scenarios, Module Requirements).
 
 The reference implementation of the KAPPS architecture's Semantic Middleware Runtime: the
 Interface-Layer component that lets a piece of Python code running on or next to a shopfloor
 resource (or as a standalone service) expose functionality through the knowledge graph, and
 lets other middleware instances discover and invoke that functionality via the graph rather
-than via hardcoded network references.
+than via hardcoded network references. This context owns the Service/Workflow/Capability/
+Operation/Mode registration and execution machinery; it delegates the actual generation and
+parsing of workflow precondition/outcome SHACL shapes to the SHACL Interop context.
 
 Built on `aas_middleware` (forked by inheritance, being incrementally reimplemented locally),
 `kapps_ogm` (all knowledge graph reads/writes), and `graph_db_interface` (raw triple store
-access, used directly where `kapps_ogm` has no equivalent yet, e.g. SHACL and instance
-discovery).
+access, used directly where `kapps_ogm` has no equivalent yet, e.g. instance discovery).
 
 ## Language
 
@@ -23,7 +27,8 @@ _Avoid_: Middleware instance (that's the Python object; Service is its graph rep
 An invokable function exposed by a Service, registered with `@mw.workflow(...)`. Realizes
 exactly one Capability. Typed via a domain-specific subclass of `svc:Workflow` that must
 pre-exist in the ontology, carrying a SHACL shape describing its arguments (precondition)
-and return value (outcome).
+and return value (outcome) — see the SHACL Interop context for how that shape is read/
+written.
 _Avoid_: Skill, Action (AAS-tradition terms for the same invocation-interface idea; KAPPS
 reserves "Service" for the deployable middleware-wrapped entity and "Workflow" for what it
 exposes — see the paper's explicit divergence from the AAS capability-skill-service model).
@@ -77,7 +82,8 @@ by watchdog-mode instances to decide staleness.
 deregistration/staleness. `svc:endpoint` is the full, directly callable URL for one specific
 Workflow or StateProperty, also set on startup and removed on deregistration/staleness. Both
 being present is a deliberate divergence from the paper's literal "address on Service only"
-wording — see [[adr-0006]].
+wording — see
+`src/kapps_semantic_middleware/docs/adr/0004-endpoint-on-service-and-workflow.md`.
 _Avoid_: URL, endpoint URL used interchangeably for both — they are distinct properties on
 distinct entity types.
 
@@ -85,7 +91,8 @@ distinct entity types.
 An `aas_middleware`-protocol `Connector` (`connect`/`disconnect`/`provide`/`consume`) whose
 `provide`/`consume` wrap `kapps_ogm.OGM.fetch`/`commit`. The mechanism by which any
 `aas_middleware` construct (workflows, synced connectors) can read/write the knowledge graph
-without going around the OGM's validated write path. See [[adr-0008]].
+without going around the OGM's validated write path. See
+`src/kapps_semantic_middleware/docs/adr/0006-knowledge-graph-connector.md`.
 
 **Deregistration**:
 The reverse of registration: on shutdown (or, for watchdog-mode-detected staleness), removing

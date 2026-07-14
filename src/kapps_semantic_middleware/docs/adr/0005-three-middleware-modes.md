@@ -26,5 +26,6 @@ no workflows, so `execute`/CRUD have nothing to hide behind.
 
 **Consequence**: `server` and `watchdog`-as-a-concept both existed as scope only at design
 time; `watchdog`'s sweep logic was pulled into this session's build scope alongside resource
-mode (see [[adr-0009]]) once its two-part decomposition (heartbeat + sweeper) became clear.
+mode (see `src/kapps_semantic_middleware/docs/adr/0007-heartbeat-and-watchdog-mode.md`) once
+its two-part decomposition (heartbeat + sweeper) became clear.
 `server` mode remains a documented, reserved mode value with no implementation yet.

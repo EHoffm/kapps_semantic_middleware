@@ -5,8 +5,9 @@
 from PyPI. Genuine correctness bugs found in any of the three sibling repos while building
 `kapps_semantic_middleware` may be fixed directly in that sibling's checkout. New
 functionality never goes into a sibling repo — it stays in `kapps_semantic_middleware`,
-even where a sibling would be the more natural long-term home (see [[adr-0005]] for the
-concrete case: SHACL support belongs in `kapps_ogm`, but is built here first).
+even where a sibling would be the more natural long-term home (see
+`src/kapps_semantic_middleware/shacl_interop/docs/adr/0001-shacl-for-workflow-signatures.md`
+for the concrete case: SHACL support belongs in `kapps_ogm`, but is built here first).
 
 **Why**: `kapps_ogm`'s published PyPI release (0.1.2) has a `NameError` at
 `property_spec.py:241` that breaks `fetch`/`create`/`commit` for any class with properties

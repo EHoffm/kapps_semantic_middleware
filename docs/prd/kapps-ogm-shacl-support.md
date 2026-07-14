@@ -1,6 +1,7 @@
 # PRD: SHACL support in kapps_ogm
 
-**Origin**: [[adr-0005]] (`kapps_semantic_middleware`). Written while building workflow
+**Origin**: `src/kapps_semantic_middleware/shacl_interop/docs/adr/0001-shacl-for-workflow-signatures.md`
+(`kapps_semantic_middleware`). Written while building workflow
 precondition/outcome representation, which needed SHACL and found `kapps_ogm` has none.
 **Status**: requirement capture only — no `kapps_ogm` code written from this document yet.
 **Audience**: whoever picks up `kapps_ogm` v2.
@@ -13,7 +14,8 @@ precondition/outcome representation, which needed SHACL and found `kapps_ogm` ha
 and currently can't get it from `kapps_ogm`:
 
 1. **Reading workflow signatures.** Workflow/StateProperty classes carry a `sh:NodeShape`
-   (`sh:targetClass`) describing their precondition/outcome properties (see [[adr-0005]]).
+   (`sh:targetClass`) describing their precondition/outcome properties (see the SHACL Interop
+   ADR referenced above).
    `kapps_semantic_middleware` needs to turn that shape into the same kind of typed,
    validated Pydantic model that `ClassSpec.to_pydantic_model()` already produces for
    OWL-Restriction-based `COMPLEX` properties — but SHACL shapes aren't parsed at all today,
@@ -39,8 +41,8 @@ and currently can't get it from `kapps_ogm`:
   described the shape. At minimum: `sh:path`, `sh:datatype`/`sh:class` (→ `LITERAL`/`OBJECT`
   as today), `sh:minCount`/`sh:maxCount` (→ the existing `min_count`/`max_count` cardinality
   handling). `sh:node` (nested shapes, needed for the precondition/outcome indirection
-  described in [[adr-0005]]) should map onto the existing nested-`ClassSpec`/`COMPLEX`
-  handling.
+  described in the SHACL Interop ADR referenced above) should map onto the existing
+  nested-`ClassSpec`/`COMPLEX` handling.
 - **R2 — Structured SHACL validation errors.** A dedicated exception type (in
   `graph_db_interface`, surfaced through `kapps_ogm`) carrying parsed `sh:focusNode`,
   `sh:resultPath`, `sh:sourceConstraintComponent`, `sh:resultMessage`,
@@ -52,8 +54,10 @@ and currently can't get it from `kapps_ogm`:
   `owl:Restriction` blank nodes must keep working exactly as they do today; SHACL support is
   additive, not a replacement.
 - **R4 — Read-only is sufficient for the initiating use case.** `kapps_semantic_middleware`
-  does not need `kapps_ogm` to *generate*/write SHACL shapes — per [[adr-0004]], Workflow/
-  Capability/Service classes and their shapes are pre-authored by ontology engineers, not
+  does not need `kapps_ogm` to *generate*/write SHACL shapes — per
+  `src/kapps_semantic_middleware/docs/adr/0003-ontology-as-ground-truth-for-types.md`,
+  Workflow/Capability/Service classes and their shapes are pre-authored by ontology engineers,
+  not
   minted at runtime. R1 is a read/parse requirement only. (A future generation capability may
   still be worth having for other consumers, but is out of scope for the requirement this PRD
   originates from.)

@@ -1,6 +1,8 @@
 # PRD: Visual toolbox for guided ontology-class authoring
 
-**Origin**: raised during design of [[adr-0004]] (`kapps_semantic_middleware`), which commits
+**Origin**: raised during design of
+`src/kapps_semantic_middleware/docs/adr/0003-ontology-as-ground-truth-for-types.md`
+(`kapps_semantic_middleware`), which commits
 to "ontology as ground truth" — every Capability, Workflow, Service, and StateProperty type a
 `@workflow`/`@state` registration references must be pre-authored in the ontology before the
 middleware using it can start.
@@ -12,7 +14,8 @@ one, not a spec for existing code.
 
 The organization building on KAPPS has roughly twenty domain engineers, each developing their
 own resource integrations (doors, transformer cells, sensors, conveyor modules — one per
-physical device type or family), against a single ontology engineer. [[adr-0004]] means every
+physical device type or family), against a single ontology engineer. The ontology-as-ground-
+truth ADR referenced above means every
 one of those twenty engineers' `@workflow`/`@state` registrations depends on a
 Capability/Workflow/Service class and a SHACL shape existing in the ontology *before* their
 code can run at all — authored correctly (right superclass, right SHACL property paths and
@@ -35,8 +38,9 @@ engineer can review and merge with confidence, rather than reverse-engineer.
 - **R1 — Guided class creation for the four registration-relevant types.** Given "I'm building
   a new Workflow for my resource, called X, that takes these arguments and returns this," the
   tool produces a correctly-shaped `owl:Class` (subclassing the right `svc:` base class) plus
-  its `sh:NodeShape` (per [[adr-0005]]'s pattern) — without the domain engineer writing RDF by
-  hand.
+  its `sh:NodeShape` (per the pattern in
+  `src/kapps_semantic_middleware/shacl_interop/docs/adr/0001-shacl-for-workflow-signatures.md`)
+  — without the domain engineer writing RDF by hand.
 - **R2 — Reuse existing Capability/Resource types where they already fit.** Before letting
   someone create a new Capability type, the tool should surface existing ones that might
   already cover the same real-world ability (avoiding e.g. `DoorOpenCapability` and

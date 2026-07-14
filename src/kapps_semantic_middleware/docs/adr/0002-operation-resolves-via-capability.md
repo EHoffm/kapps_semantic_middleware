@@ -19,6 +19,8 @@ design consistent with Core as it actually exists, at the cost of one extra hop 
 resolution.
 
 **Consequence**: every Workflow needs a matching Capability instance before it's reachable
-from an Operation — see [[adr-0004]] for how that instance comes to exist. This also means a
+from an Operation — see
+`src/kapps_semantic_middleware/docs/adr/0003-ontology-as-ground-truth-for-types.md` for how
+that instance comes to exist. This also means a
 Capability, not a Workflow, is the unit planning services discover against ("find a service
 providing X capability"), matching the paper's framing of planning as capability-driven.

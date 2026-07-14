@@ -20,7 +20,8 @@ gaining native SHACL interpretation is planned as v2 work (see
 project owns its own read/write logic for these shapes.
 
 Shapes target the Workflow's *class*, not each instance, for the same fleet-scale reason as
-[[adr-0004]]: hundreds of doors share one shape, not hundreds of duplicates.
+`src/kapps_semantic_middleware/docs/adr/0003-ontology-as-ground-truth-for-types.md`: hundreds
+of doors share one shape, not hundreds of duplicates.
 
 **Consequence**: `kapps_semantic_middleware` currently contains SHACL-generation/parsing
 logic that duplicates work properly belonging in `kapps_ogm`. This is a known, intentional,
