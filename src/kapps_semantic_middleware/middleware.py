@@ -135,7 +135,7 @@ class SemanticMiddleware(Middleware):
         await anyio.to_thread.run_sync(
             functools.partial(
                 register_service,
-                self.ogm.db,
+                self.ogm,
                 resource_iri=self.resource_iri,
                 service_iri=self.service_iri,
                 service_class=self.service_class,
@@ -149,7 +149,7 @@ class SemanticMiddleware(Middleware):
         await anyio.to_thread.run_sync(
             functools.partial(
                 deregister_service,
-                self.ogm.db,
+                self.ogm,
                 self.service_iri,
                 named_graph=self.named_graph,
             )
@@ -170,7 +170,7 @@ class SemanticMiddleware(Middleware):
                 await anyio.to_thread.run_sync(
                     functools.partial(
                         update_heartbeat,
-                        self.ogm.db,
+                        self.ogm,
                         self.service_iri,
                         named_graph=self.named_graph,
                     )
@@ -192,7 +192,7 @@ class SemanticMiddleware(Middleware):
         """Refresh this service's heartbeat once (also useful for tests/manual pings)."""
         await anyio.to_thread.run_sync(
             functools.partial(
-                update_heartbeat, self.ogm.db, self.service_iri, named_graph=self.named_graph
+                update_heartbeat, self.ogm, self.service_iri, named_graph=self.named_graph
             )
         )
 
@@ -229,7 +229,7 @@ class SemanticMiddleware(Middleware):
         swept = await anyio.to_thread.run_sync(
             functools.partial(
                 sweep_stale_services,
-                self.ogm.db,
+                self.ogm,
                 self.staleness_threshold,
                 named_graph=self.named_graph,
             )
@@ -280,7 +280,7 @@ class SemanticMiddleware(Middleware):
                 await anyio.to_thread.run_sync(
                     functools.partial(
                         register_workflow,
-                        self.ogm.db,
+                        self.ogm,
                         resource_iri=self.resource_iri,
                         service_iri=self.service_iri,
                         workflow_iri=workflow_iri,
@@ -351,7 +351,7 @@ class SemanticMiddleware(Middleware):
                 await anyio.to_thread.run_sync(
                     functools.partial(
                         register_state_property,
-                        self.ogm.db,
+                        self.ogm,
                         resource_iri=self.resource_iri,
                         service_iri=self.service_iri,
                         state_property_iri=state_property_iri,
@@ -398,7 +398,7 @@ class SemanticMiddleware(Middleware):
         workflow_iri, url = await anyio.to_thread.run_sync(
             functools.partial(
                 resolve_operation_endpoint,
-                self.ogm.db,
+                self.ogm,
                 operation_iri_obj,
             )
         )
@@ -419,7 +419,7 @@ class SemanticMiddleware(Middleware):
                 await anyio.to_thread.run_sync(
                     functools.partial(
                         record_operation_outcome,
-                        self.ogm.db,
+                        self.ogm,
                         operation_iri=operation_iri_obj,
                         workflow_iri=workflow_iri,
                         success=success,
@@ -439,7 +439,7 @@ class SemanticMiddleware(Middleware):
             await anyio.to_thread.run_sync(
                 functools.partial(
                     record_operation_outcome,
-                    self.ogm.db,
+                    self.ogm,
                     operation_iri=operation_iri_obj,
                     workflow_iri=workflow_iri,
                     success=False,

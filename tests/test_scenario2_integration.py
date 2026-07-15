@@ -110,9 +110,10 @@ def test_scenario2_door_workflows_and_live_state(graphdb):
     server, thread = _start_server(mw, DOOR_PORT)
     try:
         # Registration: both workflows and the state property are in the graph.
-        assert db.triple_exists((service_iri, SVC.hasWorkflow, open_wf))
-        assert db.triple_exists((service_iri, SVC.hasWorkflow, close_wf))
-        assert db.triple_exists((service_iri, SVC.hasStateProperty, status_sp))
+        # Links materialized on the instance-owned (inverse) side (ADR 0006).
+        assert db.triple_exists((open_wf, SVC.isWorkflowOf, service_iri))
+        assert db.triple_exists((close_wf, SVC.isWorkflowOf, service_iri))
+        assert db.triple_exists((status_sp, SVC.isStatePropertyOf, service_iri))
         assert db.triple_exists((status_sp, RDF.type, seed.DOOR_STATUS_STATE_CLASS))
         status_cap = mint_capability_iri(seed.DOOR_RESOURCE, "door_status")
         assert db.triple_exists((status_cap, SVC.providedByStateProperty, status_sp))

@@ -25,7 +25,7 @@ from kapps_semantic_middleware.registration import (
     mint_capability_iri,
     mint_workflow_iri,
 )
-from kapps_semantic_middleware.vocabulary import CFC, SVC
+from kapps_semantic_middleware.vocabulary import SVC
 
 requires_graphdb = pytest.mark.skipif(
     not all(
@@ -84,12 +84,15 @@ def test_scenario1_hello_world_end_to_end(graphdb):
 
     server, thread = _start_server(mw1, HELLO_PORT)
     try:
-        # Registration wrote the full Service/Capability/Workflow structure + reachability.
-        assert db.triple_exists((seed.HELLO_RESOURCE, SVC.hasService, service_iri))
+        # Registration wrote the full Service/Capability/Workflow structure +
+        # reachability. Links are materialized on the instance-owned (inverse) side
+        # (ADR 0006): a Service knows its resource via isServiceOf, a Workflow knows
+        # its Service via isWorkflowOf, a Capability its Workflow via realizedByWorkflow.
         assert db.triple_exists((service_iri, RDF.type, seed.HELLO_SERVICE_CLASS))
-        assert db.triple_exists((seed.HELLO_RESOURCE, CFC.hasCapability, cap_instance))
+        assert db.triple_exists((service_iri, SVC.isServiceOf, seed.HELLO_RESOURCE))
+        assert db.triple_exists((cap_instance, RDF.type, seed.HELLO_CAPABILITY_CLASS))
         assert db.triple_exists((cap_instance, SVC.realizedByWorkflow, wf_instance))
-        assert db.triple_exists((service_iri, SVC.hasWorkflow, wf_instance))
+        assert db.triple_exists((wf_instance, SVC.isWorkflowOf, service_iri))
         assert db.triples_get(sub=service_iri, pred=SVC.address)
         assert db.triples_get(sub=wf_instance, pred=SVC.endpoint)
 
@@ -134,9 +137,10 @@ def test_missing_ground_truth_class_fails_fast(graphdb):
     )
 
     seed.seed_scenario1(graphdb)
+    ogm = OGM(db=graphdb)
     with pytest.raises(OntologyGroundTruthError):
         register_workflow(
-            graphdb,
+            ogm,
             resource_iri=seed.HELLO_RESOURCE,
             service_iri=seed.HELLO_RESOURCE + "_service",
             workflow_iri=seed.HELLO_RESOURCE + "_service_workflow_ghost",
