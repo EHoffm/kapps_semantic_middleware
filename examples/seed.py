@@ -61,20 +61,34 @@ def _read_service_ontology() -> str:
     )
 
 
-def _read_demo_ontology() -> str:
-    """Return the scenario demo ontology Turtle (sibling of this file)."""
-    return (Path(__file__).parent / "demo_ontology.ttl").read_text(encoding="utf-8")
+def _read_demo_ontology(filename: str) -> str:
+    """Return a scenario demo ontology Turtle file (sibling of this file)."""
+    return (Path(__file__).parent / filename).read_text(encoding="utf-8")
 
 
 def clear_repository(db) -> None:
-    """Clear the repository's default graph (authorized clearable test repo)."""
+    """Clear the repository's default graph (authorized clearable test repo).
+
+    Always run this before seeding, so a scenario never accumulates residual
+    triples from a previous run or a different scenario.
+    """
     db.clear_graph()
 
 
 def load_scenario1_ontologies(db) -> None:
-    """Load the ``svc:`` module and the scenario 1 demo ontology into the repo."""
+    """Load the ``svc:`` module and ONLY the scenario 1 demo classes into the repo."""
     db.import_statements(_read_service_ontology(), content_type="application/x-turtle")
-    db.import_statements(_read_demo_ontology(), content_type="application/x-turtle")
+    db.import_statements(
+        _read_demo_ontology("demo_scenario1.ttl"), content_type="application/x-turtle"
+    )
+
+
+def load_scenario2_ontologies(db) -> None:
+    """Load the ``svc:`` module and ONLY the scenario 2 (door) demo classes into the repo."""
+    db.import_statements(_read_service_ontology(), content_type="application/x-turtle")
+    db.import_statements(
+        _read_demo_ontology("demo_scenario2.ttl"), content_type="application/x-turtle"
+    )
 
 
 def create_resource(db, resource_iri: IRI, resource_class: IRI) -> None:
@@ -115,7 +129,7 @@ def seed_scenario2(db) -> None:
     demo ontology is shared with scenario 1, so the same loader applies.
     """
     clear_repository(db)
-    load_scenario1_ontologies(db)  # demo_ontology.ttl also carries the door classes
+    load_scenario2_ontologies(db)
     create_resource(db, DOOR_RESOURCE, DOOR_RESOURCE_CLASS)
 
 
