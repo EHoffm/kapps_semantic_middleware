@@ -320,17 +320,20 @@ def record_operation_outcome(
     *,
     operation_iri: IRI,
     workflow_iri: IRI,
-    success: bool,
     result: Optional[str] = None,
     timestamp: Optional[datetime] = None,
     named_graph: Optional[IRI] = None,
 ) -> None:
-    """Record execution provenance on an Operation via OGM.commit (R12 writeback)."""
+    """Record execution provenance on an Operation via OGM.commit (R12 writeback).
+
+    Whether execution succeeded is carried by the Operation's terminal
+    ``svc:operationStatus`` (``done``/``failed``, ADR 0009), not a separate boolean;
+    this writeback records only which Workflow ran it, when, and the optional result.
+    """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
     data: dict = {
         str(SVC.executedByWorkflow): [_ref(workflow_iri)],
-        str(SVC.executionSuccess): [bool(success)],
         str(SVC.executionTimestamp): [timestamp.isoformat()],
     }
     if result is not None:

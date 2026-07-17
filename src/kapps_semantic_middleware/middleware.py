@@ -422,7 +422,6 @@ class SemanticMiddleware(Middleware):
                         self.ogm,
                         operation_iri=operation_iri_obj,
                         workflow_iri=workflow_iri,
-                        success=success,
                         result=str(result),
                     )
                 )
@@ -442,7 +441,6 @@ class SemanticMiddleware(Middleware):
                     self.ogm,
                     operation_iri=operation_iri_obj,
                     workflow_iri=workflow_iri,
-                    success=False,
                     result=str(exc),
                 )
             )

@@ -113,9 +113,11 @@ def test_scenario1_hello_world_end_to_end(graphdb):
         assert result["result"] == "hello world"
         assert result["workflow"] == str(wf_instance)
 
-        # R12 provenance was written back onto the operation.
+        # R12 provenance was written back onto the operation. Success/failure is now
+        # carried by the terminal svc:operationStatus (done/failed, ADR 0009), not a
+        # separate executionSuccess boolean; the in-memory result["success"] above still
+        # reflects the invocation outcome.
         assert db.triple_exists((seed.HELLO_OPERATION, SVC.executedByWorkflow, wf_instance))
-        assert db.triples_get(sub=seed.HELLO_OPERATION, pred=SVC.executionSuccess)
         assert db.triples_get(sub=seed.HELLO_OPERATION, pred=SVC.executionTimestamp)
     finally:
         server.should_exit = True
