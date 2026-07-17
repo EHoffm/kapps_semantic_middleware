@@ -51,11 +51,49 @@ _Avoid_: Skill (AAS term for a related but not identical concept).
 
 **Operation**:
 Defined in Core (`cfc:Operation`, subclass of `Task`). The executable, resource-assigned
-form of a task; links to a Capability via `cfc:implementsCapability`. In this project,
-resolving and invoking an Operation is what `execute()` does, and the Operation is where the
-outcome of that invocation gets recorded afterward.
+form of a task; links to a Capability via `cfc:implementsCapability`. A caller creates an
+Operation in the graph and dispatches it to the resource that will carry it out; that
+resource queues it, pulls it, runs it, and the outcome is recorded back onto it. The
+graph-level unit of work exchanged between middleware instances.
 _Avoid_: Workflow invocation, Job (Operation is the graph-level unit of work; a single
-Operation resolves to exactly one Workflow invocation via its Capability).
+Operation resolves to exactly one Workflow via its Capability).
+
+**Event trigger** (`execute()`):
+The receiver-side built-in Workflow that every resource-mode middleware exposes on its REST
+API. A caller "triggers" it to signal that an Operation addressed to that resource now exists in
+the graph; the receiver enqueues the Operation, `ogm.fetch`es it, and hands it to an optional
+domain callback (else leaves it `queued`). The trigger carries only the Operation IRI — the
+payload lives in the graph — and does not block on the work or return a business result.
+_Avoid_: RPC call, Invoke (the event trigger notifies; it does not run the work synchronously).
+
+**Dispatch**:
+The caller-side act of handing an Operation to another resource: create the Operation
+individual in the graph (through the OGM-routed write path) and then fire the receiver's
+event trigger. Accessed from domain Python as a transaction context manager — the body populates
+the Operation, the atomic exit performs the create-and-notify.
+_Avoid_: Send, Publish (there is no message bus; dispatch is a graph write plus an event trigger).
+
+**Operation queue**:
+A resource-mode middleware's pending-work list — the Operations addressed to its Resource
+that await or are in progress. Held in memory as a cache and reconstructed at startup by
+querying the graph (own `queued` operations, plus own orphaned `running` operations to
+reclaim); filled live by event triggers. A dead resource's stranded operations are swept
+centrally by a watchdog, not by per-resource polling.
+_Avoid_: Message queue, Broker (there is no broker; the queue is a view over graph state).
+
+**Operation status**:
+The lifecycle state of an Operation: `queued` (created and addressed, awaiting pull) →
+`running` (pulled, in progress) → `done` or `failed` (terminal). Drives coordination and
+recovery. Execution provenance (which Workflow ran it, when, the result) is written as part
+of the terminal transition, so the status is itself the provenance record — there is no
+separate success flag.
+
+**Pull-and-run**:
+The receiver-side transaction context manager by which domain code takes the next `queued`
+Operation, sets it `running` (re-fetching it under a domain-supplied `ClassScope`), runs the
+work in the body, and on atomic exit records the terminal `done`/`failed` state and
+provenance — dumping the Resource's datamodel to the graph on failure.
+_Avoid_: Poll, Consume (pull-and-run is the guarded unit of work, not the delivery mechanism).
 
 **Resource**:
 Defined in Core (`cfc:Resource`). The physical or logical thing a Service wraps (a door, a
@@ -63,8 +101,9 @@ transformer cell, a screwing tool). Required at construction time in resource mo
 
 **Mode**:
 A `SemanticMiddleware` construction-time choice governing what the instance is *for*:
-- `"resource"` — wraps one Resource; user-registered Workflows/StateProperties are the REST
-  surface; `execute`/CRUD are plain Python methods, not REST-exposed.
+- `"resource"` — wraps one Resource; the REST surface is the user-registered Workflows/
+  StateProperties plus the built-in `execute()` event trigger; the transactional context-manager
+  surface (dispatch, pull-and-run, handover) and reads/CRUD stay Python-only, not REST-exposed.
 - `"server"` — wraps no Resource; CRUD/`execute` themselves are the REST surface (e.g. a
   future data-serving "product server"). Not yet implemented.
 - `"watchdog"` — wraps no Resource, exposes little to no REST surface; runs a sweep loop

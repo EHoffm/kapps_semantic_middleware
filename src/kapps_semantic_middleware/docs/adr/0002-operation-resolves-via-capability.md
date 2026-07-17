@@ -24,3 +24,13 @@ from an Operation — see
 that instance comes to exist. This also means a
 Capability, not a Workflow, is the unit planning services discover against ("find a service
 providing X capability"), matching the paper's framing of planning as capability-driven.
+
+---
+
+**Amendment (2026-07-17, event trigger model).** The resolution chain in this ADR still holds
+unchanged — an Operation still resolves `implementsCapability → realizedByWorkflow`. What
+changed is what happens *after* resolution: `execute()` no longer performs a synchronous HTTP
+POST to the resolved Workflow endpoint and blocks on the result. Under the event trigger model (ADR
+0009), resolution locates the **receiving Service** to notify; the caller then triggers that
+Service's `execute()`, and the work is pulled from a queue. The two-hop capability
+resolution is the discovery step; invocation is the event trigger.

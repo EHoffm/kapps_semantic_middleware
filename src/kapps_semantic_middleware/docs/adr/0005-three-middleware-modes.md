@@ -29,3 +29,14 @@ time; `watchdog`'s sweep logic was pulled into this session's build scope alongs
 mode (see `src/kapps_semantic_middleware/docs/adr/0007-heartbeat-and-watchdog-mode.md`) once
 its two-part decomposition (heartbeat + sweeper) became clear.
 `server` mode remains a documented, reserved mode value with no implementation yet.
+
+---
+
+**Amendment (2026-07-17, event trigger model).** This ADR said `execute` is exposed *only* as a
+plain Python method in resource mode. That is no longer true for `execute()` itself: under the
+event trigger model (ADR 0009) `execute()` is the receiver-side intake, exposed as a **built-in
+Workflow on the REST API** so a caller on another host can trigger it. The corrected resource-mode
+REST surface is therefore: user-registered Workflows/StateProperties **plus the built-in
+`execute()` event trigger**. Everything else stays Python-only — CRUD, and the transactional
+context-manager surface (dispatch/`request`, pull-and-run, handover; ADR 0010) — none of which
+is REST-exposed in resource mode.
