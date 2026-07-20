@@ -288,3 +288,50 @@ def test_claim_next_empty_queue_raises(graphdb):
     with pytest.raises(OperationQueueEmpty):
         with mw.claim_next():
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Domain callback on enqueue (#15): a registered callback fires when an Operation
+# is enqueued and drives a background pull-and-run (ADR 0009).
+# --------------------------------------------------------------------------- #
+
+
+def _wait_for_status(db, op_iri, status: str, timeout: float = 15.0) -> None:
+    """Poll the graph until `op_iri` reaches `status` (the callback runs in the background)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        triples = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
+        if triples and str(triples[0][2]) == status:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"operation {op_iri} did not reach status {status!r} within {timeout}s")
+
+
+@requires_graphdb
+def test_callback_runs_operation_on_enqueue(graphdb):
+    """A registered callback fires on enqueue and drives a pull-and-run to done + provenance (#15).
+
+    The no-callback path — an Operation left `queued` — is covered by
+    test_event_trigger_dispatch_enqueues_over_rest, which dispatches without a callback.
+    """
+    db = graphdb
+    seed.seed_scenario1(db)
+    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
+
+    mw_b = _hello_resource(graphdb, B_PORT)
+    mw_b.register_callback(lambda operation: hello_world())  # domain work function
+    server, thread = _start_server(mw_b, B_PORT)
+    try:
+        op_iri = _dispatch_hello_op(graphdb)  # event trigger enqueues + fires the callback
+
+        # The callback runs in the background; wait for the terminal transition.
+        _wait_for_status(db, op_iri, OperationStatus.DONE)
+        assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
+        result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
+        assert result and str(result[0][2]) == "hello world"
+        # The callback drained the queue (no manual claim_next needed).
+        assert op_iri not in mw_b._operation_queue
+    finally:
+        server.should_exit = True
+        thread.join(timeout=20)
+        time.sleep(0.5)

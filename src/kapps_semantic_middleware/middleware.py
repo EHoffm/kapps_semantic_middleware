@@ -162,6 +162,12 @@ class SemanticMiddleware(Middleware):
             # (the graph is the source of truth; durability/reconstruction is #17) and the
             # receiver-side event-trigger REST route that other resources ring to dispatch.
             self._operation_queue: List[IRI] = []
+            # Optional domain callback fired on enqueue (#15); None = leave the Operation
+            # queued for a manual claim_next. Background tasks are tracked so they are not
+            # garbage-collected before they finish.
+            self._callback: Optional[Any] = None
+            self._callback_scope: Any = None
+            self._callback_tasks: set = set()
             self._register_event_trigger()
 
             self.add_callback("on_start_up", self._register_service)
@@ -541,6 +547,14 @@ class SemanticMiddleware(Middleware):
             functools.partial(self.ogm.fetch, instance_iri=operation_iri)
         )
         self._operation_queue.append(operation_iri)
+        if self._callback is not None:
+            # Fire the domain callback in the background (#15): the trigger returns
+            # immediately (ADR 0009 — it does not block on the work); the pull-and-run runs
+            # off the event loop so its blocking graph I/O never stalls the server. Keep a
+            # reference so the task is not garbage-collected before it finishes.
+            task = asyncio.create_task(self._run_callback())
+            self._callback_tasks.add(task)
+            task.add_done_callback(self._callback_tasks.discard)
         return {"operation": str(operation_iri), "status": OperationStatus.QUEUED}
 
     @contextlib.contextmanager
@@ -692,6 +706,54 @@ class SemanticMiddleware(Middleware):
                 result=claimed.result,
                 named_graph=self.named_graph,
             )
+
+    def register_callback(self, callback: Any, scope: Any = None) -> None:
+        """Register a domain work callback fired on enqueue (#15, ADR 0009).
+
+        `callback` is the work function `callback(operation) -> result`: it runs the
+        Operation's work and returns the value recorded as `svc:executionResult`. On each
+        enqueue the middleware drives a background pull-and-run around it —
+        `with claim_next(scope) as c: c.result = callback(c.operation)` — so status
+        (`running`->`done`/`failed`) and provenance are handled by the middleware and the
+        domain writes only the work. Opt-in: with no callback registered, an enqueued
+        Operation is left `queued` for a manual `claim_next`. `scope` is the domain
+        ClassScope used to re-fetch the Operation.
+        """
+        if self.mode != "resource":
+            raise RuntimeError(
+                f"register_callback() is only valid in resource mode; current mode is {self.mode!r}"
+            )
+        self._callback = callback
+        self._callback_scope = scope
+
+    async def _run_callback(self) -> None:
+        """Drive the domain callback's pull-and-run off the event loop (#15).
+
+        The blocking pull-and-run runs in a worker thread so it never stalls the server. A
+        failure inside the domain work is a normal terminal outcome — `claim_next` has
+        already recorded it as `failed` with provenance in the graph — so it is logged at
+        warning level (not error) here; the exception is caught only so this fire-and-forget
+        task does not leak an unretrieved-exception warning. A drained-queue race
+        (`OperationQueueEmpty`, another callback task claimed the op first) is benign.
+        """
+        try:
+            await anyio.to_thread.run_sync(self._drive_callback)
+        except OperationQueueEmpty:
+            pass  # another callback task claimed the operation first; nothing to do
+        except Exception:
+            logger.warning(
+                "Domain callback did not complete cleanly for a queued operation on %s",
+                self.resource_iri,
+                exc_info=True,
+            )
+
+    def _drive_callback(self) -> None:
+        """Run one pull-and-run wrapping the registered domain callback (#15)."""
+        callback = self._callback
+        if callback is None:  # defensive: only scheduled when a callback is registered
+            return
+        with self.claim_next(self._callback_scope) as claimed:
+            claimed.result = callback(claimed.operation)
 
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
