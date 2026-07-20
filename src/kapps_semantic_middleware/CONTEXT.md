@@ -102,8 +102,10 @@ transformer cell, a screwing tool). Required at construction time in resource mo
 **Mode**:
 A `SemanticMiddleware` construction-time choice governing what the instance is *for*:
 - `"resource"` — wraps one Resource; the REST surface is the user-registered Workflows/
-  StateProperties plus the built-in `execute()` event trigger; the transactional context-manager
-  surface (dispatch, pull-and-run, handover) and reads/CRUD stay Python-only, not REST-exposed.
+  StateProperties, the built-in `execute()` event trigger, and a CRUD REST API generated from
+  the resource's own datamodel (`generate_rest_api_for_data_model`; ADR 0005 #13 amendment). The
+  transactional context-manager surface (dispatch/`request`, pull-and-run, handover) and the
+  graph-write helpers stay Python-only, not REST-exposed.
 - `"server"` — wraps no Resource; CRUD/`execute` themselves are the REST surface (e.g. a
   future data-serving "product server"). Not yet implemented.
 - `"watchdog"` — wraps no Resource, exposes little to no REST surface; runs a sweep loop

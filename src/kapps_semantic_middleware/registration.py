@@ -20,13 +20,14 @@ ADR 0009 (liveness).
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from graph_db_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
 
-from kapps_semantic_middleware.vocabulary import CFC, SVC
+from kapps_semantic_middleware.vocabulary import CFC, OperationStatus, SVC
 
 if TYPE_CHECKING:
     from kapps_ogm import OGM
@@ -38,6 +39,9 @@ class OntologyGroundTruthError(Exception):
 
 class OperationResolutionError(Exception):
     """An Operation cannot be resolved to a reachable Workflow endpoint (ADR 0002)."""
+
+
+RDF_TYPE = IRI("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
 
 
 # --------------------------------------------------------------------------- #
@@ -401,3 +405,131 @@ def sweep_stale_services(
     for service_iri in stale:
         deregister_service(ogm, service_iri, named_graph=named_graph)
     return stale
+
+
+# --------------------------------------------------------------------------- #
+# Event-trigger dispatch & operation queue (ADR 0009 / 0010).
+# --------------------------------------------------------------------------- #
+
+
+EVENT_TRIGGER_WORKFLOW_NAME = "event_trigger"
+"""Reserved built-in Workflow name for the receiver's event-trigger REST endpoint."""
+
+
+def build_event_trigger_url(address: str) -> str:
+    """Build the receiver's event-trigger endpoint (``POST /workflows/event_trigger/execute``, ADR 0009)."""
+    return f"{address.rstrip('/')}/workflows/{EVENT_TRIGGER_WORKFLOW_NAME}/execute"
+
+
+def mint_operation_iri(operation_class: IRI) -> IRI:
+    """Mint a unique Operation instance IRI under the operation-class namespace.
+
+    Operations are per-dispatch, so (unlike the deterministic registration IRIs) each
+    dispatch mints a fresh IRI.
+    """
+    return IRI(f"{operation_class}_op_{uuid.uuid4().hex[:12]}")
+
+
+def create_operation(
+    ogm: "OGM",
+    *,
+    operation_iri: IRI,
+    operation_class: IRI,
+    capability_iri: IRI,
+    status: str = OperationStatus.QUEUED,
+    data: Optional[dict] = None,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Create an Operation individual for dispatch, addressed to a target Capability (ADR 0009/0010).
+
+    The Core structural triples (``rdf:type`` and ``cfc:implementsCapability``) are written
+    through the graph_db_interface triple API, exactly as ``seed.create_operation`` does: the
+    scenarios load a Core *subset* that does not declare the Core Operation-property domains
+    the OGM's validated write path requires, so the OGM cannot hydrate them. The
+    ``svc:operationStatus`` (and any svc:-domain ``data``) go through the OGM commit path,
+    whose domains *are* declared in ``service.ttl`` (ADR 0008). Lesson for #14 / kapps_ogm: to
+    route the whole Operation create through the OGM, the loaded ontology must declare the Core
+    Operation property domains.
+    """
+    ogm.db.triple_add((operation_iri, RDF_TYPE, operation_class), named_graph=named_graph)
+    ogm.db.triple_add(
+        (operation_iri, CFC.implementsCapability, capability_iri), named_graph=named_graph
+    )
+    commit_data = {str(SVC.operationStatus): [status]}
+    if data:
+        commit_data.update(data)
+    _set(ogm, operation_iri, commit_data, named_graph)
+
+
+def resolve_dispatch_target(
+    ogm: "OGM",
+    capability_class: IRI,
+    target_resource: Optional[IRI] = None,
+    named_graph: Optional[IRI] = None,
+) -> Tuple[IRI, IRI, str]:
+    """Resolve a reachable receiver for a Capability *class* (ADR 0002 discovery, ADR 0009).
+
+    Binds a Capability *instance* of ``capability_class`` realized by a Workflow whose
+    Service has a live ``svc:address``:
+    ``Capability --realizedByWorkflow--> Workflow --isWorkflowOf--> Service --address``.
+    If ``target_resource`` is given, the Service is pinned to that resource
+    (``svc:isServiceOf``). The bound Capability instance is what the dispatched Operation
+    will ``cfc:implementsCapability``.
+
+    Returns:
+        Tuple of (capability_instance_iri, service_iri, service_address).
+
+    Raises:
+        OperationResolutionError: If no reachable Service realizes the capability class.
+    """
+    resource_filter = ""
+    if target_resource is not None:
+        resource_filter = f"\n        ?svc <{SVC.isServiceOf}> <{target_resource}> ."
+    sparql = f"""
+    SELECT ?cap ?svc ?addr WHERE {{
+        ?cap a <{capability_class}> .
+        ?cap <{SVC.realizedByWorkflow}> ?wf .
+        ?wf <{SVC.isWorkflowOf}> ?svc .
+        ?svc <{SVC.address}> ?addr .{resource_filter}
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    if not bindings:
+        raise OperationResolutionError(
+            f"Capability class {capability_class} cannot be resolved to any reachable "
+            "Service (no Capability of that class is realized by a Workflow whose Service "
+            "has a current svc:address)."
+        )
+    binding = bindings[0]
+    return IRI(str(binding["cap"])), IRI(str(binding["svc"])), str(binding["addr"])
+
+
+def revert_operation(
+    ogm: "OGM",
+    operation_iri: IRI,
+    *,
+    operation_class: IRI,
+    capability_iri: IRI,
+    data: Optional[dict] = None,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Remove a just-created Operation whose event trigger failed to deliver (ADR 0010).
+
+    Atomic create-and-notify: a failed notify reverts the created Operation. ``OGM.delete``
+    is not implemented in ``kapps_ogm`` yet, so this removes exactly what
+    ``create_operation`` wrote. Literal properties are cleared through the OGM commit path
+    first (commit needs the ``rdf:type`` triple present to resolve the class); the
+    ``cfc:implementsCapability`` and ``rdf:type`` triples are then removed via the low-level
+    ``ogm.db.triple_delete`` (a sanctioned graph_db_interface write).
+    """
+    clear_literals: dict = {str(SVC.operationStatus): []}
+    if data:
+        clear_literals.update({k: [] for k in data})
+    _set(ogm, operation_iri, clear_literals, named_graph)
+    ogm.db.triple_delete(
+        (operation_iri, CFC.implementsCapability, capability_iri), named_graph=named_graph
+    )
+    ogm.db.triple_delete((operation_iri, RDF_TYPE, operation_class), named_graph=named_graph)

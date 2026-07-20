@@ -40,3 +40,14 @@ REST surface is therefore: user-registered Workflows/StateProperties **plus the 
 `execute()` event trigger**. Everything else stays Python-only — CRUD, and the transactional
 context-manager surface (dispatch/`request`, pull-and-run, handover; ADR 0010) — none of which
 is REST-exposed in resource mode.
+
+**Amendment (2026-07-17, #13 — resource datamodel REST interface).** Resource mode now *also*
+stands up a **CRUD REST API generated from the resource's own datamodel**: on startup the
+middleware OGM-fetches the resource individual, materializes its `aas_middleware` datamodel, and
+calls `generate_rest_api_for_data_model` (the `generate_rest_interface` path). This **relaxes the
+"CRUD stays Python-only" stance** of the previous amendment: the *resource's own datamodel* is
+REST-exposed so peers can read/observe it. What remains Python-only is the transactional
+context-manager surface (`request`/dispatch, pull-and-run, handover; ADR 0010) and the graph-write
+helpers — never REST-exposed in resource mode. The generation is best-effort (a resource with no
+materializable data is skipped, not fatal), and the generated route path is currently derived
+verbatim from the resource IRI (unwieldy — a cosmetic follow-up for #14).

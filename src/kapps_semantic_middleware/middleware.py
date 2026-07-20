@@ -12,23 +12,29 @@ Capability to a Workflow endpoint, which is then invoked over HTTP.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import inspect
+import logging
 from typing import Any, Dict, List, Optional
 
 import anyio
 import httpx
 from fastapi import APIRouter
 from graph_db_interface import IRI
+from pydantic import BaseModel
 
 from aas_middleware import Middleware
 
 from kapps_semantic_middleware.registration import (
     OperationResolutionError,
+    build_event_trigger_url,
     build_state_endpoint,
     build_workflow_endpoint,
+    create_operation,
     deregister_service,
     mint_capability_iri,
+    mint_operation_iri,
     mint_service_iri,
     mint_state_property_iri,
     mint_workflow_iri,
@@ -36,12 +42,36 @@ from kapps_semantic_middleware.registration import (
     register_service,
     register_state_property,
     register_workflow,
+    resolve_dispatch_target,
     resolve_operation_endpoint,
+    revert_operation,
     sweep_stale_services,
     update_heartbeat,
 )
+from kapps_semantic_middleware.vocabulary import OperationStatus
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["SemanticMiddleware", "OperationResolutionError"]
+
+
+class _EventTriggerPayload(BaseModel):
+    """REST body of the event trigger: the IRI of the Operation now in the graph (ADR 0009)."""
+
+    operation_iri: str
+
+
+class _OperationDraft:
+    """Mutable draft yielded by ``request(...)``.
+
+    The dispatch body populates ``data`` (domain property-IRI str -> list of values) and
+    can read ``iri`` (the minted Operation IRI). The atomic exit turns it into a graph
+    Operation and fires the event trigger (ADR 0010).
+    """
+
+    def __init__(self, iri: IRI) -> None:
+        self.iri = iri
+        self.data: Dict[str, list] = {}
 
 
 class SemanticMiddleware(Middleware):
@@ -109,8 +139,17 @@ class SemanticMiddleware(Middleware):
             self.service_class = IRI(service_class)
             self.service_iri = mint_service_iri(self.resource_iri)
 
+            # Event-trigger coordination (ADR 0009/0010): an in-memory operation queue
+            # (the graph is the source of truth; durability/reconstruction is #17) and the
+            # receiver-side event-trigger REST route that other resources ring to dispatch.
+            self._operation_queue: List[IRI] = []
+            self._register_event_trigger()
+
             self.add_callback("on_start_up", self._register_service)
             self.add_callback("on_shutdown", self._deregister_service)
+            # Stand up the resource's REST interface from graph ground truth
+            # (generate_rest_interface: OGM-fetch the resource instance -> datamodel -> API).
+            self.add_callback("on_start_up", self._load_resource_datamodel)
             if heartbeat_interval and heartbeat_interval > 0:
                 self.add_callback("on_start_up", self._start_heartbeat)
                 self.add_callback("on_shutdown", self._stop_heartbeat)
@@ -445,3 +484,146 @@ class SemanticMiddleware(Middleware):
                 )
             )
             raise
+
+    # ------------------------------------------------------------------ #
+    # Event-trigger coordination: receiver intake + caller dispatch.
+    # ADR 0009 (event-trigger model), ADR 0010 (transaction context managers).
+    # NOTE: the synchronous execute() above is retained until pull-and-run (#14)
+    # can run the work through the new model; it is removed in #14/#19.
+    # ------------------------------------------------------------------ #
+
+    def _register_event_trigger(self) -> None:
+        """Expose the built-in ``execute`` event trigger on the REST API (ADR 0009).
+
+        Mounted via the base aas_middleware workflow mechanism as a plain REST route
+        (``POST /workflows/event_trigger/execute``) — deliberately NOT a KG-registered
+        ``svc:Workflow``: the event trigger is framework plumbing every resource-mode
+        instance exposes so peers can ring it, not a domain capability (ADR 0005 amended).
+        """
+        middleware = self
+
+        async def event_trigger(payload: _EventTriggerPayload) -> Dict[str, str]:
+            return await middleware._handle_event_trigger(IRI(payload.operation_iri))
+
+        # Base decorator mounts the route without the KG registration the KAPPS
+        # ``self.workflow(...)`` override performs.
+        Middleware.workflow(self)(event_trigger)
+
+    async def _handle_event_trigger(self, operation_iri: IRI) -> Dict[str, str]:
+        """Receiver-side event-trigger intake (ADR 0009).
+
+        The trigger carries only the Operation IRI — its payload lives in the graph. We
+        ``ogm.fetch`` the Operation (confirming it exists) and enqueue it into this
+        instance's in-memory queue, leaving it ``queued`` and returning immediately with
+        no business result. A domain callback (#15) / pull-and-run (#14) is what later
+        runs the work; this slice only enqueues.
+        """
+        await anyio.to_thread.run_sync(
+            functools.partial(self.ogm.fetch, instance_iri=operation_iri)
+        )
+        self._operation_queue.append(operation_iri)
+        return {"operation": str(operation_iri), "status": OperationStatus.QUEUED}
+
+    @contextlib.contextmanager
+    def request(
+        self,
+        *,
+        capability_class: Any,
+        operation_class: Any,
+        operation_iri: Optional[str] = None,
+        target_resource: Optional[str] = None,
+    ):
+        """Caller-side dispatch as a transaction context manager (ADR 0010).
+
+        Usage::
+
+            with mw.request(capability_class=cap, operation_class=op_cls) as op:
+                ...  # populate op.data with the operation's domain fields (if any)
+
+        The body populates the yielded draft; on clean exit the middleware **atomically**
+        creates the Operation (status ``queued``, addressed to a reachable Service via its
+        Capability — ADR 0002 discovery) and triggers that Service's event trigger over
+        REST. If the trigger fails to deliver, the created Operation is reverted (ADR 0010
+        atomic create-and-notify). A body exception aborts before anything is written.
+
+        This is the in-process caller face — not REST-exposed (ADR 0005/0010).
+        """
+        if self.mode != "resource":
+            raise RuntimeError(
+                f"request() is only valid in resource mode; current mode is {self.mode!r}"
+            )
+        capability_class_iri = IRI(capability_class)
+        operation_class_iri = IRI(operation_class)
+        op_iri = (
+            IRI(operation_iri) if operation_iri else mint_operation_iri(operation_class_iri)
+        )
+
+        # __enter__ precondition, OUTSIDE the transaction (ADR 0010): resolve a reachable
+        # receiver for the capability BEFORE the body runs, so an unroutable dispatch fails
+        # before any domain work rather than at commit.
+        capability_iri, _service_iri, address = resolve_dispatch_target(
+            self.ogm,
+            capability_class_iri,
+            target_resource=IRI(target_resource) if target_resource else None,
+            named_graph=self.named_graph,
+        )
+        draft = _OperationDraft(op_iri)
+
+        # Body runs here; an exception propagates and nothing is written.
+        yield draft
+
+        # __exit__ (clean): atomically create the Operation and fire the event trigger.
+        create_operation(
+            self.ogm,
+            operation_iri=op_iri,
+            operation_class=operation_class_iri,
+            capability_iri=capability_iri,
+            status=OperationStatus.QUEUED,
+            data=draft.data or None,
+            named_graph=self.named_graph,
+        )
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    build_event_trigger_url(address),
+                    json={"operation_iri": str(op_iri)},
+                )
+                response.raise_for_status()
+        except Exception:
+            revert_operation(
+                self.ogm,
+                op_iri,
+                operation_class=operation_class_iri,
+                capability_iri=capability_iri,
+                data=draft.data or None,
+                named_graph=self.named_graph,
+            )
+            raise
+
+    async def _load_resource_datamodel(self) -> None:
+        """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
+
+        Resource mode builds its REST surface from the graph: OGM-fetch the resource
+        individual, materialize its aas_middleware datamodel, and generate the CRUD REST
+        API (``generate_rest_api_for_data_model``). Best-effort and additive — the
+        event-trigger and workflow routes are the load-bearing surface for this slice, so
+        a resource with no materializable data is skipped with a warning rather than
+        failing startup.
+        """
+        try:
+            node = await anyio.to_thread.run_sync(
+                functools.partial(
+                    self.ogm.fetch, instance_iri=self.resource_iri, materialize=True
+                )
+            )
+            instance = getattr(node, "instance", None)
+            if instance is None:
+                return
+            self.load_model_instances("resource", [instance])
+            self.generate_rest_api_for_data_model("resource")
+        except Exception as exc:  # noqa: BLE001 - additive convenience surface, never fatal
+            logger.warning(
+                "Could not generate the resource datamodel REST API for %s: %s",
+                self.resource_iri,
+                exc,
+            )
