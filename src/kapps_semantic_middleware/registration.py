@@ -15,7 +15,7 @@ module therefore use the materialized (instance-owned) direction.
 
 See ADR 0002 (Operation resolves via Capability), ADR 0003 (ontology-as-ground-
 truth), ADR 0004 (endpoint on Service and Workflow), ADR 0006 (OGM write path),
-ADR 0009 (liveness).
+ADR 0007 (liveness).
 """
 
 from __future__ import annotations
@@ -284,69 +284,7 @@ def deregister_service(
 
 
 # --------------------------------------------------------------------------- #
-# Resolution + provenance.
-# --------------------------------------------------------------------------- #
-
-
-def resolve_operation_endpoint(ogm: "OGM", operation_iri: IRI) -> Tuple[IRI, str]:
-    """Resolve an Operation to an invokable Workflow endpoint (ADR 0002).
-
-    Chain: ``Operation --cfc:implementsCapability--> Capability
-    --svc:realizedByWorkflow--> Workflow --svc:endpoint--> url``. A read against the
-    access module; an unreachable (deregistered) workflow has no ``svc:endpoint`` and
-    will not match.
-
-    Raises:
-        OperationResolutionError: If no online workflow realizes the capability.
-    """
-    sparql = f"""
-    SELECT ?wf ?url WHERE {{
-        <{operation_iri}> <{CFC.implementsCapability}> ?cap .
-        ?cap <{SVC.realizedByWorkflow}> ?wf .
-        ?wf <{SVC.endpoint}> ?url .
-    }}
-    """
-    result = ogm.db.query(sparql, convert_bindings=True)
-    bindings = (
-        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
-    )
-    if not bindings:
-        raise OperationResolutionError(
-            f"Operation {operation_iri} cannot be resolved to any online Workflow "
-            "(no capability realized by a workflow with a current endpoint)."
-        )
-    binding = bindings[0]
-    return IRI(str(binding["wf"])), str(binding["url"])
-
-
-def record_operation_outcome(
-    ogm: "OGM",
-    *,
-    operation_iri: IRI,
-    workflow_iri: IRI,
-    result: Optional[str] = None,
-    timestamp: Optional[datetime] = None,
-    named_graph: Optional[IRI] = None,
-) -> None:
-    """Record execution provenance on an Operation via OGM.commit (R12 writeback).
-
-    Whether execution succeeded is carried by the Operation's terminal
-    ``svc:operationStatus`` (``done``/``failed``, ADR 0009), not a separate boolean;
-    this writeback records only which Workflow ran it, when, and the optional result.
-    """
-    if timestamp is None:
-        timestamp = datetime.now(timezone.utc)
-    data: dict = {
-        str(SVC.executedByWorkflow): [_ref(workflow_iri)],
-        str(SVC.executionTimestamp): [timestamp.isoformat()],
-    }
-    if result is not None:
-        data[str(SVC.executionResult)] = [str(result)]
-    _set(ogm, operation_iri, data, named_graph)
-
-
-# --------------------------------------------------------------------------- #
-# Liveness: heartbeat (per-service) and watchdog sweep (centralized). ADR 0009.
+# Liveness: heartbeat (per-service) and watchdog sweep (centralized). ADR 0007.
 # --------------------------------------------------------------------------- #
 
 
@@ -400,7 +338,7 @@ def sweep_stale_services(
     now: Optional[datetime] = None,
     named_graph: Optional[IRI] = None,
 ) -> list[IRI]:
-    """Deregister every stale Service (ADR 0009 watchdog sweep). Returns swept IRIs."""
+    """Deregister every stale Service (ADR 0007 watchdog sweep). Returns swept IRIs."""
     stale = find_stale_services(ogm, max_age_seconds, now=now, named_graph=named_graph)
     for service_iri in stale:
         deregister_service(ogm, service_iri, named_graph=named_graph)

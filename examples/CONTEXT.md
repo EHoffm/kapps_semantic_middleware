@@ -12,9 +12,14 @@ knowledge-graph state.
 
 **Scenario**:
 One self-contained, runnable demonstration notebook exercising a specific slice of Core
-Middleware functionality end-to-end (e.g. Scenario 1: hello-world workflow registration plus
-cross-middleware `execute`; Scenario 2: a door resource's open/close workflows and its live
-status).
+Middleware functionality end-to-end. The two scenarios deliberately show the *two* resource-
+interaction patterns the middleware supports: Scenario 1 (hello-world) is the **operation-
+coordination** pattern — a planner dispatches an operation through the event trigger and the
+resource pulls-and-runs it (ADR 0009/0010). Scenario 2 (a door + a minimal mobile robot) is
+the **direct workflow/state invocation** pattern — the robot discovers the door purely
+through the knowledge graph (SPARQL), reads its live status over the StateProperty GET
+endpoint, and invokes the door's open workflow directly at the endpoint it found; the door
+has no operation queue and executes synchronously. Not operation based.
 _Avoid_: Example, demo (used loosely elsewhere in this repo's docs; Scenario is the precise
 unit — one notebook, one dummy repository, one seed script).
 

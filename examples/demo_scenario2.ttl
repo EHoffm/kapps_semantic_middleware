@@ -56,3 +56,13 @@ ex:DoorStatusStateProperty rdf:type owl:Class ;
     rdfs:subClassOf svc:StateProperty ;
     rdfs:label "Door Status State Property" ;
     rdfs:comment "The GET-readable status (opened/closed) of the door; its live value is never persisted to the graph." .
+
+# --- Mobile robot: a minimal consumer that discovers and interacts with the door ---
+ex:MobileRobotResource rdf:type owl:Class ;
+    rdfs:subClassOf cfc:Resource ;
+    rdfs:label "Mobile Robot Resource" ;
+    rdfs:comment "A minimal mobile transport robot. Scenario scope: no motion/position/motor model — just enough to discover the door through the knowledge graph and drive its state/workflow endpoints directly." .
+
+ex:MobileRobotControllerService rdf:type owl:Class ;
+    rdfs:subClassOf svc:Service ;
+    rdfs:label "Mobile Robot Controller Service" .

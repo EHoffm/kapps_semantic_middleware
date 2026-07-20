@@ -39,13 +39,11 @@ from kapps_semantic_middleware.registration import (
     mint_service_iri,
     mint_state_property_iri,
     mint_workflow_iri,
-    record_operation_outcome,
     record_terminal_status,
     register_service,
     register_state_property,
     register_workflow,
     resolve_dispatch_target,
-    resolve_operation_endpoint,
     resolve_operation_workflow,
     revert_operation,
     set_operation_status,
@@ -136,7 +134,7 @@ class SemanticMiddleware(Middleware):
         self.named_graph = named_graph
         self.address = address or f"http://{host}:{port}"
 
-        # Liveness (ADR 0009).
+        # Liveness (ADR 0007).
         self.heartbeat_interval = heartbeat_interval
         self.staleness_threshold = staleness_threshold
         self.sweep_interval = sweep_interval
@@ -219,7 +217,7 @@ class SemanticMiddleware(Middleware):
             )
         )
 
-    # --- Liveness: per-service heartbeat (resource mode), ADR 0009 --------- #
+    # --- Liveness: per-service heartbeat (resource mode), ADR 0007 --------- #
 
     async def _start_heartbeat(self) -> None:
         """Start the background heartbeat loop (resource mode)."""
@@ -260,7 +258,7 @@ class SemanticMiddleware(Middleware):
             )
         )
 
-    # --- Liveness: centralized watchdog sweep (watchdog mode), ADR 0009 ---- #
+    # --- Liveness: centralized watchdog sweep (watchdog mode), ADR 0007 ---- #
 
     async def _start_sweep(self) -> None:
         """Start the background staleness-sweep loop (watchdog mode)."""
@@ -432,89 +430,9 @@ class SemanticMiddleware(Middleware):
 
         return decorator
 
-    async def execute(
-        self,
-        operation_iri: str,
-        payload: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Execute an Operation by resolving it to a Workflow endpoint and invoking it.
-
-        Follows the ADR 0002 resolution chain (Operation --implementsCapability-->
-        Capability --realizedByWorkflow--> Workflow --endpoint--> URL), invokes the
-        endpoint over HTTP, and records execution provenance on the Operation (R12)
-        whether or not the call succeeds.
-
-        This is a Python method only (not a REST route) per ADR 0005 resource mode.
-
-        Args:
-            operation_iri: IRI of the Operation to execute.
-            payload: Optional JSON payload sent in the POST body.
-
-        Returns:
-            Dict with keys: operation, workflow, endpoint, success, result.
-
-        Raises:
-            OperationResolutionError: If no online Workflow realizes the capability.
-            httpx.HTTPError: On HTTP failures (recorded as a failed outcome first).
-        """
-        operation_iri_obj = IRI(operation_iri)
-
-        workflow_iri, url = await anyio.to_thread.run_sync(
-            functools.partial(
-                resolve_operation_endpoint,
-                self.ogm,
-                operation_iri_obj,
-            )
-        )
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                if payload is not None:
-                    response = await client.post(url, json=payload)
-                else:
-                    response = await client.post(url)
-
-                success = response.is_success
-                try:
-                    result = response.json()
-                except Exception:
-                    result = response.text
-
-                await anyio.to_thread.run_sync(
-                    functools.partial(
-                        record_operation_outcome,
-                        self.ogm,
-                        operation_iri=operation_iri_obj,
-                        workflow_iri=workflow_iri,
-                        result=str(result),
-                    )
-                )
-
-                return {
-                    "operation": str(operation_iri_obj),
-                    "workflow": str(workflow_iri),
-                    "endpoint": url,
-                    "success": success,
-                    "result": result,
-                }
-
-        except httpx.HTTPError as exc:
-            await anyio.to_thread.run_sync(
-                functools.partial(
-                    record_operation_outcome,
-                    self.ogm,
-                    operation_iri=operation_iri_obj,
-                    workflow_iri=workflow_iri,
-                    result=str(exc),
-                )
-            )
-            raise
-
     # ------------------------------------------------------------------ #
     # Event-trigger coordination: receiver intake + caller dispatch.
     # ADR 0009 (event-trigger model), ADR 0010 (transaction context managers).
-    # NOTE: the synchronous execute() above is retained until pull-and-run (#14)
-    # can run the work through the new model; it is removed in #14/#19.
     # ------------------------------------------------------------------ #
 
     def _register_event_trigger(self) -> None:

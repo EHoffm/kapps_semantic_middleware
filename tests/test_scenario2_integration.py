@@ -1,15 +1,18 @@
 """Scenario 2 end-to-end integration test against a live GraphDB.
 
-A decentrally-controlled door exposes two workflows (open, close) and one live
-StateProperty (status). Driving the public API: registration writes the full
-structure, execute() opens/closes the door over HTTP, and the status is served
-live over GET while never being persisted to the graph. Skipped when GRAPHDB_*
-env vars are absent.
+A decentrally-controlled door and a minimal mobile robot, demonstrating the **direct
+workflow/state invocation** interaction pattern — as opposed to scenario 1's asynchronous
+operation-coordination model. The door exposes two workflows (open, close) and one live
+StateProperty (status); it has **no operation queue** — its workflow endpoints execute
+synchronously when invoked directly. The mobile robot is a minimal consumer: it discovers
+the door purely through the knowledge graph (a SPARQL query), reads the door's live state
+via the StateProperty GET endpoint, and — finding it closed — invokes the door's open
+workflow directly by hitting the execute URL it found in the graph. This is NOT operation
+based. Skipped when GRAPHDB_* env vars are absent (see conftest).
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import threading
@@ -42,14 +45,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 import seed  # noqa: E402
 
 DOOR_PORT = 8997
+ROBOT_PORT = 8998
 
-# In-memory door state — mutated by the workflows, read by the state getter.
-# It is deliberately NOT in the knowledge graph.
+# In-memory door state — mutated by the workflows, read by the state getter. It is
+# deliberately NOT in the knowledge graph.
 _door = {"status": "closed"}
+_auto_close_timers: list[threading.Timer] = []
 
 
 def door_open() -> str:
+    """Open the door and schedule it to auto-close after 30 s (the door closes itself)."""
     _door["status"] = "opened"
+    timer = threading.Timer(30.0, lambda: _door.__setitem__("status", "closed"))
+    timer.daemon = True
+    timer.start()
+    _auto_close_timers.append(timer)
     return "opened"
 
 
@@ -62,7 +72,7 @@ def door_status() -> str:
     return _door["status"]
 
 
-def _start_server(mw, port):
+def _start_server(mw: SemanticMiddleware, port: int) -> tuple[uvicorn.Server, threading.Thread]:
     config = uvicorn.Config(mw.app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -71,14 +81,70 @@ def _start_server(mw, port):
     while not server.started and time.time() - t0 < 30:
         time.sleep(0.05)
     if not server.started:
-        raise RuntimeError("server did not start")
+        raise RuntimeError("server did not start in time")
     return server, thread
 
 
+def _discover_door_endpoints(ogm, door_resource_iri) -> tuple[str, str]:
+    """Discover the door's live-state GET endpoint and its open-workflow execute URL purely
+    from the knowledge graph, via a SPARQL query (no hardcoded URLs). This is how the robot
+    finds the door it is approaching and the reachable endpoints it needs."""
+    sparql = f"""
+    SELECT ?status_url ?open_url WHERE {{
+        ?svc <{SVC.isServiceOf}> <{door_resource_iri}> .
+        ?sp <{SVC.isStatePropertyOf}> ?svc .
+        ?sp a <{seed.DOOR_STATUS_STATE_CLASS}> .
+        ?sp <{SVC.endpoint}> ?status_url .
+        ?wf <{SVC.isWorkflowOf}> ?svc .
+        ?wf a <{seed.DOOR_OPEN_WORKFLOW_CLASS}> .
+        ?wf <{SVC.endpoint}> ?open_url .
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    assert bindings, "robot could not discover the door's endpoints in the knowledge graph"
+    b = bindings[0]
+    return str(b["status_url"]), str(b["open_url"])
+
+
+def robot_pass_through_door(ogm, door_resource_iri) -> list[str]:
+    """The mobile robot's scripted behaviour.
+
+    Deterministic, one step after another; the only forks are "is the door open?" and, if
+    not, "open it". Discovery is via SPARQL against the knowledge graph; the live state and
+    the workflow invocation are direct REST calls to the endpoints found in the graph. Not
+    operation based, no queue.
+    """
+    log: list[str] = []
+    status_url, open_url = _discover_door_endpoints(ogm, door_resource_iri)
+    log.append("discovered door endpoints via SPARQL")
+
+    def ensure_open(phase: str) -> None:
+        state = httpx.get(status_url).json()
+        log.append(f"{phase}: door is {state}")
+        if state == "closed":
+            httpx.post(open_url)  # invoke the open workflow directly at its execute URL
+            log.append(f"{phase}: door was closed -> invoked open workflow")
+            state = httpx.get(status_url).json()
+            log.append(f"{phase}: door is now {state}")
+        assert state == "opened", f"door failed to open ({phase})"
+
+    # Approach the door: check its state and, if closed, open it, then drive through.
+    ensure_open("approach")
+    log.append("drove through the door")
+    # (Story, not implemented: drop the load somewhere behind the door, then drive back.)
+    # On return the door auto-closes after 30 s, but the drop-off took less time, so it is
+    # still open and the robot drives straight back through without further interaction.
+    ensure_open("return")
+    log.append("drove back through the door")
+    return log
+
+
 @requires_graphdb
-def test_scenario2_door_workflows_and_live_state(graphdb):
+def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
     db = graphdb
     _door["status"] = "closed"
+    _auto_close_timers.clear()
     seed.seed_scenario2(db)
 
     service_iri = seed.DOOR_RESOURCE + "_service"
@@ -86,7 +152,9 @@ def test_scenario2_door_workflows_and_live_state(graphdb):
     close_wf = mint_workflow_iri(service_iri, "door_close")
     status_sp = mint_state_property_iri(service_iri, "door_status")
 
-    mw = SemanticMiddleware(
+    # The door middleware: two workflows + one live StateProperty. This scenario does not
+    # use the operation queue at all — the workflow endpoints execute synchronously.
+    door = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.DOOR_RESOURCE,
         service_class=seed.DOOR_SERVICE_CLASS,
@@ -94,23 +162,23 @@ def test_scenario2_door_workflows_and_live_state(graphdb):
         host="127.0.0.1",
         port=DOOR_PORT,
     )
-    mw.workflow(
+    door.workflow(
         capability_class=seed.DOOR_OPEN_CAPABILITY_CLASS,
         workflow_class=seed.DOOR_OPEN_WORKFLOW_CLASS,
     )(door_open)
-    mw.workflow(
+    door.workflow(
         capability_class=seed.DOOR_CLOSE_CAPABILITY_CLASS,
         workflow_class=seed.DOOR_CLOSE_WORKFLOW_CLASS,
     )(door_close)
-    mw.state(
+    door.state(
         capability_class=seed.DOOR_STATUS_CAPABILITY_CLASS,
         state_property_class=seed.DOOR_STATUS_STATE_CLASS,
     )(door_status)
 
-    server, thread = _start_server(mw, DOOR_PORT)
+    server, thread = _start_server(door, DOOR_PORT)
     try:
-        # Registration: both workflows and the state property are in the graph.
-        # Links materialized on the instance-owned (inverse) side (ADR 0006).
+        # Registration wrote the door's structure + reachability (instance-owned inverse
+        # side, ADR 0006): both workflows and the state property, with reachable endpoints.
         assert db.triple_exists((open_wf, SVC.isWorkflowOf, service_iri))
         assert db.triple_exists((close_wf, SVC.isWorkflowOf, service_iri))
         assert db.triple_exists((status_sp, SVC.isStatePropertyOf, service_iri))
@@ -118,38 +186,38 @@ def test_scenario2_door_workflows_and_live_state(graphdb):
         status_cap = mint_capability_iri(seed.DOOR_RESOURCE, "door_status")
         assert db.triple_exists((status_cap, SVC.providedByStateProperty, status_sp))
         assert db.triples_get(sub=status_sp, pred=SVC.endpoint)
+        assert db.triples_get(sub=open_wf, pred=SVC.endpoint)
 
-        base = f"http://127.0.0.1:{DOOR_PORT}"
-
-        # Live state: served over GET, initially closed.
-        r = httpx.get(f"{base}/state/door_status")
-        assert r.status_code == 200 and r.json() == "closed", r.text
-
-        # Open the door via the resolved operation, then the live state reflects it.
-        seed.create_operation(
-            db, seed.DOOR_OPEN_OPERATION, mint_capability_iri(seed.DOOR_RESOURCE, "door_open")
+        # The mobile robot: a minimal second middleware. It exposes nothing itself; its
+        # scripted domain logic discovers and drives the door purely through the graph +
+        # REST, using its own OGM connection for the SPARQL discovery.
+        robot = SemanticMiddleware(
+            mode="resource",
+            resource_iri=seed.MOBILE_ROBOT,
+            service_class=seed.MOBILE_ROBOT_SERVICE_CLASS,
+            ogm=OGM(db=graphdb.__class__.from_env()),
+            host="127.0.0.1",
+            port=ROBOT_PORT,
         )
-        res_open = asyncio.run(mw.execute(seed.DOOR_OPEN_OPERATION))
-        assert res_open["success"] and res_open["result"] == "opened", res_open
-        assert httpx.get(f"{base}/state/door_status").json() == "opened"
+        log = robot_pass_through_door(robot.ogm, seed.DOOR_RESOURCE)
 
-        # Close it again; the live GET tracks the in-memory change.
-        seed.create_operation(
-            db, seed.DOOR_CLOSE_OPERATION, mint_capability_iri(seed.DOOR_RESOURCE, "door_close")
-        )
-        res_close = asyncio.run(mw.execute(seed.DOOR_CLOSE_OPERATION))
-        assert res_close["success"] and res_close["result"] == "closed", res_close
-        assert httpx.get(f"{base}/state/door_status").json() == "closed"
+        # The robot found the door closed on approach, invoked the open workflow directly,
+        # drove through, and on return found it still open (auto-close had not fired).
+        assert "discovered door endpoints via SPARQL" in log
+        assert "drove through the door" in log
+        assert "drove back through the door" in log
+        # The open workflow was invoked exactly once — only on approach, not on return.
+        assert sum("invoked open workflow" in line for line in log) == 1
+        # The direct workflow invocation actually opened the door (live state).
+        assert _door["status"] == "opened"
 
-        # The live value is NEVER written to the graph: the state property carries only
-        # structural triples + endpoint, and no "opened"/"closed" literal appears anywhere.
-        sp_predicates = {
-            str(p) for _, p, _ in db.triples_get(sub=status_sp)
-        }
-        assert str(SVC.endpoint) in sp_predicates
+        # The live status value is NEVER written to the graph: the state property carries
+        # only structural triples + endpoint; no "opened"/"closed" literal appears on it.
         for _, _, obj in db.triples_get(sub=status_sp):
             assert str(obj) not in ("opened", "closed"), "state value must not be persisted"
     finally:
+        for t in _auto_close_timers:
+            t.cancel()
         server.should_exit = True
         thread.join(timeout=20)
         time.sleep(0.5)

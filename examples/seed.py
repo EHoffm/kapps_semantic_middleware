@@ -51,6 +51,11 @@ DOOR_RESOURCE = IRI(f"{DEMO_NS}door_042")
 DOOR_OPEN_OPERATION = IRI(f"{DEMO_NS}doorOpenOperation_1")
 DOOR_CLOSE_OPERATION = IRI(f"{DEMO_NS}doorCloseOperation_1")
 
+# Mobile robot (scenario 2 consumer): discovers and drives the door through the graph.
+MOBILE_ROBOT_RESOURCE_CLASS = IRI(f"{DEMO_NS}MobileRobotResource")
+MOBILE_ROBOT_SERVICE_CLASS = IRI(f"{DEMO_NS}MobileRobotControllerService")
+MOBILE_ROBOT = IRI(f"{DEMO_NS}mobile_robot_007")
+
 
 def _read_service_ontology() -> str:
     """Return the packaged ``svc:`` ontology Turtle."""
@@ -131,6 +136,7 @@ def seed_scenario2(db) -> None:
     clear_repository(db)
     load_scenario2_ontologies(db)
     create_resource(db, DOOR_RESOURCE, DOOR_RESOURCE_CLASS)
+    create_resource(db, MOBILE_ROBOT, MOBILE_ROBOT_RESOURCE_CLASS)
 
 
 # Resource *class* IRIs (instances above are typed with these).
