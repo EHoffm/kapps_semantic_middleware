@@ -43,33 +43,10 @@ requires_graphdb = pytest.mark.skipif(
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 import seed  # noqa: E402
+from handlers import door_close, door_open, door_status, reset_door  # noqa: E402
 
 DOOR_PORT = 8997
 ROBOT_PORT = 8998
-
-# In-memory door state — mutated by the workflows, read by the state getter. It is
-# deliberately NOT in the knowledge graph.
-_door = {"status": "closed"}
-_auto_close_timers: list[threading.Timer] = []
-
-
-def door_open() -> str:
-    """Open the door and schedule it to auto-close after 30 s (the door closes itself)."""
-    _door["status"] = "opened"
-    timer = threading.Timer(30.0, lambda: _door.__setitem__("status", "closed"))
-    timer.daemon = True
-    timer.start()
-    _auto_close_timers.append(timer)
-    return "opened"
-
-
-def door_close() -> str:
-    _door["status"] = "closed"
-    return "closed"
-
-
-def door_status() -> str:
-    return _door["status"]
 
 
 def _start_server(mw: SemanticMiddleware, port: int) -> tuple[uvicorn.Server, threading.Thread]:
@@ -143,8 +120,7 @@ def robot_pass_through_door(ogm, door_resource_iri) -> list[str]:
 @requires_graphdb
 def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
     db = graphdb
-    _door["status"] = "closed"
-    _auto_close_timers.clear()
+    reset_door()
     seed.seed_scenario2(db)
 
     service_iri = seed.DOOR_RESOURCE + "_service"
@@ -209,15 +185,14 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         # The open workflow was invoked exactly once — only on approach, not on return.
         assert sum("invoked open workflow" in line for line in log) == 1
         # The direct workflow invocation actually opened the door (live state).
-        assert _door["status"] == "opened"
+        assert door_status() == "opened"
 
         # The live status value is NEVER written to the graph: the state property carries
         # only structural triples + endpoint; no "opened"/"closed" literal appears on it.
         for _, _, obj in db.triples_get(sub=status_sp):
             assert str(obj) not in ("opened", "closed"), "state value must not be persisted"
     finally:
-        for t in _auto_close_timers:
-            t.cancel()
+        reset_door()
         server.should_exit = True
         thread.join(timeout=20)
         time.sleep(0.5)
