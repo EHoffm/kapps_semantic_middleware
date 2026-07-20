@@ -76,8 +76,8 @@ class SVC:
     endpoint = IRI("endpoint", base=SVC_NS)  # Workflow|StateProperty -> xsd:anyURI (full URL)
     lastHeartbeat = IRI("lastHeartbeat", base=SVC_NS)  # Service -> xsd:dateTime
 
-    # Execution provenance (R12, ADR 0009) — written onto a cfc:Operation by execute()
-    # Success is now carried by the terminal operationStatus (done/failed), not a separate boolean.
+    # Execution provenance (R12, ADR 0009) — written onto a cfc:Operation by the pull-and-run
+    # terminal transition. Success is carried by the terminal operationStatus (done/failed).
     operationStatus = IRI("operationStatus", base=SVC_NS)  # Operation -> xsd:string (queued/running/done/failed, ADR 0009)
     executedByWorkflow = IRI("executedByWorkflow", base=SVC_NS)  # Operation -> Workflow
     executionTimestamp = IRI("executionTimestamp", base=SVC_NS)  # Operation -> xsd:dateTime

@@ -381,9 +381,9 @@ def create_operation(
     """Create an Operation individual for dispatch, addressed to a target Capability (ADR 0009/0010).
 
     The Core structural triples (``rdf:type`` and ``cfc:implementsCapability``) are written
-    through the graph_db_interface triple API, exactly as ``seed.create_operation`` does: the
-    scenarios load a Core *subset* that does not declare the Core Operation-property domains
-    the OGM's validated write path requires, so the OGM cannot hydrate them. The
+    through the low-level graph_db_interface triple API: the scenarios load a Core *subset*
+    that does not declare the Core Operation-property domains the OGM's validated write path
+    requires, so the OGM cannot hydrate them. The
     ``svc:operationStatus`` (and any svc:-domain ``data``) go through the OGM commit path,
     whose domains *are* declared in ``service.ttl`` (ADR 0008). Lesson for #14 / kapps_ogm: to
     route the whole Operation create through the OGM, the loaded ontology must declare the Core

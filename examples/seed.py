@@ -19,7 +19,6 @@ from pathlib import Path
 from graph_db_interface import IRI
 from rdflib.namespace import RDF
 
-from kapps_semantic_middleware.vocabulary import CFC
 
 DEMO_NS = "https://example.org/kapps-demo#"
 
@@ -34,7 +33,6 @@ PLANNER_SERVICE_CLASS = IRI(f"{DEMO_NS}PlannerService")
 # --- Scenario 1 instance IRIs ---
 HELLO_RESOURCE = IRI(f"{DEMO_NS}hello_resource")
 PLANNER_RESOURCE = IRI(f"{DEMO_NS}planner_resource")
-HELLO_OPERATION = IRI(f"{DEMO_NS}helloWorldOperation_1")
 
 # --- Scenario 2 (door) class IRIs ---
 DOOR_RESOURCE_CLASS = IRI(f"{DEMO_NS}DoorResource")
@@ -48,8 +46,6 @@ DOOR_STATUS_STATE_CLASS = IRI(f"{DEMO_NS}DoorStatusStateProperty")
 
 # --- Scenario 2 instance IRIs ---
 DOOR_RESOURCE = IRI(f"{DEMO_NS}door_042")
-DOOR_OPEN_OPERATION = IRI(f"{DEMO_NS}doorOpenOperation_1")
-DOOR_CLOSE_OPERATION = IRI(f"{DEMO_NS}doorCloseOperation_1")
 
 # Mobile robot (scenario 2 consumer): discovers and drives the door through the graph.
 MOBILE_ROBOT_RESOURCE_CLASS = IRI(f"{DEMO_NS}MobileRobotResource")
@@ -101,25 +97,8 @@ def create_resource(db, resource_iri: IRI, resource_class: IRI) -> None:
     db.triple_add((resource_iri, RDF.type, resource_class))
 
 
-def create_operation(db, operation_iri: IRI, capability_iri: IRI) -> None:
-    """Create an Operation instance targeting a Capability instance.
-
-    The Operation implements a Capability (``cfc:implementsCapability``); at
-    execution time the middleware resolves that Capability to the Workflow that
-    realizes it. ``capability_iri`` is the capability *instance* the middleware
-    minted when it registered the workflow (deterministic, so the scenario can
-    reference it up front).
-    """
-    db.triple_add((operation_iri, RDF.type, CFC.Operation))
-    db.triple_add((operation_iri, CFC.implementsCapability, capability_iri))
-
-
 def seed_scenario1(db) -> None:
-    """Full scenario 1 seed: clear, load ontologies, create the two resources.
-
-    The Operation is created separately (after the hello-world middleware has
-    registered its capability instance) via :func:`create_operation`.
-    """
+    """Full scenario 1 seed: clear, load ontologies, and create the hello + planner resources."""
     clear_repository(db)
     load_scenario1_ontologies(db)
     create_resource(db, HELLO_RESOURCE, HELLO_RESOURCE_CLASS)
@@ -127,12 +106,7 @@ def seed_scenario1(db) -> None:
 
 
 def seed_scenario2(db) -> None:
-    """Full scenario 2 (door) seed: clear, load ontologies, create the door resource.
-
-    The open/close Operations are created separately (after the door middleware
-    has registered its capability instances) via :func:`create_operation`. The
-    demo ontology is shared with scenario 1, so the same loader applies.
-    """
+    """Full scenario 2 (door) seed: clear, load ontologies, create the door + robot resources."""
     clear_repository(db)
     load_scenario2_ontologies(db)
     create_resource(db, DOOR_RESOURCE, DOOR_RESOURCE_CLASS)

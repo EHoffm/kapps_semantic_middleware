@@ -1,4 +1,4 @@
-"""Phase 4 liveness integration tests against a live GraphDB (ADR 0009).
+"""Phase 4 liveness integration tests against a live GraphDB (ADR 0007).
 
 Deterministic (no waiting on real intervals): a heartbeat is written and refreshed
 idempotently, and a watchdog sweep deregisters a stale service while leaving a
