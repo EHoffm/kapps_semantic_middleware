@@ -533,3 +533,81 @@ def revert_operation(
         (operation_iri, CFC.implementsCapability, capability_iri), named_graph=named_graph
     )
     ogm.db.triple_delete((operation_iri, RDF_TYPE, operation_class), named_graph=named_graph)
+
+
+# ---- Pull-and-run: status transitions + terminal provenance (ADR 0009 / 0010) ----
+
+
+class OperationQueueEmpty(Exception):
+    """Raised when `claim_next` finds no `queued` Operation to pull."""
+
+
+def resolve_operation_workflow(
+    ogm: "OGM", operation_iri: IRI, named_graph: Optional[IRI] = None
+) -> IRI:
+    """Resolve an Operation to the Workflow that realizes its Capability, WITHOUT
+    requiring a live endpoint (ADR 0002 chain, minus reachability). This is the
+    provenance resolver used by pull-and-run so `executedByWorkflow` is recorded even
+    if the workflow's `svc:endpoint` was deregistered mid-run.
+
+    Raises:
+        OperationResolutionError: If no Workflow realizes the Operation's Capability.
+    """
+    sparql = f"""
+    SELECT ?wf WHERE {{
+        <{operation_iri}> <{CFC.implementsCapability}> ?cap .
+        ?cap <{SVC.realizedByWorkflow}> ?wf .
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    if not bindings:
+        raise OperationResolutionError(
+            f"Operation {operation_iri} cannot be resolved to any Workflow "
+            "(no Capability realized by a Workflow)."
+        )
+    binding = bindings[0]
+    return IRI(str(binding["wf"]))
+
+
+def set_operation_status(
+    ogm: "OGM",
+    *,
+    operation_iri: IRI,
+    status: str,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Set `svc:operationStatus` on an Operation via the OGM atomic commit path.
+
+    The queued->running (and any single-status) transition; ADR 0009.
+    """
+    _set(ogm, operation_iri, {str(SVC.operationStatus): [status]}, named_graph)
+
+
+def record_terminal_status(
+    ogm: "OGM",
+    *,
+    operation_iri: IRI,
+    workflow_iri: IRI,
+    status: str,
+    result: Optional[str] = None,
+    timestamp: Optional[datetime] = None,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Record terminal status (`done`/`failed`) with execution provenance in ONE commit.
+
+    Writes status + provenance atomically (single commit) so an Operation is never
+    terminal-without-provenance (ADR 0009: the status IS the provenance record).
+    """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    data: dict = {
+        str(SVC.operationStatus): [status],
+        str(SVC.executedByWorkflow): [_ref(workflow_iri)],
+        str(SVC.executionTimestamp): [timestamp.isoformat()],
+    }
+    if result is not None:
+        data[str(SVC.executionResult)] = [str(result)]
+    _set(ogm, operation_iri, data, named_graph)

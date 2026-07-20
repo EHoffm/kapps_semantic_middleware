@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from aas_middleware import Middleware
 
 from kapps_semantic_middleware.registration import (
+    OperationQueueEmpty,
     OperationResolutionError,
     build_event_trigger_url,
     build_state_endpoint,
@@ -39,12 +40,15 @@ from kapps_semantic_middleware.registration import (
     mint_state_property_iri,
     mint_workflow_iri,
     record_operation_outcome,
+    record_terminal_status,
     register_service,
     register_state_property,
     register_workflow,
     resolve_dispatch_target,
     resolve_operation_endpoint,
+    resolve_operation_workflow,
     revert_operation,
+    set_operation_status,
     sweep_stale_services,
     update_heartbeat,
 )
@@ -72,6 +76,21 @@ class _OperationDraft:
     def __init__(self, iri: IRI) -> None:
         self.iri = iri
         self.data: Dict[str, list] = {}
+
+
+class _ClaimedOperation:
+    """Handle yielded by ``claim_next(...)`` (ADR 0010 pull-and-run).
+
+    ``operation`` is the re-fetched Operation (a `kapps_ogm` Node — hydrated under the
+    domain-supplied ClassScope, or a bare reference when no scope was given); the body reads
+    it to decide what work to do and sets ``result`` to the outcome, which is recorded as
+    ``svc:executionResult`` in the terminal transition.
+    """
+
+    def __init__(self, iri: IRI, operation: Any) -> None:
+        self.iri = iri
+        self.operation = operation
+        self.result: Optional[str] = None
 
 
 class SemanticMiddleware(Middleware):
@@ -599,6 +618,80 @@ class SemanticMiddleware(Middleware):
                 named_graph=self.named_graph,
             )
             raise
+
+    @contextlib.contextmanager
+    def claim_next(self, scope: Any = None):
+        """Pull-and-run the next queued Operation as a transaction context manager (ADR 0009/0010).
+
+        Usage::
+
+            with mw.claim_next(scope) as claimed:
+                claimed.result = do_the_work(claimed.operation)
+
+        `__enter__` pops the next `queued` Operation from this instance's in-memory queue
+        (FIFO; raises `OperationQueueEmpty` if none), marks it `running`, and re-fetches it
+        under the domain-supplied `ClassScope` so the body gets exactly the object shape it
+        needs. The body runs the work and may set `claimed.result`. On clean exit the CM
+        **atomically** records `done` + provenance (`executedByWorkflow` / `executionTimestamp`
+        / `executionResult`); on a body exception it records `failed` + the exception message
+        and re-raises. Provenance is folded into the terminal transition (ADR 0009); the
+        resource-datamodel failure dump is deferred to a later slice.
+
+        This is the in-process receiver face — not REST-exposed (ADR 0005/0010).
+        """
+        if self.mode != "resource":
+            raise RuntimeError(
+                f"claim_next() is only valid in resource mode; current mode is {self.mode!r}"
+            )
+        if not self._operation_queue:
+            raise OperationQueueEmpty("no queued Operation to pull")
+        op_iri = self._operation_queue[0]  # peek FIFO; only dequeue once preconditions pass
+
+        # Precondition, BEFORE any mutation (ADR 0010): resolve the Workflow for provenance
+        # WITHOUT requiring a live endpoint, so `executedByWorkflow` is recorded even if the
+        # workflow's `svc:endpoint` was deregistered mid-run. If this raises, the Operation
+        # stays queued (in the graph and this in-memory queue) for a later retry.
+        workflow_iri = resolve_operation_workflow(
+            self.ogm, op_iri, named_graph=self.named_graph
+        )
+
+        # Preconditions passed — claim it: dequeue, mark running, then re-fetch under scope.
+        self._operation_queue.pop(0)
+        set_operation_status(
+            self.ogm,
+            operation_iri=op_iri,
+            status=OperationStatus.RUNNING,
+            named_graph=self.named_graph,
+        )
+        if scope is not None:
+            operation = self.ogm.fetch(
+                instance_iri=op_iri, class_scope=scope, materialize=True
+            )
+        else:
+            operation = self.ogm.fetch(instance_iri=op_iri, as_reference=True)
+        claimed = _ClaimedOperation(op_iri, operation)
+
+        try:
+            yield claimed
+        except Exception as exc:
+            record_terminal_status(
+                self.ogm,
+                operation_iri=op_iri,
+                workflow_iri=workflow_iri,
+                status=OperationStatus.FAILED,
+                result=str(exc),
+                named_graph=self.named_graph,
+            )
+            raise
+        else:
+            record_terminal_status(
+                self.ogm,
+                operation_iri=op_iri,
+                workflow_iri=workflow_iri,
+                status=OperationStatus.DONE,
+                result=claimed.result,
+                named_graph=self.named_graph,
+            )
 
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).

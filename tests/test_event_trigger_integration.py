@@ -20,9 +20,12 @@ import uvicorn
 from rdflib.namespace import RDF
 
 from kapps_ogm import OGM
+from kapps_ogm.utils.class_scope import ClassScope
 from kapps_semantic_middleware import SemanticMiddleware
 from kapps_semantic_middleware.registration import (
+    OperationQueueEmpty,
     mint_capability_iri,
+    mint_workflow_iri,
     register_service,
     register_workflow,
 )
@@ -169,3 +172,119 @@ def test_event_trigger_revert_on_undeliverable(graphdb):
     assert not db.triple_exists((op_iri, RDF.type, CFC.Operation))
     assert not db.triple_exists((op_iri, CFC.implementsCapability, cap_instance))
     assert not db.triples_get(sub=op_iri, pred=SVC.operationStatus)
+
+
+# --------------------------------------------------------------------------- #
+# Pull-and-run (#14): claim the next queued Operation, run the work, record the
+# terminal status + provenance atomically (ADR 0009 / 0010).
+# --------------------------------------------------------------------------- #
+
+
+def _hello_resource(graphdb, port: int) -> SemanticMiddleware:
+    """A hello-resource middleware exposing the helloworld workflow + the event trigger."""
+    mw = SemanticMiddleware(
+        mode="resource",
+        resource_iri=seed.HELLO_RESOURCE,
+        service_class=seed.HELLO_SERVICE_CLASS,
+        ogm=OGM(db=graphdb.__class__.from_env()),
+        host="127.0.0.1",
+        port=port,
+    )
+    mw.workflow(
+        capability_class=seed.HELLO_CAPABILITY_CLASS,
+        workflow_class=seed.HELLO_WORKFLOW_CLASS,
+    )(hello_world)
+    return mw
+
+
+def _dispatch_hello_op(graphdb) -> str:
+    """Dispatch one hello-capability Operation from a planner middleware; return its IRI."""
+    mw_a = SemanticMiddleware(
+        mode="resource",
+        resource_iri=seed.PLANNER_RESOURCE,
+        service_class=seed.PLANNER_SERVICE_CLASS,
+        ogm=OGM(db=graphdb.__class__.from_env()),
+        host="127.0.0.1",
+        port=8996,
+    )
+    with mw_a.request(
+        capability_class=seed.HELLO_CAPABILITY_CLASS,
+        operation_class=str(CFC.Operation),
+    ) as op:
+        pass  # helloworld takes no arguments
+    return op.iri
+
+
+@requires_graphdb
+def test_pull_and_run_completes_operation(graphdb):
+    """Full loop: A dispatches -> B enqueues -> B pull-and-runs helloworld -> Operation done + provenance."""
+    db = graphdb
+    seed.seed_scenario1(db)
+    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
+
+    mw_b = _hello_resource(graphdb, B_PORT)
+    server, thread = _start_server(mw_b, B_PORT)
+    try:
+        op_iri = _dispatch_hello_op(graphdb)  # queued on B via the REST event trigger
+
+        # B pulls the queued Operation and runs the work under a domain-supplied ClassScope.
+        scope = ClassScope.from_property_chains([[SVC.operationStatus]])
+        with mw_b.claim_next(scope) as claimed:
+            assert claimed.iri == op_iri
+            assert claimed.operation is not None  # re-fetched under the scope
+            claimed.result = hello_world()
+
+        # Terminal transition: done + provenance folded in (ADR 0009).
+        status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
+        assert status and str(status[0][2]) == OperationStatus.DONE
+        assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
+        assert db.triples_get(sub=op_iri, pred=SVC.executionTimestamp)
+        result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
+        assert result and str(result[0][2]) == "hello world"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=20)
+        time.sleep(0.5)
+
+
+@requires_graphdb
+def test_pull_and_run_failure_marks_failed(graphdb):
+    """A body exception marks the Operation `failed` with the error message + provenance (ADR 0009)."""
+    db = graphdb
+    seed.seed_scenario1(db)
+    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
+
+    mw_b = _hello_resource(graphdb, B_PORT)
+    server, thread = _start_server(mw_b, B_PORT)
+    try:
+        op_iri = _dispatch_hello_op(graphdb)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            with mw_b.claim_next():
+                raise RuntimeError("boom")
+
+        status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
+        assert status and str(status[0][2]) == OperationStatus.FAILED
+        assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
+        result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
+        assert result and "boom" in str(result[0][2])
+    finally:
+        server.should_exit = True
+        thread.join(timeout=20)
+        time.sleep(0.5)
+
+
+@requires_graphdb
+def test_claim_next_empty_queue_raises(graphdb):
+    """claim_next with nothing queued raises OperationQueueEmpty (nothing to pull)."""
+    mw = SemanticMiddleware(
+        mode="resource",
+        resource_iri=seed.HELLO_RESOURCE,
+        service_class=seed.HELLO_SERVICE_CLASS,
+        ogm=OGM(db=graphdb),
+        host="127.0.0.1",
+        port=8998,
+    )
+    with pytest.raises(OperationQueueEmpty):
+        with mw.claim_next():
+            pass
