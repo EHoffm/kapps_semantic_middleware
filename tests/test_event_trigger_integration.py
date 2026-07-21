@@ -42,6 +42,7 @@ requires_graphdb = pytest.mark.skipif(
 # examples/ is not a package; add it to the path to reuse the scenario seed helper.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 import seed  # noqa: E402
+from handlers import door_open, door_status, reset_door  # noqa: E402
 
 B_PORT = 8995
 
@@ -332,6 +333,82 @@ def test_callback_runs_operation_on_enqueue(graphdb):
         # The callback drained the queue (no manual claim_next needed).
         assert op_iri not in mw_b._operation_queue
     finally:
+        server.should_exit = True
+        thread.join(timeout=20)
+        time.sleep(0.5)
+
+
+# --------------------------------------------------------------------------- #
+# Two-instance REST event-trigger proof (#16): A dispatches to B over real HTTP;
+# B enqueues (queued), then pulls-and-runs a STATEFUL workflow (done), with the
+# door's state change as B's observable side effect.
+# --------------------------------------------------------------------------- #
+
+
+@requires_graphdb
+def test_two_instance_rest_event_trigger_full_lifecycle(graphdb):
+    """A (mobile robot) dispatches an open Operation to B (door) over REST; B enqueues it
+    (queued), then pulls-and-runs door_open (done). Asserts the full status lifecycle across
+    two instances and B's observable side effect (the door actually opens)."""
+    db = graphdb
+    reset_door()
+    seed.seed_scenario2(db)
+    door_service = seed.DOOR_RESOURCE + "_service"
+    open_wf = mint_workflow_iri(door_service, "door_open")
+
+    # B: the door resource, exposing door_open + the built-in event trigger over REST.
+    mw_b = SemanticMiddleware(
+        mode="resource",
+        resource_iri=seed.DOOR_RESOURCE,
+        service_class=seed.DOOR_SERVICE_CLASS,
+        ogm=OGM(db=graphdb.__class__.from_env()),
+        host="127.0.0.1",
+        port=B_PORT,
+    )
+    mw_b.workflow(
+        capability_class=seed.DOOR_OPEN_CAPABILITY_CLASS,
+        workflow_class=seed.DOOR_OPEN_WORKFLOW_CLASS,
+    )(door_open)
+
+    server, thread = _start_server(mw_b, B_PORT)
+    try:
+        # A: the mobile robot, dispatching an open Operation to the door — the peer resolved
+        # purely through the graph, the event trigger fired over HTTP.
+        mw_a = SemanticMiddleware(
+            mode="resource",
+            resource_iri=seed.MOBILE_ROBOT,
+            service_class=seed.MOBILE_ROBOT_SERVICE_CLASS,
+            ogm=OGM(db=graphdb.__class__.from_env()),
+            host="127.0.0.1",
+            port=8996,
+        )
+        with mw_a.request(
+            capability_class=seed.DOOR_OPEN_CAPABILITY_CLASS,
+            operation_class=str(CFC.Operation),
+        ) as op:
+            pass
+        op_iri = op.iri
+
+        # The REST event trigger reached B and B enqueued it: the Operation is `queued`,
+        # and the door has not moved yet.
+        status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
+        assert status and str(status[0][2]) == OperationStatus.QUEUED
+        assert op_iri in mw_b._operation_queue
+        assert door_status() == "closed"
+
+        # B's domain pulls and runs it: the door opens (observable side effect), op -> done.
+        with mw_b.claim_next() as claimed:
+            assert claimed.iri == op_iri
+            claimed.result = door_open()
+
+        assert door_status() == "opened"  # B's observable state change
+        status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
+        assert status and str(status[0][2]) == OperationStatus.DONE
+        assert db.triple_exists((op_iri, SVC.executedByWorkflow, open_wf))
+        result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
+        assert result and str(result[0][2]) == "opened"
+    finally:
+        reset_door()
         server.should_exit = True
         thread.join(timeout=20)
         time.sleep(0.5)
