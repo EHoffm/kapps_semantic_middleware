@@ -34,6 +34,8 @@ from kapps_semantic_middleware.registration import (
     build_workflow_endpoint,
     create_operation,
     deregister_service,
+    find_resource_operations,
+    mark_operation_failed,
     mint_capability_iri,
     mint_operation_iri,
     mint_service_iri,
@@ -173,6 +175,9 @@ class SemanticMiddleware(Middleware):
             # Stand up the resource's REST interface from graph ground truth
             # (generate_rest_interface: OGM-fetch the resource instance -> datamodel -> API).
             self.add_callback("on_start_up", self._load_resource_datamodel)
+            # Reconstruct the operation queue from the graph (ADR 0009 durability): a one-shot
+            # startup query, so no work is lost across a restart and no steady-state polling.
+            self.add_callback("on_start_up", self._reconstruct_queue)
             if heartbeat_interval and heartbeat_interval > 0:
                 self.add_callback("on_start_up", self._start_heartbeat)
                 self.add_callback("on_shutdown", self._stop_heartbeat)
@@ -672,6 +677,49 @@ class SemanticMiddleware(Middleware):
             return
         with self.claim_next(self._callback_scope) as claimed:
             claimed.result = callback(claimed.operation)
+
+    async def _reconstruct_queue(self) -> None:
+        """Reconstruct the operation queue from the graph on startup (ADR 0009 durability).
+
+        Own ``queued`` Operations are re-enqueued into the in-memory cache; own orphaned
+        ``running`` Operations — this resource crashed mid-execution — are transitioned to
+        ``failed`` and never auto-rerun, because a half-done physical action must not silently
+        replay. Both are found by ontology traversal (Operation -> Capability <- resource),
+        whose links persist across a restart, so this is a one-shot startup query rather than
+        steady-state polling.
+        """
+        queued = await anyio.to_thread.run_sync(
+            functools.partial(
+                find_resource_operations,
+                self.ogm,
+                self.resource_iri,
+                [OperationStatus.QUEUED],
+                self.named_graph,
+            )
+        )
+        for op_iri in queued:
+            if op_iri not in self._operation_queue:
+                self._operation_queue.append(op_iri)
+
+        orphaned = await anyio.to_thread.run_sync(
+            functools.partial(
+                find_resource_operations,
+                self.ogm,
+                self.resource_iri,
+                [OperationStatus.RUNNING],
+                self.named_graph,
+            )
+        )
+        for op_iri in orphaned:
+            await anyio.to_thread.run_sync(
+                functools.partial(
+                    mark_operation_failed,
+                    self.ogm,
+                    op_iri,
+                    "orphaned running operation reclaimed at startup; not auto-rerun",
+                    self.named_graph,
+                )
+            )
 
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).

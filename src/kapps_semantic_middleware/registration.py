@@ -195,8 +195,9 @@ def register_workflow(
 ) -> None:
     """Register a Workflow instance, its Capability instance, and their links.
 
-    The Workflow owns ``svc:isWorkflowOf`` (-> service) and ``svc:endpoint``; the
-    Capability owns ``svc:realizedByWorkflow`` (-> workflow). Raises
+    The Workflow owns ``svc:isWorkflowOf`` (-> service) and ``svc:endpoint``; the Capability
+    owns ``svc:realizedByWorkflow`` (-> workflow); and the resource is linked to the
+    Capability it *provides* (``cfc:hasCapability``, Resource -> Capability). Raises
     OntologyGroundTruthError if the classes are not the required subclasses.
     """
     assert_class_registered(ogm, workflow_class, SVC.Workflow, named_graph)
@@ -213,6 +214,12 @@ def register_workflow(
         {str(SVC.realizedByWorkflow): [_ref(workflow_iri)]},
         named_graph,
     )
+    # The resource *provides* the Capability (cfc:hasCapability, Resource -> Capability). This
+    # Core link — not declared in the loaded Core subset — is written through the low-level
+    # triple API (as create_operation does for cfc: links). It is what lets a restarting
+    # resource (or the watchdog) find its own Operations by ontology traversal rather than by
+    # matching IRI names, and it persists across a restart.
+    ogm.db.triple_add((resource_iri, CFC.hasCapability, capability_iri), named_graph=named_graph)
 
 
 def register_state_property(
@@ -229,10 +236,10 @@ def register_state_property(
 ) -> None:
     """Register a StateProperty instance, its Capability instance, and their links.
 
-    The StateProperty owns ``svc:isStatePropertyOf`` (-> service) and
-    ``svc:endpoint``; the Capability owns ``svc:providedByStateProperty`` (-> state
-    property). Only the stable endpoint is written — the live value is never
-    persisted.
+    The StateProperty owns ``svc:isStatePropertyOf`` (-> service) and ``svc:endpoint``; the
+    Capability owns ``svc:providedByStateProperty`` (-> state property); and the resource is
+    linked to the Capability it *provides* (``cfc:hasCapability``). Only the stable endpoint
+    is written — the live value is never persisted.
     """
     assert_class_registered(ogm, state_property_class, SVC.StateProperty, named_graph)
     assert_class_registered(ogm, capability_class, CFC.Capability, named_graph)
@@ -252,6 +259,8 @@ def register_state_property(
         {str(SVC.providedByStateProperty): [_ref(state_property_iri)]},
         named_graph,
     )
+    # The resource provides this Capability too (cfc:hasCapability); see register_workflow.
+    ogm.db.triple_add((resource_iri, CFC.hasCapability, capability_iri), named_graph=named_graph)
 
 
 # --------------------------------------------------------------------------- #
@@ -338,9 +347,28 @@ def sweep_stale_services(
     now: Optional[datetime] = None,
     named_graph: Optional[IRI] = None,
 ) -> list[IRI]:
-    """Deregister every stale Service (ADR 0007 watchdog sweep). Returns swept IRIs."""
+    """Deregister every stale Service and fail its resource's stranded Operations (ADR 0007/0009).
+
+    Alongside removing a dead resource's reachability, the watchdog marks that resource's
+    stranded Operations (``queued``/``running``) ``failed`` so work addressed to a resource
+    that will never return does not hang forever. Returns the swept Service IRIs.
+    """
     stale = find_stale_services(ogm, max_age_seconds, now=now, named_graph=named_graph)
     for service_iri in stale:
+        resource_iri = _resource_of_service(ogm, service_iri, named_graph=named_graph)
+        if resource_iri is not None:
+            for op_iri in find_resource_operations(
+                ogm,
+                resource_iri,
+                [OperationStatus.QUEUED, OperationStatus.RUNNING],
+                named_graph=named_graph,
+            ):
+                mark_operation_failed(
+                    ogm,
+                    op_iri,
+                    "stranded operation swept by watchdog: the resource is stale/dead",
+                    named_graph=named_graph,
+                )
         deregister_service(ogm, service_iri, named_graph=named_graph)
     return stale
 
@@ -549,3 +577,80 @@ def record_terminal_status(
     if result is not None:
         data[str(SVC.executionResult)] = [str(result)]
     _set(ogm, operation_iri, data, named_graph)
+
+
+# ---- Queue durability + recovery (ADR 0009) ----
+
+
+def find_resource_operations(
+    ogm: "OGM",
+    resource_iri: IRI,
+    statuses: list[str],
+    named_graph: Optional[IRI] = None,
+) -> list[IRI]:
+    """Find a resource's own Operations whose ``svc:operationStatus`` is one of ``statuses``.
+
+    Ontology-backed traversal (ADR 0009): an Operation implements a Capability
+    (``cfc:implementsCapability``), and the resource provides that Capability
+    (``cfc:hasCapability``). Both links persist across a restart, so this works at early
+    startup before re-registration. Explicitly does NOT match on IRI names.
+
+    Args:
+        ogm: The OGM instance.
+        resource_iri: The resource whose queue to inspect.
+        statuses: Iterable of status strings to filter (e.g. ``["queued", "running"]``).
+        named_graph: Optional named graph for the read.
+
+    Returns:
+        List of Operation IRIs matching the criteria.
+    """
+    status_filter = ", ".join(f'"{s}"' for s in statuses)
+    sparql = f"""
+    SELECT DISTINCT ?op WHERE {{
+        ?op <{CFC.implementsCapability}> ?cap .
+        <{resource_iri}> <{CFC.hasCapability}> ?cap .
+        ?op <{SVC.operationStatus}> ?st .
+        FILTER(?st IN ({status_filter}))
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return [IRI(str(b["op"])) for b in bindings]
+
+
+def _resource_of_service(
+    ogm: "OGM", service_iri: IRI, named_graph: Optional[IRI] = None
+) -> Optional[IRI]:
+    """The resource a Service wraps (``svc:isServiceOf``), or None. A read (ontology hop)."""
+    sparql = f"SELECT ?r WHERE {{ <{service_iri}> <{SVC.isServiceOf}> ?r . }}"
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return IRI(str(bindings[0]["r"])) if bindings else None
+
+
+def mark_operation_failed(
+    ogm: "OGM",
+    operation_iri: IRI,
+    reason: str,
+    named_graph: Optional[IRI] = None,
+) -> None:
+    """Transition an Operation to ``failed`` with a reason via the OGM atomic commit path.
+
+    Used to reclaim an orphaned ``running`` Operation (a resource crashed mid-execution) or
+    to sweep a dead resource's stranded Operations. Recovery is never a silent physical
+    replay (ADR 0009) — the Operation goes to ``failed`` and a planner decides whether to
+    re-dispatch.
+    """
+    _set(
+        ogm,
+        operation_iri,
+        {
+            str(SVC.operationStatus): [OperationStatus.FAILED],
+            str(SVC.executionResult): [reason],
+        },
+        named_graph,
+    )
