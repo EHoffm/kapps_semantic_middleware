@@ -24,8 +24,6 @@ class TestMESTerms:
     @pytest.mark.parametrize(
         "term_name",
         [
-            "hasPossession",
-            "isPossessedBy",
             "hasHandoverAbility",
             "complements",
             "HandoverAbility",

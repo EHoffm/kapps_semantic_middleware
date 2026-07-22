@@ -19,6 +19,9 @@ from pathlib import Path
 from graph_db_interface import IRI
 from rdflib.namespace import RDF
 
+from kapps_semantic_middleware.registration import create_possession
+from kapps_semantic_middleware.vocabulary import MES
+
 
 DEMO_NS = "https://example.org/kapps-demo#"
 
@@ -51,6 +54,13 @@ DOOR_RESOURCE = IRI(f"{DEMO_NS}door_042")
 MOBILE_ROBOT_RESOURCE_CLASS = IRI(f"{DEMO_NS}MobileRobotResource")
 MOBILE_ROBOT_SERVICE_CLASS = IRI(f"{DEMO_NS}MobileRobotControllerService")
 MOBILE_ROBOT = IRI(f"{DEMO_NS}mobile_robot_007")
+
+# --- Handover scenario IRIs (Core reified possession + mes: handover ability) ---
+TRANSFER_MODULE_CLASS = IRI(f"{DEMO_NS}TransferModule")
+BOX_CLASS = IRI(f"{DEMO_NS}Box")
+HANDOVER_SOURCE = IRI(f"{DEMO_NS}transfer_module_A")
+HANDOVER_DEST = IRI(f"{DEMO_NS}transfer_module_B")
+HANDOVER_BOX = IRI(f"{DEMO_NS}box_001")
 
 
 def _read_service_ontology() -> str:
@@ -111,6 +121,33 @@ def seed_scenario2(db) -> None:
     load_scenario2_ontologies(db)
     create_resource(db, DOOR_RESOURCE, DOOR_RESOURCE_CLASS)
     create_resource(db, MOBILE_ROBOT, MOBILE_ROBOT_RESOURCE_CLASS)
+
+
+def _read_mes_ontology() -> str:
+    """Return the packaged mes: ontology Turtle (handover-ability vocabulary)."""
+    return (
+        resources.files("kapps_semantic_middleware")
+        .joinpath("ontology", "mes.ttl")
+        .read_text(encoding="utf-8")
+    )
+
+
+def seed_handover(db, ogm) -> None:
+    """Full handover seed: clear, load the mes: + handover ontologies, create two transfer
+    modules and a box, give the destination the ability complementary to Pass (Retrieve), and
+    make the source currently possess the box (Core reified possession, written via the OGM)."""
+    clear_repository(db)
+    db.import_statements(_read_mes_ontology(), content_type="application/x-turtle")
+    db.import_statements(
+        _read_demo_ontology("demo_handover.ttl"), content_type="application/x-turtle"
+    )
+    create_resource(db, HANDOVER_SOURCE, TRANSFER_MODULE_CLASS)
+    create_resource(db, HANDOVER_DEST, TRANSFER_MODULE_CLASS)
+    create_resource(db, HANDOVER_BOX, BOX_CLASS)
+    # The destination carries the ability complementary to Pass (Retrieve).
+    db.triple_add((HANDOVER_DEST, MES.hasHandoverAbility, MES.Retrieve))
+    # The source currently possesses the box.
+    create_possession(ogm, workpiece_iri=HANDOVER_BOX, possessor_iri=HANDOVER_SOURCE)
 
 
 # Resource *class* IRIs (instances above are typed with these).

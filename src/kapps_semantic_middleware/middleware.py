@@ -27,13 +27,16 @@ from pydantic import BaseModel
 from aas_middleware import Middleware
 
 from kapps_semantic_middleware.registration import (
+    HandoverPreconditionError,
     OperationQueueEmpty,
     OperationResolutionError,
     build_event_trigger_url,
     build_state_endpoint,
     build_workflow_endpoint,
+    counterpart_has_complementary_ability,
     create_operation,
     deregister_service,
+    find_possession_state,
     find_resource_operations,
     mark_operation_failed,
     mint_capability_iri,
@@ -49,6 +52,7 @@ from kapps_semantic_middleware.registration import (
     resolve_operation_workflow,
     revert_operation,
     set_operation_status,
+    switch_possession,
     sweep_stale_services,
     update_heartbeat,
 )
@@ -629,6 +633,66 @@ class SemanticMiddleware(Middleware):
                 result=claimed.result,
                 named_graph=self.named_graph,
             )
+
+    @contextlib.contextmanager
+    def handover(self, *, mode: Any, workpiece: Any, counterpart: Any):
+        """Change-of-possession primitive as a transaction context manager (ADR 0011).
+
+        Usage::
+
+            with mw.handover(mode=MES.Pass, workpiece=wp, counterpart=other):
+                ...  # domain-owned physical transport / counterpart coordination
+
+        `__enter__` runs exactly two precondition checks OUTSIDE the transaction: (1) the caller
+        currently possesses the workpiece (a `cfc:PossessionState` the workpiece points to with
+        this resource as possessor), and (2) the counterpart carries the `mes:hasHandoverAbility`
+        COMPLEMENTARY to `mode`. There is deliberately no destination-free / universal maxCount-1
+        check — possession is not universally single. The body is domain-owned (physical
+        transport and any counterpart coordination, e.g. via a `request(...)` dispatch); the core
+        never references the event trigger. On clean exit `__exit__` switches possession to the
+        counterpart: it appends the counterpart's `cfc:hasPossessor` to a fresh PossessionState
+        (an atomic insertion — a resource may possess several workpieces) and then re-points the
+        workpiece's cardinality-1 `cfc:hasPossessedWorkpiece` in a single OGM DELETE/INSERT
+        (the update path, ADR 0008); the workpiece thus points to exactly one PossessionState
+        throughout. On an exception it aborts with no switch. Possession is Core's reified model
+        (`cfc:PossessionState`); the "possessed by exactly one" cardinality is Core's own
+        Workpiece restriction, the commit-time SHACL backstop.
+        """
+        if self.mode != "resource":
+            raise RuntimeError(
+                f"handover() is only valid in resource mode; current mode is {self.mode!r}"
+            )
+        workpiece_iri = IRI(workpiece)
+        counterpart_iri = IRI(counterpart)
+        mode_ability_iri = IRI(mode)
+
+        # __enter__ preconditions, OUTSIDE the transaction (ADR 0011/0010).
+        current_ps = find_possession_state(
+            self.ogm, workpiece_iri, self.resource_iri, named_graph=self.named_graph
+        )
+        if current_ps is None:
+            raise HandoverPreconditionError(
+                f"{self.resource_iri} does not currently possess {workpiece_iri}"
+            )
+        if not counterpart_has_complementary_ability(
+            self.ogm, counterpart_iri, mode_ability_iri, named_graph=self.named_graph
+        ):
+            raise HandoverPreconditionError(
+                f"counterpart {counterpart_iri} lacks the handover ability complementary "
+                f"to {mode_ability_iri}"
+            )
+
+        # Body runs here; an exception aborts before any possession switch.
+        yield
+
+        # __exit__ (clean): switch possession to the counterpart (append possessor link, then
+        # atomically re-point the workpiece's single possession).
+        switch_possession(
+            self.ogm,
+            workpiece_iri=workpiece_iri,
+            new_possessor_iri=counterpart_iri,
+            named_graph=self.named_graph,
+        )
 
     def register_callback(self, callback: Any, scope: Any = None) -> None:
         """Register a domain work callback fired on enqueue (#15, ADR 0009).

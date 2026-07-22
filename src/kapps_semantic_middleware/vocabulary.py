@@ -43,10 +43,15 @@ class CFC:
     ChangeabilityCapability = IRI("ChangeabilityCapability", base=CORE_NS)
     Operation = IRI("Operation", base=CORE_NS)
     Task = IRI("Task", base=CORE_NS)
+    # Possession (Core's reified, time-bound model — verified against Core 0.9.0).
+    PossessionState = IRI("PossessionState", base=CORE_NS)  # a Resource-holds-Workpiece state
+    Workpiece = IRI("Workpiece", base=CORE_NS)
 
     # Object properties
     implementsCapability = IRI("implementsCapability", base=CORE_NS)  # Operation -> Capability
     hasCapability = IRI("hasCapability", base=CORE_NS)  # Resource -> Capability
+    hasPossessor = IRI("hasPossessor", base=CORE_NS)  # Resource -> PossessionState
+    hasPossessedWorkpiece = IRI("hasPossessedWorkpiece", base=CORE_NS)  # Workpiece -> PossessionState
 
 
 class SVC:
@@ -85,14 +90,17 @@ class SVC:
 
 
 class MES:
-    """Terms from this project's MES ontology (`mes:`), defined in ontology/mes.ttl."""
+    """Terms from this project's MES ontology (`mes:`), defined in ontology/mes.ttl.
+
+    Scope is now handover *ability* only: possession itself is Core material-flow state
+    (``cfc:PossessionState`` / ``cfc:hasPossessor`` / ``cfc:hasPossessedWorkpiece``, see
+    ``class CFC``), so this module no longer mints its own possession vocabulary (ADR 0012).
+    """
 
     # Classes
     HandoverAbility = IRI("HandoverAbility", base=MES_NS)  # Enumerated class with six individuals
 
     # Object properties
-    hasPossession = IRI("hasPossession", base=MES_NS)  # Resource -> material-flow product
-    isPossessedBy = IRI("isPossessedBy", base=MES_NS)  # material-flow product -> Resource
     hasHandoverAbility = IRI("hasHandoverAbility", base=MES_NS)  # Resource -> HandoverAbility
     complements = IRI("complements", base=MES_NS)  # HandoverAbility -> HandoverAbility (symmetric)
 

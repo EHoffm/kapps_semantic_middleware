@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 from graph_db_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
 
-from kapps_semantic_middleware.vocabulary import CFC, OperationStatus, SVC
+from kapps_semantic_middleware.vocabulary import CFC, MES, OperationStatus, SVC
 
 if TYPE_CHECKING:
     from kapps_ogm import OGM
@@ -654,3 +654,122 @@ def mark_operation_failed(
         },
         named_graph,
     )
+
+
+# ---- Possession + handover (Core reified possession, ADR 0011) ----
+
+
+class HandoverPreconditionError(Exception):
+    """A handover precondition failed (caller lacks possession, or counterpart lacks the
+    complementary handover ability) — rejected before any physical work begins (ADR 0011)."""
+
+
+def mint_possession_state_iri(workpiece_iri: IRI) -> IRI:
+    """Mint a fresh PossessionState IRI (each change of possession makes a new state; the
+    previous one is kept as implicit history)."""
+    return IRI(f"{workpiece_iri}_possession_{uuid.uuid4().hex[:12]}")
+
+
+def create_possession(
+    ogm: "OGM",
+    *,
+    workpiece_iri: IRI,
+    possessor_iri: IRI,
+    named_graph: Optional[IRI] = None,
+) -> IRI:
+    """Establish an initial possession over Core's reified model (verified vs Core 0.9.0).
+
+    A ``cfc:PossessionState`` the possessor holds (``cfc:hasPossessor``, appended as an atomic
+    insertion since a resource may possess several workpieces) and the workpiece is possessed
+    by (``cfc:hasPossessedWorkpiece``, set through the OGM commit/update path — ADR 0008). The
+    scenario ontology must declare these Core terms' domains so the OGM commit validates.
+
+    Returns:
+        The minted PossessionState IRI.
+    """
+    ps_iri = mint_possession_state_iri(workpiece_iri)
+    # A resource may possess several workpieces at once (ADR 0011 — possession is not
+    # universally maxCount 1), so `cfc:hasPossessor` is APPENDED via the graph_db_interface
+    # atomic insertion; a workpiece has exactly one possession, so `cfc:hasPossessedWorkpiece`
+    # is SET through the OGM commit path (an atomic replace). The PossessionState node comes
+    # into being as their shared object (inferably a cfc:PossessionState via rdfs:range).
+    ogm.db.triple_add((possessor_iri, CFC.hasPossessor, ps_iri), named_graph=named_graph)
+    _set(ogm, workpiece_iri, {str(CFC.hasPossessedWorkpiece): [_ref(ps_iri)]}, named_graph)
+    return ps_iri
+
+
+def find_possession_state(
+    ogm: "OGM",
+    workpiece_iri: IRI,
+    possessor_iri: IRI,
+    named_graph: Optional[IRI] = None,
+) -> Optional[IRI]:
+    """The current PossessionState in which ``possessor_iri`` holds ``workpiece_iri``, or None.
+
+    An ontology-backed read (``workpiece cfc:hasPossessedWorkpiece ?ps . possessor
+    cfc:hasPossessor ?ps``) — never matches on IRI names.
+    """
+    sparql = f"""
+    SELECT ?ps WHERE {{
+        <{workpiece_iri}> <{CFC.hasPossessedWorkpiece}> ?ps .
+        <{possessor_iri}> <{CFC.hasPossessor}> ?ps .
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return IRI(str(bindings[0]["ps"])) if bindings else None
+
+
+def counterpart_has_complementary_ability(
+    ogm: "OGM",
+    counterpart_iri: IRI,
+    mode_ability_iri: IRI,
+    named_graph: Optional[IRI] = None,
+) -> bool:
+    """True iff the counterpart carries the handover ability COMPLEMENTARY to ``mode_ability_iri``.
+
+    ``mes:complements`` is symmetric; a read (``mode_ability mes:complements ?a . counterpart
+    mes:hasHandoverAbility ?a``).
+    """
+    sparql = f"""
+    SELECT ?a WHERE {{
+        <{mode_ability_iri}> <{MES.complements}> ?a .
+        <{counterpart_iri}> <{MES.hasHandoverAbility}> ?a .
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return bool(bindings)
+
+
+def switch_possession(
+    ogm: "OGM",
+    *,
+    workpiece_iri: IRI,
+    new_possessor_iri: IRI,
+    named_graph: Optional[IRI] = None,
+) -> IRI:
+    """Atomically change possession of a workpiece to a new possessor (ADR 0011).
+
+    A fresh ``cfc:PossessionState`` is minted for the new possessor. The new possessor's
+    ``cfc:hasPossessor`` is APPENDED as an atomic insertion (graph_db_interface) — a resource
+    may possess several workpieces, so this must not disturb its existing possessions (ADR
+    0011 — possession is not universally maxCount 1). The workpiece's
+    ``cfc:hasPossessedWorkpiece`` is then re-pointed via a single ``OGM.commit`` — the update
+    path (ADR 0008), an atomic DELETE/INSERT that keeps the workpiece pointing to exactly one
+    PossessionState throughout, so Core's Workpiece cardinality-1 (the commit-time SHACL
+    backstop) is never transiently violated. Appending the possessor link BEFORE the re-point
+    means a failed re-point leaves the prior possession fully intact. The previous
+    PossessionState is kept as implicit history.
+
+    Returns:
+        The new PossessionState IRI.
+    """
+    new_ps = mint_possession_state_iri(workpiece_iri)
+    ogm.db.triple_add((new_possessor_iri, CFC.hasPossessor, new_ps), named_graph=named_graph)
+    _set(ogm, workpiece_iri, {str(CFC.hasPossessedWorkpiece): [_ref(new_ps)]}, named_graph)
+    return new_ps

@@ -35,3 +35,31 @@ semantics and the two-instance synchronization of `Pass↔Retrieve` are delibera
 ([#9](https://github.com/EHoffm/kapps_semantic_middleware/issues/9)); v1 keeps all such
 coordination in the domain-owned body. Promotes the resolution of
 [#7](https://github.com/EHoffm/kapps_semantic_middleware/issues/7).
+
+---
+
+**Amendment (2026-07-21, #18 — possession is Core's reified `PossessionState`).** Verified
+against Core 0.9.0: Core already models possession as a **reified, time-bound
+`cfc:PossessionState`** (`cfc:hasPossessor` Resource→PossessionState, `cfc:hasPossessedWorkpiece`
+Workpiece→PossessionState), with a Core restriction that a **Workpiece has exactly one**
+`hasPossessedWorkpiece` state. So this project no longer uses the (now-removed) binary
+`mes:hasPossession`; the handover primitive reads and writes **Core's** possession model:
+
+- `__enter__` "caller possesses the workpiece" check: is there a PossessionState the workpiece
+  points to whose possessor is the caller — `workpiece cfc:hasPossessedWorkpiece ?ps .
+  caller cfc:hasPossessor ?ps`.
+- `__exit__` switch: mint a new `cfc:PossessionState`; **append** the counterpart's
+  `cfc:hasPossessor` link to it as an atomic insertion (a resource may possess several
+  workpieces, so this is an insert via the graph_db_interface, *not* an OGM replace that would
+  clobber its other possessions — ADR 0008); then **re-point** the workpiece's cardinality-1
+  `cfc:hasPossessedWorkpiece` to it in one OGM `DELETE/INSERT` (the update path). The append is
+  ordered before the re-point, so a failed re-point leaves the prior possession fully intact.
+  The workpiece points to exactly one PossessionState throughout — the cardinality-bearing step
+  (the re-point) is a single atomic commit, so the backstop is never transiently violated. The
+  old PossessionState is kept as **implicit history** (the workpiece no longer points to it); no
+  OWL-Time interval is written in v1 (deferred). The "possessed by exactly one" backstop is
+  **Core's own** Workpiece cardinality-1 on `cfc:hasPossessedWorkpiece`, enforced at commit by
+  SHACL — not asserted by this project.
+
+The `mes:hasHandoverAbility` complementary-ability check in `__enter__` is unchanged (Core has
+no handover-ability concept). See ADR 0012 amendment.

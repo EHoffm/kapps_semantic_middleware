@@ -15,37 +15,17 @@
 # module is domain-facing — the vocabulary domain experts touch — and is a
 # sibling to the reachability/coordination module svc:, which both import Core.
 #
-# v1 scope (Core Middleware ADR 0011, handover primitive): possession, and a
-# handover-ability tag with six enumerated individuals. Deliberately NO ability
-# classes beyond the single tag class, NO liveness, NO Place, NO topology model.
+# v1 scope (Core Middleware ADR 0011, handover primitive): a handover-ability tag with
+# six enumerated individuals. Possession is NOT re-minted here — it is Core material-flow
+# state (cfc:PossessionState / cfc:hasPossessor / cfc:hasPossessedWorkpiece; verified
+# against Core 0.9.0). Deliberately NO ability classes beyond the single tag class, NO
+# liveness, NO Place, NO topology model.
 #################################################################
 
 mes: rdf:type owl:Ontology ;
     rdfs:label "KAPPS MES Ontology" ;
-    rdfs:comment "Manufacturing-execution functionality layered on the Circular Factory Core ontology: which Resource currently holds a material-flow product (possession), and which handover roles a Resource is able to take part in (handover ability). A domain-facing module that imports and specializes Core; distinct from the middleware-facing reachability/coordination module svc:." ;
+    rdfs:comment "Manufacturing-execution functionality layered on the Circular Factory Core ontology: which handover roles a Resource is able to take part in (handover ability). Possession itself is Core material-flow state (cfc:PossessionState), not re-minted here. A domain-facing module that imports and specializes Core; distinct from the middleware-facing reachability/coordination module svc:." ;
     owl:imports <https://w3id.org/circularfactory/Core> .
-
-#################################################################
-# Possession
-#
-# The change-of-possession primitive (handover) reads the caller's current
-# possession in its precondition check and commits a single atomic possession
-# switch on clean exit. The "possessed by exactly one Resource" cardinality is
-# left to a per-scenario SHACL shape (the commit-time backstop), NOT asserted
-# here — possession is not universally maxCount 1.
-#################################################################
-
-mes:hasPossession rdf:type owl:ObjectProperty ;
-    rdfs:label "hasPossession" ;
-    rdfs:comment "Relates a Resource (the carrier) to a material-flow product it currently holds. The direction owned by the carrier; inverse of mes:isPossessedBy. The type of the possessed product is fixed by the domain/use-case ontology, so no rdfs:range is asserted in this module." ;
-    rdfs:domain cfc:Resource ;
-    owl:inverseOf mes:isPossessedBy .
-
-mes:isPossessedBy rdf:type owl:ObjectProperty ;
-    rdfs:label "isPossessedBy" ;
-    rdfs:comment "Relates a material-flow product to the Resource currently holding it. Inverse of mes:hasPossession; the carrier side is a cfc:Resource." ;
-    rdfs:range cfc:Resource ;
-    owl:inverseOf mes:hasPossession .
 
 #################################################################
 # Handover ability

@@ -38,3 +38,16 @@ Service/Workflow → `svc:`, Operation/Capability → `cfc:`) is downstream in
 with an external manufacturing-execution ontology standard is deferred** to a `/research`
 sub-task and does not block minting our own module (same posture as importing Core). Promotes the
 resolution of [#10](https://github.com/EHoffm/kapps_semantic_middleware/issues/10).
+
+---
+
+**Amendment (2026-07-21, #18 — possession is Core, not `mes:`).** The reasoning above ("possession
+placed in `mes:` rather than `cfc:` … would mean extending the published Core") rested on a false
+premise: **Core 0.9.0 already defines possession** — `cfc:PossessionState` with `cfc:hasPossessor`
+/ `cfc:hasPossessedWorkpiece` (and an optional `cfc:hasPossessionInterval`), including a Workpiece
+cardinality-1 on `hasPossessedWorkpiece`. So possession is **not** re-minted in `mes:`; the project
+uses Core's possession model directly (ADR 0011 amended), and `mes:hasPossession` /
+`mes:isPossessedBy` are removed. The `mes:` module now carries **only handover ability**
+(`mes:hasHandoverAbility` + the six enumerated individuals + `mes:complements`) — which Core
+genuinely lacks — so the "mint our own module for what Core doesn't have" principle still holds,
+with a smaller `mes:` surface. Lesson: check the published Core before minting a domain term.
