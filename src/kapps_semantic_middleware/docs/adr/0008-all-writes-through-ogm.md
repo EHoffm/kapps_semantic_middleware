@@ -61,3 +61,30 @@ bounded, documented exception to the OGM-only write rule, forced by the loaded-s
 limitation; routing these Core writes through the OGM requires the loaded ontology to declare
 the Core Operation/Capability property domains (a `kapps_ogm`/ontology follow-up — see the
 `create_operation` docstring).
+
+---
+
+**Amendment (2026-07-22, follow-up — `create_operation` now writes through `OGM.create`).**
+Re-checked against the paper (the reference implementation's ground truth): §4.3 states "every
+write originates as an OGM commit… making the OGM the architecture's **single validated write
+path**," and §4.4.2 locates the validation "at the Python boundary before any SPARQL update is
+constructed." So the raw-triple writes above are a **fidelity gap**, not a blessed alternative
+path — the `graph_db_interface` is not a service-facing write path. This amendment closes that
+gap for **Operation creation**: the loaded scenario/demo ontologies now declare
+`cfc:implementsCapability` (`rdfs:domain cfc:Operation`, `rdfs:range cfc:Capability`), so
+`create_operation` persists the whole Operation (`rdf:type` + `implementsCapability` +
+`svc:operationStatus`) in one `OGM.create`.
+
+**What is *not* yet closed, and why.** Two low-level writes remain, each for a principled reason:
+
+- `cfc:hasCapability` (written at registration, Resource→Capability) is **multi-valued** — a
+  resource provides many capabilities. `OGM.commit` has whole-property-set *replace* semantics,
+  so routing an append through it would clobber the resource's other capabilities. The correct
+  fix is a **validated single-triple append in `kapps_ogm`** (the paper, §4.4.2, explicitly
+  envisions the OGM adding/removing individual property assertions); per ADR 0001 that is a
+  `kapps_ogm` enhancement, not an ad-hoc addition here. This is the **same** gap as
+  `cfc:hasPossessor` in `switch_possession`/`create_possession` (ADR 0011) — both are
+  multi-valued appends parked on `ogm.db.triple_add` awaiting that one capability.
+- `revert_operation`/deregister **deletions** stay on `ogm.db.triple_delete`: the OGM
+  intentionally offers no entity deletion (paper §4.4.2), and triple-level removal is the
+  sanctioned access-module operation for "remove exactly what was written."

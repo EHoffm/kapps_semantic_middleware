@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import functools
 import inspect
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -621,6 +622,7 @@ class SemanticMiddleware(Middleware):
                 workflow_iri=workflow_iri,
                 status=OperationStatus.FAILED,
                 result=str(exc),
+                failure_state=self._dump_resource_datamodel(),
                 named_graph=self.named_graph,
             )
             raise
@@ -812,3 +814,28 @@ class SemanticMiddleware(Middleware):
                 self.resource_iri,
                 exc,
             )
+
+    def _dump_resource_datamodel(self) -> Optional[str]:
+        """Serialize this resource's aas_middleware datamodel to a JSON string, or None.
+
+        The failed-Operation state snapshot (ADR 0009 / #14): on a body exception, `claim_next`
+        records this alongside `operationStatus=failed` (`svc:failureState`) so the resource
+        state under which the failure occurred is diagnosable from the graph. Best-effort — a
+        resource with no materializable datamodel, or a serialization error, yields None so the
+        `failed` status and error string are still recorded; the snapshot is purely additive.
+        """
+        try:
+            node = self.ogm.fetch(instance_iri=self.resource_iri, materialize=True)
+            instance = getattr(node, "instance", None)
+            if instance is None:
+                return None
+            if isinstance(instance, BaseModel):
+                return instance.model_dump_json()
+            return json.dumps(instance, default=str)
+        except Exception as exc:  # noqa: BLE001 - additive diagnostic, never fatal to failure recording
+            logger.warning(
+                "Could not serialize resource datamodel for failure dump of %s: %s",
+                self.resource_iri,
+                exc,
+            )
+            return None

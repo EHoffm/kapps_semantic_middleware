@@ -408,23 +408,23 @@ def create_operation(
 ) -> None:
     """Create an Operation individual for dispatch, addressed to a target Capability (ADR 0009/0010).
 
-    The Core structural triples (``rdf:type`` and ``cfc:implementsCapability``) are written
-    through the low-level graph_db_interface triple API: the scenarios load a Core *subset*
-    that does not declare the Core Operation-property domains the OGM's validated write path
-    requires, so the OGM cannot hydrate them. The
-    ``svc:operationStatus`` (and any svc:-domain ``data``) go through the OGM commit path,
-    whose domains *are* declared in ``service.ttl`` (ADR 0008). Lesson for #14 / kapps_ogm: to
-    route the whole Operation create through the OGM, the loaded ontology must declare the Core
-    Operation property domains.
+    The whole Operation — its ``rdf:type``, the single-valued ``cfc:implementsCapability``
+    link, and ``svc:operationStatus`` (plus any svc:-domain ``data``) — is created in ONE
+    ``OGM.create``, the single validated write path (ADR 0008; paper §4.3/4.4.2 "every write
+    originates as an OGM commit"). This requires the loaded ontology to declare the Core
+    Operation-property domains (``cfc:implementsCapability`` with ``rdfs:domain cfc:Operation``);
+    the scenario/demo ontologies do. The Resource→Capability ``cfc:hasCapability`` link written
+    at *registration* is a separate, multi-valued append that stays on the low-level path until
+    ``kapps_ogm`` grows a validated single-triple append (see ADR 0008 and the ``hasPossessor``
+    parallel in ADR 0011).
     """
-    ogm.db.triple_add((operation_iri, RDF_TYPE, operation_class), named_graph=named_graph)
-    ogm.db.triple_add(
-        (operation_iri, CFC.implementsCapability, capability_iri), named_graph=named_graph
-    )
-    commit_data = {str(SVC.operationStatus): [status]}
+    create_data: dict = {
+        str(CFC.implementsCapability): [_ref(capability_iri)],
+        str(SVC.operationStatus): [status],
+    }
     if data:
-        commit_data.update(data)
-    _set(ogm, operation_iri, commit_data, named_graph)
+        create_data.update(data)
+    _create(ogm, operation_class, operation_iri, create_data, named_graph)
 
 
 def resolve_dispatch_target(
@@ -559,13 +559,17 @@ def record_terminal_status(
     workflow_iri: IRI,
     status: str,
     result: Optional[str] = None,
+    failure_state: Optional[str] = None,
     timestamp: Optional[datetime] = None,
     named_graph: Optional[IRI] = None,
 ) -> None:
     """Record terminal status (`done`/`failed`) with execution provenance in ONE commit.
 
     Writes status + provenance atomically (single commit) so an Operation is never
-    terminal-without-provenance (ADR 0009: the status IS the provenance record).
+    terminal-without-provenance (ADR 0009: the status IS the provenance record). On failure,
+    ``failure_state`` (a JSON snapshot of the resource's datamodel) is written into
+    ``svc:failureState`` in the same commit, so the failed status and the state that produced
+    it are never separable.
     """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
@@ -576,6 +580,8 @@ def record_terminal_status(
     }
     if result is not None:
         data[str(SVC.executionResult)] = [str(result)]
+    if failure_state is not None:
+        data[str(SVC.failureState)] = [failure_state]
     _set(ogm, operation_iri, data, named_graph)
 
 

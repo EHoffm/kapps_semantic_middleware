@@ -9,6 +9,7 @@ Operation. Skipped when GRAPHDB_* env vars are absent (see conftest).
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -242,6 +243,8 @@ def test_pull_and_run_completes_operation(graphdb):
         assert db.triples_get(sub=op_iri, pred=SVC.executionTimestamp)
         result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
         assert result and str(result[0][2]) == "hello world"
+        # A successful Operation carries no failure snapshot (svc:failureState is failure-only).
+        assert not list(db.triples_get(sub=op_iri, pred=SVC.failureState))
     finally:
         server.should_exit = True
         thread.join(timeout=20)
@@ -269,6 +272,10 @@ def test_pull_and_run_failure_marks_failed(graphdb):
         assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
         result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
         assert result and "boom" in str(result[0][2])
+        # The resource datamodel is snapshotted into svc:failureState, atomically with `failed`.
+        failure = list(db.triples_get(sub=op_iri, pred=SVC.failureState))
+        assert failure, "svc:failureState should capture the resource datamodel on failure"
+        assert json.loads(str(failure[0][2]))["id"] == str(seed.HELLO_RESOURCE)
     finally:
         server.should_exit = True
         thread.join(timeout=20)

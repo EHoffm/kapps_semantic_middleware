@@ -87,6 +87,7 @@ class SVC:
     executedByWorkflow = IRI("executedByWorkflow", base=SVC_NS)  # Operation -> Workflow
     executionTimestamp = IRI("executionTimestamp", base=SVC_NS)  # Operation -> xsd:dateTime
     executionResult = IRI("executionResult", base=SVC_NS)  # Operation -> xsd:string
+    failureState = IRI("failureState", base=SVC_NS)  # Operation -> xsd:string (JSON resource-datamodel dump on failure)
 
 
 class MES:

@@ -170,3 +170,9 @@ svc:executionResult rdf:type owl:DatatypeProperty ;
     rdfs:comment "An optional serialized (string) representation of the value the Workflow returned when the Operation was pulled and run. Part of the outcome recorded on the Operation." ;
     rdfs:domain cfc:Operation ;
     rdfs:range xsd:string .
+
+svc:failureState rdf:type owl:DatatypeProperty ;
+    rdfs:label "failureState" ;
+    rdfs:comment "An optional JSON snapshot of the executing resource's aas_middleware datamodel captured at the moment an Operation failed, written atomically with svc:operationStatus=failed (ADR 0009). It records the observed resource state under which the failure occurred, so a failed Operation is diagnosable and replayable from the graph alone. Absent on successful (done) Operations." ;
+    rdfs:domain cfc:Operation ;
+    rdfs:range xsd:string .

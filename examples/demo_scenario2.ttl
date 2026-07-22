@@ -22,6 +22,13 @@ cfc:EquippedCapability rdf:type owl:Class ; rdfs:subClassOf cfc:Capability .
 cfc:Task rdf:type owl:Class .
 cfc:Operation rdf:type owl:Class ; rdfs:subClassOf cfc:Task .
 
+# The Operation->Capability link is declared so create_operation persists an Operation
+# through the OGM's validated write path (ADR 0008) rather than raw triples.
+cfc:implementsCapability rdf:type owl:ObjectProperty ;
+    rdfs:domain cfc:Operation ;
+    rdfs:range cfc:Capability ;
+    rdfs:label "implements capability" .
+
 ex:DoorResource rdf:type owl:Class ;
     rdfs:subClassOf cfc:Resource ;
     rdfs:label "Door Resource" ;
