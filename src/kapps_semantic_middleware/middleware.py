@@ -67,7 +67,7 @@ __all__ = ["SemanticMiddleware", "OperationResolutionError"]
 class _EventTriggerPayload(BaseModel):
     """REST body of the event trigger: the IRI of the Operation now in the graph (ADR 0009)."""
 
-    operation_iri: str
+    operation_iri: str #TODO: Why is this not an iri? 
 
 
 class _OperationDraft:
@@ -102,13 +102,13 @@ class SemanticMiddleware(Middleware):
     """KAPPS Semantic Middleware extending aas_middleware.Middleware.
 
     Adds knowledge-graph registration, discovery, and execution. Supports three
-    modes per ADR 0005: "resource" (wraps one resource_iri with REST-facing
+    modes: "resource" (wraps one resource_iri with REST-facing
     workflows), "server" (reserved, data-serving with no physical resource), and
     "watchdog" (reserved, liveness-sweeping). Resource mode registers the
     Service/Workflow/Capability instances on startup and deregisters them on
     shutdown.
 
-    Operation execution follows ADR 0002: an Operation resolves via its implemented
+    Operation execution: an Operation resolves via its implemented
     Capability to a Workflow endpoint, which is then invoked over HTTP.
     """
 
@@ -141,7 +141,7 @@ class SemanticMiddleware(Middleware):
         self.named_graph = named_graph
         self.address = address or f"http://{host}:{port}"
 
-        # Liveness (ADR 0007).
+        # Liveness.
         self.heartbeat_interval = heartbeat_interval
         self.staleness_threshold = staleness_threshold
         self.sweep_interval = sweep_interval

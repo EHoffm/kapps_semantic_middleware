@@ -102,7 +102,7 @@ def assert_class_registered(
         raise OntologyGroundTruthError(
             f"Class {class_iri} must be {base_iri} or a subclass thereof, "
             "but it is not registered as such in the knowledge graph. "
-            "Types are ontology-ground-truth (ADR 0003): author the class first."
+            "Types are ontology-ground-truth: author the class first."
         )
 
 
