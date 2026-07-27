@@ -23,8 +23,8 @@ mw = SemanticMiddleware(
 > inside the parameter blanknode (`[TU.hasConveyorBelt, TU.hasConveyorSpeed, INF.hasValue]`).
 > Reproduced live, that third element is **silently discarded**: a `ClassScope` terminates at a
 > `COMPLEX` property and cannot select within it. A view names properties down to the parameter and
-> no further. Excluding connection metadata is therefore done by a middleware-side projection — see
-> **ADR 0019**, which amends the mechanism below while keeping its intent.
+> no further. Connection metadata is excluded not by the view and not by a middleware step, but by the
+> `rdfs:range` restriction never declaring it — see the correction below (ADR 0019 superseded).
 
 A connector for the same resource does not see the TransferUnit at all. Its scope is rooted at the
 component it serves:
@@ -46,15 +46,24 @@ where it needs it**. The user view is rooted at the TransferUnit and stops at va
 mode; a connector's view is rooted at one belt and consists almost entirely of connection metadata.
 Neither is "the" datamodel, and a connector re-scoping itself does not disturb what peers see.
 
-This is also what keeps the IT-OT boundary real. Value, unit and MQTT topic hang off **one**
-blanknode, so a scopeless fetch serves the broker address to every peer that GETs the resource — and
-a controller could then bypass the middleware and drive the PLC over MQTT directly, which is the
-coupling the architecture exists to remove. ~~The user view excludes connection metadata not by a
-deny-list in router code but by simply not projecting it~~ — **superseded by ADR 0019**: a scope
-cannot decline to project part of a blanknode, so the exclusion is a middleware-side projection
-step. The "excluded by default rather than by a maintained list" property is preserved differently:
-the projection hides what a registered connector declares about its own protocol (ADR 0020), so a
-new protocol is covered when its connector is registered, not when someone remembers a deny-list.
+This is also what keeps the IT-OT boundary real: a peer that could read the broker address could
+bypass the middleware and drive the PLC over MQTT directly, which is the coupling the architecture
+exists to remove.
+
+> **Corrected twice, settled 2026-07-27 (#25/#28).** This paragraph originally argued that value,
+> unit and MQTT topic share one blanknode, so a scopeless fetch would serve the broker address to
+> every peer — and that the *view* prevents it by not projecting it. Both halves were wrong.
+>
+> A scope cannot decline to project part of a blanknode (ADR 0019), so it was never the view's doing.
+> But no middleware step is needed either: a parameter materializes to exactly what its property's
+> `rdfs:range` restriction declares, and the domain ontology deliberately declares **only** domain
+> content plus the access-mode marker. Connection metadata is in **no** restriction — the domain TBox
+> and a connector's `inf:` TBox are unconnected, and the middleware joins them at runtime when the
+> resource is instantiated. So the broker address is dropped before a datamodel exists.
+>
+> **The restriction is the projection**, and it is excluded by default in the strongest sense: a new
+> protocol's metadata is invisible northbound because nobody ever declared it, not because anybody
+> remembered a deny-list. ADR 0019 is superseded and its implementation issue closed unbuilt.
 
 ### Configured in code, not authored in the ontology
 
@@ -73,8 +82,16 @@ handle combinations it has not seen.
 Settability is northbound (ADR 0015), so `inf:accessMode` is projected into the user view and
 travels in the payload next to value and unit. The payload is therefore self-describing — a generic
 UI renders an input where it finds `readwrite` and a read-only row where it finds `read` — and the
-route generator gates the PUT verb off the same field (ADR 0017). A static facet repeating in a
-live-value response costs nothing, because `OGM.commit` filters unchanged triples before committing.
+route generator gates the PUT verb off the same field (ADR 0017). ~~A static facet repeating in a
+live-value response costs nothing, because `OGM.commit` filters unchanged triples before committing.~~
+
+> **Corrected 2026-07-27 (#28).** `OGM.commit` does **not** filter unchanged triples for a complex
+> property. `to_triples` mints a fresh `genid-{uuid4}` blank node on every serialization, and `diff`
+> compares whole blank-node groups — so the groups never compare equal and **every commit deletes and
+> recreates the entire parameter node**, even with no changes. Worse, the new node is built from the
+> materialized instance, so any triple the ClassSpec does not declare — the connection metadata — is
+> orphaned. Filed as SAWeindel/kapps_ogm#4. The conclusion above still holds once that lands; until
+> then, do not commit a parameter node.
 
 ### A standard path with an escape hatch, again
 

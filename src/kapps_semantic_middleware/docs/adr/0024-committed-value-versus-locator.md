@@ -51,6 +51,14 @@ the ontology or the middleware has to mark which is in use, and no new term is n
 choice. That is the cheapest possible way to support both, and it keeps the recognition model (ADR 0020)
 untouched.
 
+> **Blocked for the committed-value pattern until SAWeindel/kapps_ogm#4 lands (#28).**
+> Committing a parameter today **orphans its connection metadata**: `to_triples` mints a fresh blank
+> node every serialization and `diff` replaces whole blank-node groups, so the old node — still holding
+> the topic and broker the ClassSpec never declared — is unlinked and a metadata-less node takes its
+> place. The locator pattern is unaffected, because it never commits values. A domain choosing the
+> committed-value pattern must wait for the fix, or keep its connection metadata on a node it does not
+> commit.
+
 ## Consequences
 
 - Amends **ADR 0014**: "the live value is never persisted to the graph" is scoped to the locator pattern
