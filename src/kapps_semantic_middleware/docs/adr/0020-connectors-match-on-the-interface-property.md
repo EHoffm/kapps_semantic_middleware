@@ -6,8 +6,15 @@ The **connector registry** is assembled at middleware initialization from the li
 connectors shipped in the middleware, and can be extended programmatically after init with a
 domain-built connector class plus its ontology description.
 
-Recognition runs over the materialized datamodel, per attribute: is it a `COMPLEX` property, and is
-that property a **subproperty of** some registered connector's interface property?
+Recognition runs per complex property: is it a `COMPLEX` property, and is that property a **subproperty
+of** some registered connector's interface property?
+
+> **Amended 2026-07-27 (#28, ADR 0023).** Recognition runs over the **ClassSpec and the graph at
+> construction**, not over the materialized datamodel as originally written. Everything it needs — which
+> properties are COMPLEX, which match an interface property, which component individuals exist — is
+> available without instance data, and registering this early is what lets `lifespan` connect the
+> connectors at all. A connector registered during `on_start_up` never has `connect()` called and its
+> inbound traffic dies silently. The disposition rules below are unchanged.
 
 ```python
 class MQTTConnector(SemanticConnector):

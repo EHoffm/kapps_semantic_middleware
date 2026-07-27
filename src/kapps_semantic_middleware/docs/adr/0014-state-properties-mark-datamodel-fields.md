@@ -26,7 +26,9 @@ bypass the connector seam.
 **One backing store, not two.** A getter-backed read surface plus a datamodel-backed write
 surface would be two sources of truth for the same value, needing reconciliation. Unifying on
 the datamodel — the value lives in one place, fed by the PLC over MQTT and read/written through
-the framework CRUD — removes the split. The live value is still never *persisted to the graph*;
+the framework CRUD — removes the split. The live value is still never *persisted to the graph*
+(**scoped by ADR 0024**: that is the *locator* pattern, not a middleware invariant — a slowly-changing
+parameter may legitimately be committed, and the middleware enforces neither choice);
 only the `svc:endpoint` triple is written (ADR 0013 unchanged on that point).
 
 **Direct REST, not Operation-routed.** Consistent with ADR 0013 (a setpoint is an idempotent

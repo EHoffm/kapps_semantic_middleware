@@ -55,7 +55,7 @@ topic + broker). Typed by a protocol **interface class** under `inf:InterfaceAcc
 The middleware's former "readable state" and the shop-floor "parameter" are one thing seen from
 two directions — southbound (how the middleware reaches the device) and northbound (how peers
 reach the middleware). Whether it is externally settable is a **facet** (an access mode), not a
-subclass. The live value is never persisted to the graph. Northbound it is **atomic**: value, unit
+subclass. Northbound it is **atomic**: value, unit
 and access mode are read and written together as one dict, because they share one blanknode — the
 locked circular-factory pattern for metadata about a property, RDF having no properties-about-
 properties (ADR 0017). Its **shape is the TBox restriction** on its property's `rdfs:range`, not the
@@ -63,6 +63,9 @@ instance data: anything the restriction does not declare is dropped at materiali
 warning, so metadata a connector needs must be declared there or it never arrives (ADR 0019).
 A complex property that matches no registered connector is **not** a Parameter — it is ordinary
 data the consumer asked for, displayed and readable, with nothing wired (ADR 0020).
+Whether its value lives in the graph is the domain's choice — see **Committed value** / **Locator**. It is
+also the deepest thing a binding can address: `ConnectionInfo` bottoms out at the Parameter, never at the
+value inside it (ADR 0023).
 _Avoid_: StateProperty (retired term, ADR 0015); Sensor value / Observation (those describe the
 data, not the graph node); Capability (states have none — there is no "light-barrier capability").
 
@@ -131,24 +134,54 @@ _Avoid_: Zero-configuration, Fully generic (both overclaim — the system does n
 has never been taught).
 
 **Semantic connector**:
-An aas_middleware `Connector` (`connect`/`disconnect`/`provide`/`consume`) paired with a **protocol
-metadata ontology**. The class **carries the ontology terms it serves in its own code**: the
-**Interface property** it binds to, and the connection-metadata properties its protocol needs — which
-are also exactly what the **Projection** hides northbound. `provide` reads the live value, `consume`
-writes it (a read-only Parameter uses `provide` only). A connector may hardcode terms from its own
-ontology and no others; domain vocabulary never appears in it, nor anywhere in the core (ADR 0021).
-_Avoid_: Connector (the bare aas_middleware protocol, without the metadata ontology); Adapter, Driver.
+Any connector able to **register itself from the knowledge graph**. Every connector aas_middleware ships
+(MQTT, OPC-UA, HTTP, websocket, webhook, AAS client, model) is a candidate; only the bare `Connector`
+protocol is not, being the interface specification itself. Realized as a **Binding descriptor**, not as a
+connector subclass (ADR 0023).
+_Avoid_: Connector (the bare aas_middleware protocol, without the metadata ontology); Adapter, Driver;
+MQTT connector as the archetype (MQTT is the first instance, not the shape of the concept).
+
+**Binding descriptor**:
+The object that makes a connector semantic: it names the **connector class** it builds, the **Interface
+property** it binds to, the connection-metadata properties its protocol needs — which are also exactly
+what the **Projection** hides northbound — and how to turn one Parameter's metadata into one or more
+framework registrations. It references its connector class rather than subclassing it, so a connector
+nobody here owns can still be made semantic. One binding may yield **two** connectors (a read topic and a
+write topic) against **one** binding target, differing only in direction. Built and registered **at
+construction**, from the ClassSpec and the graph — registering later means the framework never connects
+them and inbound traffic dies silently (ADR 0023).
+_Avoid_: Connector factory, Plugin (the descriptor is declarative — it states what a protocol needs, and
+building is one method on it).
+
+**Static facet**:
+A part of a Parameter that does not change with a reading — unit, access mode. Captured by the **Binding
+descriptor** at wiring time and reassembled into the payload on every inbound message, because the write
+path replaces the whole Parameter node and nothing downstream can read the previous value back. Free to
+carry, since `OGM.commit` filters unchanged triples (ADR 0018, ADR 0023).
+_Avoid_: Constant, Config (a facet belongs to the Parameter and is authored in the ontology, not to the
+deployment).
 
 **Connector registry**:
-The universal map from **Interface property** to **Semantic connector**. Built at middleware
-initialization from the known, tested connector classes shipped in the middleware, and extensible
-after init by injecting a domain-built connector class together with its ontology description.
-Resolution is `parameter property rdfs:subPropertyOf* → interface property → semantic connector`;
-supporting a new protocol is registering a new entry, never a core change. The seam by which the
-middleware ships standard `inf:` connectors (MQTT, OPC-UA reserved) and a domain expert can register
-their own (ADR 0020).
+The universal map from **Interface property** to **Binding descriptor**. Built at middleware
+initialization from the known, tested descriptors shipped in the middleware, and extensible after init by
+injecting a domain-built one. Resolution is
+`parameter property rdfs:subPropertyOf* → interface property → binding descriptor`; supporting a new
+protocol is registering a new entry, never a core change. Recognition runs over the **ClassSpec and the
+graph**, not over materialized instance data, which is what allows registration to happen early enough
+for the framework to connect them (ADR 0020, ADR 0023).
 _Avoid_: Connector factory, Plugin loader (the registry keys specifically on the interface property);
 keying on `rdf:type` (superseded — the parameter blanknode has no named type).
+
+**Committed value** / **Locator**:
+The two legitimate ways a domain may treat a Parameter's value, chosen per subproject — the middleware is
+agnostic and enforces neither. **Committed value**: the data point changes slowly, so the domain code
+commits it and the graph holds the value; `@state` is not involved. **Locator**: the data point changes
+fast, so the graph holds only *where the value lives* — unit, access mode, topic, broker — and never the
+value itself, which exists only in the datamodel and over REST. Scenario 3 is a locator, which is why its
+instance data carries no `inf:hasValue` literals; the restriction still declares the field, so an
+unobserved Parameter reads as `[]` (ADR 0024).
+_Avoid_: Cached value, Stale value (a committed value is authoritative for its update rate, not a stale
+copy); "the live value is never persisted" as a middleware rule (it is the locator pattern's property).
 
 **Capability**:
 Defined in Core (`cfc:Capability`, subclasses `EquippedCapability`/`FlexibilityCapability`/
