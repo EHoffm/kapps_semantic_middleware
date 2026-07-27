@@ -1,5 +1,23 @@
 # Multiple `rdfs:range` assertions are conjunctive, so `kapps_ogm` raising on them is a defect
 
+> **MOTIVATION RETIRED 2026-07-27 (#25). Still correct; no longer urgent, and no longer gating.**
+>
+> Both driving use cases below have gone away, and one rested on a factual error:
+>
+> - *"Upstream properties cannot be extended."* We no longer want to extend them. Connection metadata
+>   does not belong in a range restriction at all — the domain TBox and the connector's `inf:` TBox are
+>   deliberately unconnected, and the two are joined at runtime by the middleware. `tu:hasConveyorSpeed`
+>   keeps exactly the restriction upstream gives it.
+> - *"The interface hierarchy cannot carry ranges, because subproperties would inherit two."* **Wrong.**
+>   RDFS does not entail a `rdfs:range` triple for a subproperty, and neither GraphDB repository
+>   materializes one — measured, `include_implicit=True` returns **0** inherited ranges on both, and a
+>   property with its own range plus a superproperty range resolves to exactly **1**. There was never a
+>   collision to avoid. (It also means range-on-superproperty does not *work* as a mechanism here: the
+>   subproperty resolves to no range at all and `PropertySpec.specify` raises "no rdfs:range defined".)
+>
+> The RDFS reading is still right and the raise is still a defect, so `SAWeindel/kapps_ogm#1` stays
+> open as a correctness fix. But it **no longer gates #39**, and nothing in scenario 3 waits on it.
+
 `PropertySpec.specify` raises `ValueError: Property ... has multiple rdfs:range defined` whenever a
 property resolves to more than one range. RDFS semantics are **conjunctive** — several `rdfs:range`
 assertions mean a value must satisfy *all* of them, i.e. their intersection — so the correct

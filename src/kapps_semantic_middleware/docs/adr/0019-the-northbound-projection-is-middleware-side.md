@@ -1,5 +1,24 @@
 # The northbound projection is middleware-side; a ClassScope cannot select within a parameter
 
+> **SUPERSEDED 2026-07-27 (#25). The projection is unnecessary — do not build it.**
+>
+> This ADR solved a leak that cannot occur. It assumed connection metadata would be present in the
+> materialized datamodel and therefore had to be stripped. It is never present.
+>
+> A parameter's materialized shape is its property's `rdfs:range` restriction, and anything the
+> restriction does not declare is dropped at materialization (#29, demonstrated with `rdfs:comment`).
+> The authoritative sfb1574 ontology declares only `inf:hasValue` and `tu:hasUnit` there, and puts
+> `inf:hasMQTTTopic` in **no restriction anywhere** — the domain TBox and the connector's `inf:` TBox
+> are deliberately *not* connected. So the broker address is dropped before a datamodel exists.
+>
+> **The restriction is the projection.** A connector reads its metadata straight from the ABox at
+> registration instead; the middleware joins the two TBoxes at runtime, when the resource is
+> instantiated (ADR 0023, ADR 0024).
+>
+> Implementation issue #51 is closed unbuilt. The reasoning below about ClassScope not being able to
+> select *within* a parameter remains correct and still matters — it is why `inf:accessMode`, which a
+> peer legitimately needs, has to be declared in the restriction rather than filtered in per consumer.
+
 A `ClassScope` selects **which** parameters a consumer sees. It cannot select **within** one. The
 connection metadata that must not travel northbound is therefore removed by a **projection step in
 the middleware**, applied to the materialized datamodel before it is REST-exposed — not by the view

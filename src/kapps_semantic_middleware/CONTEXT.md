@@ -108,13 +108,14 @@ _Avoid_: The datamodel, Schema (it is one view among many; a connector's view of
 a different one).
 
 **Projection** (northbound):
-The middleware-side step that removes connection metadata from a materialized Parameter before the
-datamodel is REST-exposed. It hides exactly the properties a registered **Semantic connector**
-declares for its own protocol, and shows everything else — so unrecognised blanknode content stays
-visible as ordinary data, and a new protocol is covered the moment its connector is registered
-rather than when someone updates a deny-list (ADR 0019, ADR 0020).
-_Avoid_: Filter, Deny-list (the set is declared by connectors, not maintained centrally); View
-(the view is the ClassScope; the projection is what the middleware does to what the view returned).
+What keeps connection metadata out of the served datamodel — and it is **the TBox restriction itself**,
+not a middleware step. A Parameter materializes to exactly what its property's `rdfs:range` restriction
+declares; anything else on the node is dropped. Since the domain ontology declares only domain content
+plus the access-mode marker, and never protocol metadata, a broker address physically cannot reach a
+peer. The domain TBox and a connector's `inf:` TBox are deliberately unconnected; the middleware joins
+them at runtime, when the resource is instantiated (ADR 0019 superseded, ADR 0023/0024).
+_Avoid_: Filter, Deny-list, Stripping (nothing is removed — it never arrives); View (the view is the
+ClassScope, which selects *which* Parameters, not which parts of one).
 
 **Interface property**:
 The property a **Semantic connector** binds to — `inf:isInterfaceAccessibleMQTTParameter` and its

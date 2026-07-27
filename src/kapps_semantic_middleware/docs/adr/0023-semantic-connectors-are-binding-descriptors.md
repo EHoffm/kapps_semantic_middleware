@@ -122,7 +122,10 @@ is never writable by accident of omission.
   corrected to the COMPLEX property.
 - Never bind a `ConnectionInfo` to a blanknode model: `DataModel` assigns them synthetic ids derived from
   memory address (`id_136553861392864`), which do not survive a restart.
-- A connector-bound parameter's REST payload is the projected blanknode dict (ADR 0019), and its live
-  value is absent until the device first publishes (ADR 0024).
+- A connector-bound parameter's REST payload is whatever its range restriction declares — domain
+  content plus the access-mode marker — and its live value is absent until the device first publishes
+  (ADR 0024). **ADR 0019's projection step is not needed**: connection metadata is never declared in a
+  restriction, so it never materializes. The binding reads it straight from the ABox at registration,
+  which is the moment the middleware joins the domain TBox to the connector's `inf:` TBox.
 
 Resolves wayfinder ticket #28 under map #24.
