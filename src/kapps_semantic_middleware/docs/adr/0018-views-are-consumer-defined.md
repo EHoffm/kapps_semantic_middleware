@@ -11,24 +11,27 @@ mw = SemanticMiddleware(
     resource_iri=tui.TransferUnit1,
     service_class=tu.TransferUnitService,
     class_scope=ClassScope.from_property_chains([
-        [TU.hasConveyorBelt, TU.hasConveyorSpeed, INF.hasValue],
-        [TU.hasConveyorBelt, TU.hasConveyorSpeed, TU.hasUnit],
-        [TU.hasConveyorBelt, TU.hasConveyorSpeed, INF.accessMode],
-        [TU.hasLightBarrier, TU.isOccupied,       INF.hasValue],
-        [TU.hasLightBarrier, TU.isOccupied,       INF.accessMode],
+        [TU.hasConveyorBelt, TU.hasConveyorSpeed],
+        [TU.hasConveyorBelt, TU.hasConveyorPosition],
+        [TU.hasLightBarrier, TU.isOccupied],
     ]),
     ogm=ogm,
 )
 ```
+
+> **Corrected 2026-07-27 (#29, ADR 0019).** This example originally scoped a third level, reaching
+> inside the parameter blanknode (`[TU.hasConveyorBelt, TU.hasConveyorSpeed, INF.hasValue]`).
+> Reproduced live, that third element is **silently discarded**: a `ClassScope` terminates at a
+> `COMPLEX` property and cannot select within it. A view names properties down to the parameter and
+> no further. Excluding connection metadata is therefore done by a middleware-side projection — see
+> **ADR 0019**, which amends the mechanism below while keeping its intent.
 
 A connector for the same resource does not see the TransferUnit at all. Its scope is rooted at the
 component it serves:
 
 ```python
 ClassScope.from_property_chains([        # root: tui:ConveyorBelt1_left
-    [TU.hasConveyorSpeed, INF.hasMQTTTopic],
-    [TU.hasConveyorSpeed, INF.hasMQTTBrokerIP],
-    [TU.hasConveyorSpeed, INF.hasMQTTSetTopic],
+    [TU.hasConveyorSpeed],
 ])
 ```
 
@@ -46,9 +49,12 @@ Neither is "the" datamodel, and a connector re-scoping itself does not disturb w
 This is also what keeps the IT-OT boundary real. Value, unit and MQTT topic hang off **one**
 blanknode, so a scopeless fetch serves the broker address to every peer that GETs the resource — and
 a controller could then bypass the middleware and drive the PLC over MQTT directly, which is the
-coupling the architecture exists to remove. The user view excludes connection metadata not by a
-deny-list in router code but by simply not projecting it, so a new protocol's metadata is excluded
-by default rather than leaking until someone remembers to add it to a list.
+coupling the architecture exists to remove. ~~The user view excludes connection metadata not by a
+deny-list in router code but by simply not projecting it~~ — **superseded by ADR 0019**: a scope
+cannot decline to project part of a blanknode, so the exclusion is a middleware-side projection
+step. The "excluded by default rather than by a maintained list" property is preserved differently:
+the projection hides what a registered connector declares about its own protocol (ADR 0020), so a
+new protocol is covered when its connector is registered, not when someone remembers a deny-list.
 
 ### Configured in code, not authored in the ontology
 
@@ -82,7 +88,15 @@ engineer (ADR 0003); anything we have no standard for must still be expressible.
 ## Consequences
 
 - Omitting `class_scope` falls back to today's scopeless `ogm.fetch(..., materialize=True)`, so
-  scenarios 1 and 2 keep working unchanged and the parameter is additive.
+  scenarios 1 and 2 keep working unchanged and the parameter is additive. Measured (#29), that
+  fallback materializes **the `id` and nothing else** — `ClassSpec.specify` returns early when the
+  scope is empty, so the datamodel has no properties at all. This is **not** an error condition: the
+  middleware acts on a projection, the knowledge graph holds the information, and a projection of a
+  single individual is a legitimate one. Such a resource starts, registers and serves a datamodel
+  with one field. Attributes may still be added afterwards by workflows. The failure surface is at
+  *use*, not construction, and already exists: writing an absent attribute raises
+  (`ValueError: object has no field ...`, pydantic `extra="forbid"`), and committing an undeclared
+  property raises from `ClassSpec.specify` under scope hydration.
 - A consumer that opens a resource **GETs its REST datamodel** and renders the returned tree, rather
   than fetching structure from the graph under a view of its own. The view is stated once, by the
   resource's own middleware; consumers cannot drift from it because it is what they are served. The

@@ -17,10 +17,24 @@ GET|PUT /{TransferUnit}/{tui:TransferUnit1}
 
 `generate_endpoints_from_model` generates routes for the top-level model and **only its direct
 attributes** that are themselves `Identifiable` — no recursion
-(`aas_middleware/middleware/rest_routers.py`). For a TransferUnit that yields exactly three
-addressable things: the unit, the whole list of belts, and the whole list of barriers. A conveyor
-speed is two levels down *and* lives on a blanknode, which materializes as an `AnonymousClass` with
-no `id` (`kapps_ogm/mapping/class_spec.py`) — not `Identifiable`, therefore never routable.
+(`aas_middleware/middleware/rest_routers.py`). A conveyor speed is two levels down *and* lives on a
+blanknode, which materializes as an `AnonymousClass` with no `id`
+(`kapps_ogm/mapping/class_spec.py`) — not `Identifiable`, therefore never routable.
+
+**Corrected 2026-07-27 (#29), having run it:** this ADR originally stated that the framework
+generator yields three addressable things — the unit, the whole list of belts, and the whole list of
+barriers. It yields **one**. `get_contained_models_attribute_info` admits an attribute only if its
+annotation passes `is_identifiable_type`
+(`aas_middleware/model/formatting/aas/aas_middleware_util.py`), and `ClassSpec.to_pydantic_model`
+builds every model on plain `pydantic.BaseModel`. Belts and barriers are as invisible to the
+generator as the speeds are:
+
+```
+GET|PUT|DELETE  /..._TransferUnit/{item_id}      <- the only routes generated
+```
+
+The decision is unaffected — the router is ours either way — but #41 starts from **zero** levels of
+descent rather than one, and nothing about the nesting can be inherited from the framework.
 
 So "set ConveyorBelt1_left's speed to 3.0" was expressible only as a **read-modify-write of the
 entire belt list**: every setpoint re-asserting the sibling belt's speed and the light barriers'

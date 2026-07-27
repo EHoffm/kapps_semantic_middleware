@@ -43,7 +43,11 @@ reach the middleware). Whether it is externally settable is a **facet** (an acce
 subclass. The live value is never persisted to the graph. Northbound it is **atomic**: value, unit
 and access mode are read and written together as one dict, because they share one blanknode — the
 locked circular-factory pattern for metadata about a property, RDF having no properties-about-
-properties (ADR 0017).
+properties (ADR 0017). Its **shape is the TBox restriction** on its property's `rdfs:range`, not the
+instance data: anything the restriction does not declare is dropped at materialization with only a
+warning, so metadata a connector needs must be declared there or it never arrives (ADR 0019).
+A complex property that matches no registered connector is **not** a Parameter — it is ordinary
+data the consumer asked for, displayed and readable, with nothing wired (ADR 0020).
 _Avoid_: StateProperty (retired term, ADR 0015); Sensor value / Observation (those describe the
 data, not the graph node); Capability (states have none — there is no "light-barrier capability").
 
@@ -57,10 +61,13 @@ _Avoid_: Adapter, Driver (the interface class is the ontology term; the connecto
 **ClassScope**:
 A **projection — a view** — over the graph, expressed (in the OGM) as a tree of property-chains
 rooted at a class. A view **belongs to its consumer** and is rooted at the node that consumer cares
-about: the middleware's user view is rooted at the TransferUnit and reaches value/unit/access mode,
-while a connector's view is rooted at one conveyor belt and is almost all connection metadata. There
-is no single "the datamodel" for a resource. This is how one central ontology serves both the IT-OT
-boundary and the control/factory layer without duplicating concepts (ADR 0018).
+about. There is no single "the datamodel" for a resource. This is how one central ontology serves
+both the IT-OT boundary and the control/factory layer without duplicating concepts (ADR 0018).
+A view **terminates at a Parameter and cannot select within one**: below a complex property the
+chain is silently discarded, and the blanknode's contents are fixed by the TBox restriction, the
+same for every consumer (ADR 0019). A scope chooses *which* parameters, never *which parts* of one.
+An **empty** projection is legitimate — the graph holds the information, and a resource whose view
+is a bare individual serves a one-field datamodel and starts normally.
 _Avoid_: Filter, Query (a ClassScope is a reusable named view of which metadata to materialise).
 
 **Root** (of a view):
@@ -73,12 +80,31 @@ is a property of the view).
 
 **User view**:
 The ClassScope a resource-mode middleware is constructed with, and the one it materializes into the
-datamodel it REST-exposes: the **northbound** projection, carrying value, unit and access mode, and
-deliberately *not* connection metadata — so a peer cannot learn the broker address and bypass the
-middleware. Stated by the domain code that embeds the library, since only that code knows what the
-instance is for. Omitting it falls back to an unscoped fetch.
+datamodel it REST-exposes: the **northbound** projection. Stated by the domain code that embeds the
+library, since only that code knows what the instance is for. Omitting it falls back to an unscoped
+fetch, which materializes the `id` alone — a legitimate, if minimal, projection.
+Connection metadata is absent from it not because the view declines to fetch it (it cannot — see
+**ClassScope**) but because the **Projection** removes it (ADR 0019), so a peer cannot learn the
+broker address and bypass the middleware.
 _Avoid_: The datamodel, Schema (it is one view among many; a connector's view of the same resource is
 a different one).
+
+**Projection** (northbound):
+The middleware-side step that removes connection metadata from a materialized Parameter before the
+datamodel is REST-exposed. It hides exactly the properties a registered **Semantic connector**
+declares for its own protocol, and shows everything else — so unrecognised blanknode content stays
+visible as ordinary data, and a new protocol is covered the moment its connector is registered
+rather than when someone updates a deny-list (ADR 0019, ADR 0020).
+_Avoid_: Filter, Deny-list (the set is declared by connectors, not maintained centrally); View
+(the view is the ClassScope; the projection is what the middleware does to what the view returned).
+
+**Interface property**:
+The property a **Semantic connector** binds to — `inf:isInterfaceAccessibleMQTTParameter` and its
+siblings, under `inf:isInterfaceAccessibleParameter`. A resource's parameter declares its protocol by
+being a **subproperty** of one, which is how the authoritative upstream ontology already models it.
+Recognition is `rdfs:subPropertyOf*` against the registry; the parameter blanknode itself carries no
+named class to match on (ADR 0020).
+_Avoid_: Interface class (retained for the ontology concept, but the *match* is on the property).
 
 **Known primitives**:
 The bounded form of the system's flexibility: novel *combinations* are handled, novel *vocabulary* is
@@ -91,17 +117,23 @@ has never been taught).
 
 **Semantic connector**:
 An aas_middleware `Connector` (`connect`/`disconnect`/`provide`/`consume`) paired with a **protocol
-metadata ontology** — the **Interface class** it serves plus a **ClassScope** over the connection
-metadata that protocol needs. `provide` reads the live value, `consume` writes it (a read-only
-Parameter uses `provide` only). The unit a **Connector registry** resolves an interface class to.
+metadata ontology**. The class **carries the ontology terms it serves in its own code**: the
+**Interface property** it binds to, and the connection-metadata properties its protocol needs — which
+are also exactly what the **Projection** hides northbound. `provide` reads the live value, `consume`
+writes it (a read-only Parameter uses `provide` only). A connector may hardcode terms from its own
+ontology and no others; domain vocabulary never appears in it, nor anywhere in the core (ADR 0021).
 _Avoid_: Connector (the bare aas_middleware protocol, without the metadata ontology); Adapter, Driver.
 
 **Connector registry**:
-The universal map from **Interface class** to **Semantic connector**. Resolution is
-`parameter rdf:type → interface class → semantic connector`; supporting a new protocol is registering
-a new entry, never a core change. The seam by which the middleware ships standard `inf:` connectors
-(MQTT, OPC-UA reserved) and a domain expert can register their own.
-_Avoid_: Connector factory, Plugin loader (the registry keys specifically on the interface class).
+The universal map from **Interface property** to **Semantic connector**. Built at middleware
+initialization from the known, tested connector classes shipped in the middleware, and extensible
+after init by injecting a domain-built connector class together with its ontology description.
+Resolution is `parameter property rdfs:subPropertyOf* → interface property → semantic connector`;
+supporting a new protocol is registering a new entry, never a core change. The seam by which the
+middleware ships standard `inf:` connectors (MQTT, OPC-UA reserved) and a domain expert can register
+their own (ADR 0020).
+_Avoid_: Connector factory, Plugin loader (the registry keys specifically on the interface property);
+keying on `rdf:type` (superseded — the parameter blanknode has no named type).
 
 **Capability**:
 Defined in Core (`cfc:Capability`, subclasses `EquippedCapability`/`FlexibilityCapability`/
