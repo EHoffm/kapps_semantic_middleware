@@ -33,13 +33,75 @@ _Avoid_: Skill, Action (AAS-tradition terms for the same invocation-interface id
 reserves "Service" for the deployable middleware-wrapped entity and "Workflow" for what it
 exposes — see the paper's explicit divergence from the AAS capability-skill-service model).
 
-**StateProperty**:
-A readable, potentially high-frequency-changing property of a Resource, registered with
-`@mw.state(...)`. Exposed via a GET-only endpoint backed by an in-memory value; the value
-itself is never persisted to the graph — only one stable endpoint triple is written at
-registration time. Also typed via a pre-existing domain-specific subclass.
-_Avoid_: Sensor value, Observation (those describe the data; StateProperty describes the
-graph-exposed access point to it).
+**Parameter** (interface-accessible parameter) — _supersedes StateProperty (ADR 0015)_:
+A readable and/or settable state of a Resource, modelled as **one graph node** carrying its
+value/unit **and** the metadata a protocol connector needs to reach the device (e.g. an MQTT
+topic + broker). Typed by a protocol **interface class** under `inf:InterfaceAccessibleParameter`.
+The middleware's former "readable state" and the shop-floor "parameter" are one thing seen from
+two directions — southbound (how the middleware reaches the device) and northbound (how peers
+reach the middleware). Whether it is externally settable is a **facet** (an access mode), not a
+subclass. The live value is never persisted to the graph. Northbound it is **atomic**: value, unit
+and access mode are read and written together as one dict, because they share one blanknode — the
+locked circular-factory pattern for metadata about a property, RDF having no properties-about-
+properties (ADR 0017).
+_Avoid_: StateProperty (retired term, ADR 0015); Sensor value / Observation (those describe the
+data, not the graph node); Capability (states have none — there is no "light-barrier capability").
+
+**Interface class**:
+A protocol-specific parameter class — `inf:MQTTParameter`, `inf:OPCUAParameter`, … under
+`inf:InterfaceAccessibleParameter` — that declares what connection metadata its protocol needs and
+is paired **one-to-one with a connector** in the middleware. The protocol-extensibility seam: a new
+protocol is a new interface class plus a new connector, no core change.
+_Avoid_: Adapter, Driver (the interface class is the ontology term; the connector is its runtime pair).
+
+**ClassScope**:
+A **projection — a view** — over the graph, expressed (in the OGM) as a tree of property-chains
+rooted at a class. A view **belongs to its consumer** and is rooted at the node that consumer cares
+about: the middleware's user view is rooted at the TransferUnit and reaches value/unit/access mode,
+while a connector's view is rooted at one conveyor belt and is almost all connection metadata. There
+is no single "the datamodel" for a resource. This is how one central ontology serves both the IT-OT
+boundary and the control/factory layer without duplicating concepts (ADR 0018).
+_Avoid_: Filter, Query (a ClassScope is a reusable named view of which metadata to materialise).
+
+**Root** (of a view):
+The node a ClassScope is rooted at. Being a root is what makes a Resource a *top-level* thing rather
+than a component — TransferUnit1 is a unit and ConveyorBelt1_left is a part of it **because a view is
+rooted at the unit and reaches the belt**, not because of any part-of relation in the graph. There is
+no composition property in Core, and none is needed.
+_Avoid_: Top-level resource, Aggregate (both suggest an intrinsic property of the resource; rootedness
+is a property of the view).
+
+**User view**:
+The ClassScope a resource-mode middleware is constructed with, and the one it materializes into the
+datamodel it REST-exposes: the **northbound** projection, carrying value, unit and access mode, and
+deliberately *not* connection metadata — so a peer cannot learn the broker address and bypass the
+middleware. Stated by the domain code that embeds the library, since only that code knows what the
+instance is for. Omitting it falls back to an unscoped fetch.
+_Avoid_: The datamodel, Schema (it is one view among many; a connector's view of the same resource is
+a different one).
+
+**Known primitives**:
+The bounded form of the system's flexibility: novel *combinations* are handled, novel *vocabulary* is
+not. A task assembled from grip/move/place may never have been seen in that combination, and a product
+may combine a screw and a gear never before combined — but grip, move, place, screw and gear are all
+known. Views and discovery listings are configured over known classes for this reason; it is a
+deliberate boundary, not a limitation to be engineered away.
+_Avoid_: Zero-configuration, Fully generic (both overclaim — the system does not discover concepts it
+has never been taught).
+
+**Semantic connector**:
+An aas_middleware `Connector` (`connect`/`disconnect`/`provide`/`consume`) paired with a **protocol
+metadata ontology** — the **Interface class** it serves plus a **ClassScope** over the connection
+metadata that protocol needs. `provide` reads the live value, `consume` writes it (a read-only
+Parameter uses `provide` only). The unit a **Connector registry** resolves an interface class to.
+_Avoid_: Connector (the bare aas_middleware protocol, without the metadata ontology); Adapter, Driver.
+
+**Connector registry**:
+The universal map from **Interface class** to **Semantic connector**. Resolution is
+`parameter rdf:type → interface class → semantic connector`; supporting a new protocol is registering
+a new entry, never a core change. The seam by which the middleware ships standard `inf:` connectors
+(MQTT, OPC-UA reserved) and a domain expert can register their own.
+_Avoid_: Connector factory, Plugin loader (the registry keys specifically on the interface class).
 
 **Capability**:
 Defined in Core (`cfc:Capability`, subclasses `EquippedCapability`/`FlexibilityCapability`/
@@ -107,7 +169,9 @@ A `SemanticMiddleware` construction-time choice governing what the instance is *
   transactional context-manager surface (dispatch/`request`, pull-and-run, handover) and the
   graph-write helpers stay Python-only, not REST-exposed.
 - `"server"` — wraps no Resource; CRUD/`execute` themselves are the REST surface (e.g. a
-  future data-serving "product server"). Not yet implemented.
+  future data-serving "product server"). Not yet implemented, and deliberately still reserved: a
+  graph-*consuming* participant (a planner, a mobile robot, a controller) is a resource-mode
+  planner with its own Resource, not a server (ADR 0005, #32 amendment).
 - `"watchdog"` — wraps no Resource, exposes little to no REST surface; runs a sweep loop
   that removes stale `svc:address`/`svc:endpoint` triples left by resource-mode instances
   that stopped heartbeating.

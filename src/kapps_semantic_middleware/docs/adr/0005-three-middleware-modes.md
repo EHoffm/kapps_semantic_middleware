@@ -51,3 +51,27 @@ context-manager surface (`request`/dispatch, pull-and-run, handover; ADR 0010) a
 helpers — never REST-exposed in resource mode. The generation is best-effort (a resource with no
 materializable data is skipped, not fatal), and the generated route path is currently derived
 verbatim from the resource IRI (unwieldy — a cosmetic follow-up for #14).
+
+---
+
+**Amendment (2026-07-27, #32 — a controller is a resource-mode planner; `server` stays reserved).**
+Scenario3's controller (it discovers TransferUnits through the graph and drives them over REST) was
+the first real candidate for `server` mode, and it does not fit. This ADR defines `server` as a
+*graph-serving* shape — "`execute`/CRUD *are* the REST surface … answering `fetch`/`ClassScope`
+requests **for other services**". A controller is the mirror image: it *consumes* the graph and calls
+*other* resources' endpoints, and nothing calls it inbound (nor in the v1.1 bootstrap, #35, which is
+outbound too). Adopting `server` mode here would have meant redefining it, not implementing it. So
+the controller is a **resource-mode planner** — its own `cfc:Resource` and `svc:Service` class,
+exactly like scenario1's planner and scenario2's mobile robot — and `server` mode remains reserved
+and unimplemented, recorded as Out of scope on map #24.
+
+The scenario is a learning vehicle, and it surfaced a real defect in how that pattern has been used:
+scenario1's planner and scenario2's robot are *constructed* in resource mode but **never served**, so
+`on_start_up` never fires, they never register, and they exist only to hold an `ogm`. "Resource mode"
+was a label with no runtime consequence. The controller is served for real — it registers,
+heartbeats, and appears in its own discovery list as a resource with no controllable parameters — and
+scenarios 1 and 2 are retrofitted to match, so all three examples show one consistent pattern.
+
+Resource mode is also the shape the library is *shipped* in: it is woven into domain code as a Python
+library rather than run as a standalone server, which is why the view it exposes is a constructor
+parameter (ADR 0018) — the embedding code is what knows what the instance is for.
