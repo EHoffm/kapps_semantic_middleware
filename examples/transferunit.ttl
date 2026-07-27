@@ -4,56 +4,71 @@
 @prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
 @prefix cfc:  <https://w3id.org/circularfactory/Core#> .
 @prefix svc:  <https://w3id.org/circularfactory/Service#> .
+@prefix inf:  <https://www.sfb1574.kit.edu/ontologies/CrcInterfaces#> .
 @prefix tu:   <https://www.sfb1574.kit.edu/ontologies/TransferUnit#> .
 @prefix tui:  <https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#> .
 
 #################################################################
 # Self-contained ground-truth ontology for Scenario 3 (TransferUnit) ONLY.
 #
-# The scenario3 integration test (map #24 / #25): a mock-PLC -> middleware ->
-# controller loop over a TransferUnit that has two conveyor belts and two light
-# barriers. The conveyor speed is a *settable* control variable (read AND set at
-# one endpoint); the light barriers are read-only occupancy sensors.
+# The scenario3 integration test (map #24): a mock PLC -> middleware -> controller
+# loop over a TransferUnit with two conveyor belts and two light barriers. The
+# conveyor speeds are settable control variables; the light barriers are read-only
+# occupancy sensors. All four are reached over MQTT.
 #
-# Extends the sfb1574 minimal `tu:` TransferUnit ontology (kapps_ogm's shared
-# example, kept as the `tu:` namespace) and re-homes it onto the middleware
-# stack: cfc: Core (Resource/Capability/Operation) + svc: (Service/StateProperty).
-# Declares exactly the classes scenario3 needs — nothing else — so seeding a
-# clean repo inserts only the TransferUnit vocabulary. Same direct-subClassOf
-# discipline as scenarios 1 and 2 (ADR 0003): every domain class declares a
-# DIRECT rdfs:subClassOf to the exact base the middleware asserts against, so the
-# ground-truth check (a direct rdfs:subClassOf existence query) passes without a
-# reasoner. Co-load with ontology/service.ttl (the svc: module), exactly as
-# seed.py does for scenarios 1 and 2.
-#
-# NOTE: no SHACL shapes here. Per ADR 0013 and #25's locked scope, the write-
-# payload shape for the settable conveyor speed (e.g. speed in [0, maxSpeed]) is
-# deferred with the rest of SHACL Interop. Scenario3 is states-only (a settable
-# StateProperty + readable StateProperties); it exposes NO svc:Workflow — setting
-# a setpoint is modelled as a settable state, not a workflow (ADR 0013, "Not a
-# Workflow").
+# SELF-CONTAINED BY DESIGN. seed.py calls clear_repository() before every seed and
+# loads only the scenario's own Turtle, and GraphDB does not dereference
+# owl:imports. So this file declares every term the scenario needs and imports
+# nothing — which is also what keeps each parameter property to exactly ONE
+# rdfs:range (see the WARNING below).
 #################################################################
 # CHANGELOG (root ADR 0001 — detailed changelog comment blocks)
 #
-# 2026-07-23  #25  DRAFT — initial authoring (awaiting Etienne review).
-#   - Ported the sfb1574 `tu:` TransferUnit topology (TransferUnit composed of
-#     ConveyorBelt + LightBarrier sub-resources; tu:hasConveyorBelt /
-#     tu:hasLightBarrier) onto cfc:/svc: as the scenario3 ground-truth ontology.
-#   - Added tu:TransferUnitService (svc:Service), tu:ConveyorSpeedProperty
-#     (svc:SettableStateProperty, per ADR 0013 / #26), tu:LightBarrierProperty
-#     (svc:StateProperty, read-only), and their capabilities
-#     tu:ConveyorSpeedCapability / tu:LightBarrierCapability.
-#   - Added instance data: tui:TransferUnit1 with two conveyor belts
-#     (left/right) and two light barriers (front/back).
-#   - DROPPED from the sfb1574 example: the inf: (CrcInterfaces) import and all
-#     inf:hasValue / tu:hasUnit parameter blank nodes (a StateProperty's live
-#     value is never persisted to the graph — it is served over the GET/PUT
-#     endpoint; svc: comment). Also dropped tu:hasConveyorPosition and
-#     tu:isWorking (out of scenario3 scope: settable speed + readable barriers).
-#   - DEPENDENCY: references svc:SettableStateProperty, which does NOT yet exist
-#     in ontology/service.ttl. It is added by issue #36 (ready-for-agent). Until
-#     #36 lands, tu:ConveyorSpeedProperty's parent class is undefined and
-#     registration cannot infer settability — this file does not fully validate.
+# 2026-07-23  #25  DRAFT — initial authoring. SUPERSEDED, see below.
+#
+# 2026-07-27  #25  REWRITTEN against ADR 0015-0024. The 2026-07-23 draft modelled
+#   states as svc:StateProperty subclasses with their own Capability classes and
+#   dropped the parameter blank nodes entirely. Every one of those decisions has
+#   since been reversed:
+#
+#   - REMOVED tu:ConveyorSpeedProperty / tu:LightBarrierProperty
+#     (svc:StateProperty subclasses). ADR 0015 retires StateProperty into
+#     inf:InterfaceAccessibleParameter: a state IS a protocol-interface parameter,
+#     one node carrying value + unit + the metadata a connector needs to reach the
+#     device. Settability is a FACET (inf:accessMode), not a subclass — ADR 0015
+#     supersedes ADR 0013 on this point.
+#   - REMOVED tu:ConveyorSpeedCapability / tu:LightBarrierCapability. States have
+#     no capabilities; the authoritative sfb1574 ontology has none either, and the
+#     draft carried two "#TODO ... this is wrong modeling, delete" markers saying
+#     so. A light barrier does not have a "light-barrier capability".
+#   - RESTORED the parameter blank nodes the draft dropped, but WITHOUT values —
+#     see the locator note below.
+#   - ADDED the inf: interface-property hierarchy and the MQTT connection metadata
+#     (ADR 0016), which is what lets a connector register itself from the graph
+#     (ADR 0020/0023).
+#   - ADDED tu:hasConveyorSpeed / tu:isOccupied as parameter properties with full
+#     range restrictions.
+#
+#   NAMESPACE (provisional). The inf: terms are authored under the existing
+#   CrcInterfaces IRI, which already defines hasValue, hasMQTTTopic,
+#   hasMQTTBrokerIP and the isInterfaceAccessible* hierarchy — so the TransferUnit
+#   stays vocabulary-compatible with the minimal example shared across
+#   graph_db_interface and kapps_ogm. CrcInterfaces is deprecated; the consolidation
+#   capstone (#39) re-homes these terms under the inf: name it mints, which is one
+#   constant in vocabulary.py plus this file (ADR 0021).
+#
+#   NO VALUES — this scenario is a LOCATOR (ADR 0024). The graph records WHERE a
+#   value lives (unit, access mode, topic, broker) and never the value itself; the
+#   live value exists only in the datamodel and over REST. The inf:hasValue
+#   literals in the upstream example were test scaffolding from before the
+#   middleware existed. A parameter that has not been observed yet materializes as
+#   an empty list, which NodeValidator accepts under the Open World Assumption
+#   (min_count shortfalls are warnings, not errors — verified in #29). A domain
+#   whose data changes slowly may instead COMMIT its values; the middleware is
+#   agnostic between the two patterns (ADR 0024).
+#
+#   NO SHACL shapes. Deferred with the rest of SHACL Interop; the setter payload
+#   shape (e.g. speed within [0, maxSpeed]) is explicitly out of map #24's scope.
 #################################################################
 
 #################################################################
@@ -74,12 +89,61 @@ cfc:implementsCapability rdf:type owl:ObjectProperty ;
     rdfs:label "implements capability" .
 
 #################################################################
-# Resource types (topology carried over from the sfb1574 `tu:` example)
+# Interface-parameter vocabulary (inf:, provisional — see NAMESPACE above)
 #
-# A TransferUnit is composed of ConveyorBelt and LightBarrier sub-resources, each
-# a cfc:Resource in its own right — mirroring the sfb1574 minimal ontology
-# (tu:hasConveyorBelt / tu:hasLightBarrier). One tu:TransferUnitService (below)
-# wraps the whole TransferUnit and exposes the state of its components.
+# A resource's readable/settable state is an INTERFACE PARAMETER: one node
+# carrying its value and unit alongside the metadata a protocol connector needs to
+# reach the device (ADR 0015). Which protocol is declared by the parameter
+# property being a SUBPROPERTY of a protocol interface property — the seam a
+# connector matches on (ADR 0020), and the shape the authoritative sfb1574
+# ontology already uses.
+#
+# *** WARNING — DO NOT GIVE THESE SUPERPROPERTIES AN rdfs:range. ***
+# kapps_ogm's PropertySpec.specify raises on any property resolving to more than
+# one rdfs:range, and rdfs:range is inherited down rdfs:subPropertyOf. A range
+# here would therefore give every parameter property below two ranges and turn
+# every fetch into a crash. RDFS ranges are conjunctive and the raise is a defect
+# (root ADR 0002, SAWeindel/kapps_ogm#1); until that lands, the constraint is
+# absolute. Each parameter property carries its own complete restriction instead.
+#################################################################
+
+inf:isInterfaceAccessibleParameter rdf:type owl:ObjectProperty ;
+    rdfs:label "is interface-accessible parameter" ;
+    rdfs:comment "Marks a property whose value is reachable over some protocol interface. The generic term the middleware core is allowed to know; the protocol-specific subproperties below are known only to their connectors (ADR 0021)." .
+
+inf:isInterfaceAccessibleMQTTParameter rdf:type owl:ObjectProperty ;
+    rdfs:subPropertyOf inf:isInterfaceAccessibleParameter ;
+    rdfs:label "is interface-accessible MQTT parameter" ;
+    rdfs:comment "Marks a parameter reached over MQTT. A binding descriptor registers itself against this property and matches candidates by rdfs:subPropertyOf* (ADR 0023)." .
+
+# --- the metadata a parameter node carries -------------------------------------
+# No rdfs:domain on any of these: they appear only inside the range restrictions
+# below, from which kapps_ogm derives their types directly (owl:someValuesFrom).
+# Giving them a domain would make them separately specifiable and then their
+# missing global range would raise.
+
+inf:hasValue rdf:type owl:DatatypeProperty ;
+    rdfs:label "has value" ;
+    rdfs:comment "The parameter's value. Deliberately NOT typed globally — each parameter's restriction declares its own datatype (float for a speed, boolean for an occupancy). Under the locator pattern this is never authored in instance data (ADR 0024)." .
+
+inf:accessMode rdf:type owl:DatatypeProperty ;
+    rdfs:label "access mode" ;
+    rdfs:comment "The settability facet: \"read\" or \"readwrite\". Not a subclass — ADR 0015 supersedes ADR 0013 here. Half the direction rule: a connector's direction is the most restrictive of this and the instance's flavour, and an absent access mode means read-only (ADR 0023)." .
+
+inf:hasMQTTTopic rdf:type owl:DatatypeProperty ;
+    rdfs:label "has MQTT topic" ;
+    rdfs:comment "The topic the device publishes this parameter's readings on." .
+
+inf:hasMQTTSetTopic rdf:type owl:DatatypeProperty ;
+    rdfs:label "has MQTT set topic" ;
+    rdfs:comment "The topic a setpoint is published to. Present only on a readwrite parameter. A separate topic is required because MqttClientConnector publishes to the topic it subscribes to, so read and write need two connector instances against one binding (ADR 0023)." .
+
+inf:hasMQTTBrokerIP rdf:type owl:DatatypeProperty ;
+    rdfs:label "has MQTT broker IP" ;
+    rdfs:comment "Address of the broker carrying this parameter's topics. Connection metadata: hidden from the northbound datamodel by the projection, so a peer cannot bypass the middleware and drive the PLC directly (ADR 0019)." .
+
+#################################################################
+# Resource types (topology carried over from the sfb1574 `tu:` example)
 #################################################################
 
 tu:TransferUnit rdf:type owl:Class ;
@@ -90,15 +154,19 @@ tu:TransferUnit rdf:type owl:Class ;
 tu:ConveyorBelt rdf:type owl:Class ;
     rdfs:subClassOf cfc:Resource ;
     rdfs:label "Conveyor Belt" ;
-    rdfs:comment "A driven belt of a TransferUnit. Its conveyor speed is a settable control variable, exposed as a tu:ConveyorSpeedProperty at runtime." .
+    rdfs:comment "A driven belt of a TransferUnit. Its conveyor speed is a settable control variable reached over MQTT." .
 
 tu:LightBarrier rdf:type owl:Class ;
     rdfs:subClassOf cfc:Resource ;
     rdfs:label "Light Barrier" ;
-    rdfs:comment "A photoelectric occupancy sensor of a TransferUnit. Its blocked/clear state is read-only, exposed as a tu:LightBarrierProperty at runtime." .
+    rdfs:comment "A photoelectric occupancy sensor of a TransferUnit. Its blocked/clear state is read-only." .
 
 #################################################################
 # Composition object properties (carried over from the sfb1574 `tu:` example)
+#
+# A TransferUnit is a unit, and a belt a part of it, because the middleware's user
+# view is ROOTED at the unit and reaches the belt — not because of any part-of
+# semantics here. Rootedness is a property of the view (ADR 0018).
 #################################################################
 
 tu:hasConveyorBelt rdf:type owl:ObjectProperty ;
@@ -114,66 +182,75 @@ tu:hasLightBarrier rdf:type owl:ObjectProperty ;
     rdfs:range tu:LightBarrier .
 
 #################################################################
+# Parameter properties
+#
+# Each declares its protocol by subproperty, and carries ONE complete rdfs:range
+# restriction listing every metadata property its node may hold. That restriction
+# is the authority on the materialized shape: anything an instance asserts that the
+# restriction does not declare is dropped at materialization with only a warning
+# (verified in #29), so a topic missing from this list would never reach a
+# connector. No owl:cardinality is declared on inf:hasValue — under the locator
+# pattern it is legitimately absent until the device publishes.
+#################################################################
+
+tu:hasConveyorSpeed rdf:type owl:ObjectProperty ;
+    rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter ;
+    rdfs:label "has conveyor speed" ;
+    rdfs:comment "The belt's conveyor speed: readable and settable over MQTT via two topics." ;
+    rdfs:domain tu:ConveyorBelt ;
+    rdfs:range [ rdf:type owl:Class ;
+        owl:intersectionOf (
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasValue        ; owl:someValuesFrom xsd:float  ]
+            [ rdf:type owl:Restriction ; owl:onProperty tu:hasUnit          ; owl:someValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:accessMode      ; owl:someValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTTopic    ; owl:someValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTSetTopic ; owl:someValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTBrokerIP ; owl:someValuesFrom xsd:string ]
+        ) ] .
+
+tu:isOccupied rdf:type owl:ObjectProperty ;
+    rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter ;
+    rdfs:label "is occupied" ;
+    rdfs:comment "Whether the light barrier is currently blocked. Read-only: no inf:hasMQTTSetTopic in the restriction, and inf:accessMode is \"read\", so no write registration is ever emitted (ADR 0023)." ;
+    rdfs:domain tu:LightBarrier ;
+    rdfs:range [ rdf:type owl:Class ;
+        owl:intersectionOf (
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasValue        ; owl:someValuesFrom xsd:boolean ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:accessMode      ; owl:someValuesFrom xsd:string  ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTTopic    ; owl:someValuesFrom xsd:string  ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTBrokerIP ; owl:someValuesFrom xsd:string  ]
+        ) ] .
+
+tu:hasUnit rdf:type owl:DatatypeProperty ;
+    rdfs:label "has unit" ;
+    rdfs:comment "The unit of a parameter's value. A static facet: cached by the binding at wiring time and reassembled into the payload on every inbound message, because the write path replaces the whole parameter node (ADR 0023)." .
+
+#################################################################
 # Service type (one Service wraps the whole TransferUnit)
+#
+# One Service per MIDDLEWARE INSTANCE, not per resource — several instances may be
+# bound to one TransferUnit, each owning its own Service node, address and
+# heartbeat (ADR 0022). The Service, its endpoint and its heartbeat are minted at
+# runtime by registration, never authored here (ADR 0003).
 #################################################################
 
 tu:TransferUnitService rdf:type owl:Class ;
     rdfs:subClassOf svc:Service ;
     rdfs:label "Transfer Unit Service" ;
-    rdfs:comment "The middleware Service wrapping a TransferUnit. Exposes each belt's settable conveyor-speed StateProperty and each barrier's readable occupancy StateProperty through the knowledge graph." .
-
-#################################################################
-# Capability types
-#
-# One Capability class per exposed StateProperty kind, following scenario 2's
-# pattern (ex:DoorStatusCapability). The instance-level svc:providesCapability /
-# svc:providedByStateProperty links are minted at runtime by @mw.state (ADR
-# 0003), not authored here.
-#################################################################
-
-tu:ConveyorSpeedCapability rdf:type owl:Class ; #TODO: We do not need capabilities for speed and lightbarriers. this is wrong modeling, delete
-    rdfs:subClassOf cfc:EquippedCapability ,
-                    cfc:Capability ;
-    rdfs:label "Conveyor Speed Capability" ;
-    rdfs:comment "The settable-and-readable capability provided by a belt's tu:ConveyorSpeedProperty: read the current conveyor speed and set a new setpoint at the same endpoint." .
-
-tu:LightBarrierCapability rdf:type owl:Class ; #TODO: We do not need capabilities for speed and lightbarriers. this is wrong modeling, delete
-    rdfs:subClassOf cfc:EquippedCapability ,
-                    cfc:Capability ;
-    rdfs:label "Light Barrier Capability" ;
-    rdfs:comment "The readable capability provided by a barrier's tu:LightBarrierProperty: read whether the barrier is currently occupied (blocked) or clear." .
-
-#################################################################
-# StateProperty types
-#
-# tu:ConveyorSpeedProperty is SETTABLE — svc:SettableStateProperty (a subclass of
-# svc:StateProperty; ADR 0013 / #26): read (GET) and set (PUT/POST) one control
-# variable at one svc:endpoint. tu:LightBarrierProperty is a plain read-only
-# svc:StateProperty. Neither's live value is ever persisted to the graph; only
-# the stable endpoint triple is written at registration.
-#
-# DEPENDENCY: svc:SettableStateProperty is added to ontology/service.ttl by
-# issue #36 (not yet landed). Referenced here per ADR 0013 and #25.
-#################################################################
-
-tu:ConveyorSpeedProperty rdf:type owl:Class ;
-    rdfs:subClassOf svc:SettableStateProperty ;
-    rdfs:label "Conveyor Speed State Property" ;
-    rdfs:comment "The read-write conveyor speed of a ConveyorBelt: read the current speed over the GET endpoint and set a new setpoint at the same endpoint (svc:SettableStateProperty, ADR 0013). Its live value is never persisted to the graph." .
-
-tu:LightBarrierProperty rdf:type owl:Class ;
-    rdfs:subClassOf svc:StateProperty ;
-    rdfs:label "Light Barrier State Property" ;
-    rdfs:comment "The GET-readable occupancy (occupied/clear) of a LightBarrier; read-only (a plain svc:StateProperty). Its live value is never persisted to the graph." .
+    rdfs:comment "The middleware Service wrapping a TransferUnit, exposing its belts' and barriers' parameters over REST and registering its reachability in the graph." .
 
 #################################################################
 # Instance data — TransferUnit1 (two conveyor belts + two light barriers)
 #
-# The resource individuals only (topology mirrored from the sfb1574 tui:
-# example, minus the persisted parameter values). The Service, StateProperty and
-# Capability individuals — and their svc: wiring and endpoints — are minted at
-# runtime by the middleware's registration (@mw.state), not authored here, per
-# ADR 0003 and the scenario 1/2 convention.
+# Topic scheme (instance convention, not baked into the classes — ADR 0016):
+#   TransferUnit<n>/<component>/<position>/<param>, setpoint appends _set
+#
+# The MockTransferUnit publishes 4 topics and subscribes to 2. Broker 127.0.0.1,
+# no auth — a local test broker; a real/deployed broker with auth and TLS is out
+# of scope for map #24.
+#
+# NOTE the absence of inf:hasValue throughout: see the locator note in the
+# changelog. These nodes say where each value lives, not what it is.
 #################################################################
 
 tui:TransferUnit1 rdf:type owl:NamedIndividual ,
@@ -186,16 +263,40 @@ tui:TransferUnit1 rdf:type owl:NamedIndividual ,
 
 tui:ConveyorBelt1_left rdf:type owl:NamedIndividual ,
         tu:ConveyorBelt ;
-    rdfs:comment "Left conveyor belt of TransferUnit1; exposes one settable tu:ConveyorSpeedProperty at runtime." .
+    tu:hasConveyorSpeed [
+        tu:hasUnit          "m/s" ;
+        inf:accessMode      "readwrite" ;
+        inf:hasMQTTTopic    "TransferUnit1/ConveyorBelt/left/speed" ;
+        inf:hasMQTTSetTopic "TransferUnit1/ConveyorBelt/left/speed_set" ;
+        inf:hasMQTTBrokerIP "127.0.0.1" ;
+    ] ;
+    rdfs:comment "Left conveyor belt of TransferUnit1." .
 
 tui:ConveyorBelt1_right rdf:type owl:NamedIndividual ,
         tu:ConveyorBelt ;
-    rdfs:comment "Right conveyor belt of TransferUnit1; exposes one settable tu:ConveyorSpeedProperty at runtime." .
+    tu:hasConveyorSpeed [
+        tu:hasUnit          "m/s" ;
+        inf:accessMode      "readwrite" ;
+        inf:hasMQTTTopic    "TransferUnit1/ConveyorBelt/right/speed" ;
+        inf:hasMQTTSetTopic "TransferUnit1/ConveyorBelt/right/speed_set" ;
+        inf:hasMQTTBrokerIP "127.0.0.1" ;
+    ] ;
+    rdfs:comment "Right conveyor belt of TransferUnit1." .
 
 tui:LightBarrier1_front rdf:type owl:NamedIndividual ,
         tu:LightBarrier ;
-    rdfs:comment "Front light barrier of TransferUnit1; exposes one read-only tu:LightBarrierProperty at runtime." .
+    tu:isOccupied [
+        inf:accessMode      "read" ;
+        inf:hasMQTTTopic    "TransferUnit1/LightBarrier/front/occupied" ;
+        inf:hasMQTTBrokerIP "127.0.0.1" ;
+    ] ;
+    rdfs:comment "Front light barrier of TransferUnit1." .
 
 tui:LightBarrier1_back rdf:type owl:NamedIndividual ,
         tu:LightBarrier ;
-    rdfs:comment "Back light barrier of TransferUnit1; exposes one read-only tu:LightBarrierProperty at runtime." .
+    tu:isOccupied [
+        inf:accessMode      "read" ;
+        inf:hasMQTTTopic    "TransferUnit1/LightBarrier/back/occupied" ;
+        inf:hasMQTTBrokerIP "127.0.0.1" ;
+    ] ;
+    rdfs:comment "Back light barrier of TransferUnit1." .
