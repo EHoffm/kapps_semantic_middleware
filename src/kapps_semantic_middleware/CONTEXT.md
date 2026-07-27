@@ -21,7 +21,22 @@ access, used directly where `kapps_ogm` has no equivalent yet, e.g. instance dis
 A distributed runtime entity wrapped by a single middleware instance (e.g. a door
 controller, a screwing-resource controller, a planning service). Typed via a
 domain-specific subclass of `svc:Service` that must pre-exist in the ontology.
-_Avoid_: Middleware instance (that's the Python object; Service is its graph representation), Resource (Service *wraps* a Resource, it isn't one).
+There is **one Service per middleware instance, not per Resource**: several instances may be bound to
+one Resource, each owning its own Service node, address and heartbeat, all linked by
+`svc:isServiceOf` (ADR 0022). Discovery may therefore return several Services for one Resource.
+_Avoid_: Middleware instance (that's the Python object; Service is its graph representation), Resource (Service *wraps* a Resource, it isn't one); "the service of a resource" (there may be several).
+
+**Flavour** (of a resource-mode instance):
+A configuration of the one library, not a distinct class — resource mode is a **library woven into a
+domain expert's Python package**, never a monolithic server. **Controller**: connectors wired
+bidirectionally; drives the device. **Monitor**: connectors wired `TO_PERSISTENCE`; reads live
+values, structurally unable to drive the device; registers no Workflows, so it has no Capability and
+is never resolved for an Operation (ADR 0002), while staying discoverable with honest liveness.
+**Inspector**: `autoregister_connectors=False`; nothing connected, structure and graph content only.
+Recognition and the **Projection** run identically in all three, so connection metadata never leaks
+regardless of flavour (ADR 0020, ADR 0022).
+_Avoid_: Read-only mode (a **Mode** is `resource`/`server`/`watchdog` — a flavour is a configuration
+*within* resource mode); Monitor mode.
 
 **Workflow**:
 An invokable function exposed by a Service, registered with `@mw.workflow(...)`. Realizes

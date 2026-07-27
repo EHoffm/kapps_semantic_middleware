@@ -20,6 +20,25 @@ class MQTTConnector(SemanticConnector):
 ASK { tu:hasConveyorSpeed rdfs:subPropertyOf* inf:isInterfaceAccessibleMQTTParameter }
 ```
 
+Whether recognised parameters are actually *wired* is controlled at construction by
+**`autoregister_connectors`**, and how they are wired by **`connector_sync_direction`**, which is
+handed straight to `aas_middleware`'s `add_synced_connector`:
+
+```python
+SemanticMiddleware(mode="resource", resource_iri=tui.TransferUnit1, …,
+                   autoregister_connectors=True,
+                   connector_sync_direction=SyncDirection.TO_PERSISTENCE)
+```
+
+| flavour | setting | behaviour |
+|---|---|---|
+| controller | `True`, `BIDIRECTIONAL` (default) | reads live values and drives the device |
+| monitor | `True`, `TO_PERSISTENCE` | reads live values, can never drive the device |
+| inspector | `False` | nothing connected; structure and graph content only |
+
+**Recognition and the projection run in all three.** The flag gates wiring, never recognition — see
+below.
+
 ## Why
 
 ### The blanknode has no class to match on
@@ -84,6 +103,32 @@ Blanket `strict=True` on `NodeValidator` is **not** available as a substitute: t
 upstream instance data puts `rdfs:comment` on its parameter blanknodes, which no restriction
 declares, so strict validation fails on ground truth.
 
+### The wiring flag must not gate recognition
+
+Two middleware instances may be bound to the same graph entity — a controller that drives it and a
+read-only monitor beside it. The monitor must not open a write path to the device, hence
+`autoregister_connectors` / `connector_sync_direction`.
+
+It is tempting to implement "no connectors" as "no registry". That would be a **security hole**: with
+nothing registered, no property is recognised as a parameter, so by the rule above the blanknode
+becomes ordinary data and is **shown** — and the read-only monitor would serve `inf:hasMQTTTopic` and
+`inf:hasMQTTBrokerIP` northbound, which is exactly the bypass ADR 0018/0019 exist to prevent. The
+least-privileged instance would leak the most.
+
+So the registry is **always** built and recognition **always** runs. The flag skips `connect()` and
+the sync registration only. The projection's behaviour is identical in all three flavours, and the
+security property is independent of how the instance is configured.
+
+### Direction is the framework's concept, not ours
+
+`aas_middleware` is production-ready and already models this: `add_synced_connector` takes
+`sync_role` (`GROUND_TRUTH`/`READ_ONLY`/`READ_WRITE`/`WRITE_ONLY`) and `sync_direction`
+(`TO_PERSISTENCE`/`FROM_PERSISTENCE`/`BIDIRECTIONAL`), and `lifespan` connects everything in the
+connection registry. A monitor is `TO_PERSISTENCE` — the device's values flow into persistence and
+nothing flows back out to the device. Inventing a parallel read-only notion would duplicate a
+mechanism that already works, so we pass the framework's vocabulary through rather than wrap it.
+Core paradigms change only where the semantic layer genuinely needs something the framework lacks.
+
 ## Consequences
 
 - ADR 0016's "registry keyed on `rdf:type`" is amended to "keyed on the interface property,
@@ -93,6 +138,10 @@ declares, so strict validation fails on ground truth.
 - A domain expert can register a custom connector after init by supplying the class and its ontology
   terms — the row-3 auto-provision case (#35) becomes a matter of *when* registration happens, not
   whether it is possible.
+- `autoregister_connectors` and `connector_sync_direction` are constructor parameters of resource
+  mode, defaulting to `True` / `BIDIRECTIONAL` so existing scenarios are unaffected.
+- Controller, monitor and inspector are **configurations of one library**, not three classes. Running
+  two instances against one resource also needs distinct service identities — ADR 0022.
 - The consolidation (#39) must keep the interface-property hierarchy under the `inf:` name and must
   declare every connection-metadata property in the parameter property's range restriction, or the
   metadata is dropped before any connector sees it.
