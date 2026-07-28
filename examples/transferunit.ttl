@@ -8,187 +8,20 @@
 @prefix tu:   <https://www.sfb1574.kit.edu/ontologies/TransferUnit#> .
 @prefix tui:  <https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#> .
 
-#################################################################
-# Self-contained ground-truth ontology for Scenario 3 (TransferUnit) ONLY.
-#
-# The scenario3 integration test (map #24): a mock PLC -> middleware -> controller
-# loop over a TransferUnit with two conveyor belts and two light barriers. The
-# conveyor speeds are settable control variables; the light barriers are read-only
-# occupancy sensors. All four are reached over MQTT.
-#
-# SELF-CONTAINED BY DESIGN. seed.py calls clear_repository() before every seed and
-# loads only the scenario's own Turtle, and GraphDB does not dereference
-# owl:imports. So this file declares every term the scenario needs and imports
-# nothing — which is also what keeps each parameter property to exactly ONE
-# rdfs:range (see the WARNING below).
-#################################################################
-# CHANGELOG (root ADR 0001 — detailed changelog comment blocks)
-#
-# 2026-07-28  #53  THE INTERFACE TBox GETS ITS OWN RANGES; THE DOMAIN TBox GETS
-#   SMALLER. Three changes, from ADR 0025/0026 (grilled under #52):
-#
-#   - inf:isInterfaceAccessibleParameter and inf:isInterfaceAccessibleMQTTParameter
-#     GAINED rdfs:range restrictions. The 2026-07-27 correction below declared the
-#     MQTT terms "VOCABULARY ONLY ... they must never enter a range restriction",
-#     on the reasoning that a restriction would materialize a broker address into
-#     the served datamodel. That reasoning assumed one shape per property. ADR 0026
-#     replaces it with MERGE DEPTH: a user-facing view merges only up to the generic
-#     interface property (value, unit, access mode), a wiring view also merges the
-#     protocol subproperty (topic, set topic, broker). The broker is still physically
-#     absent northbound — the restriction is still the projection — but the metadata
-#     is now DECLARED, which is what lets provisioning write it through the OGM at
-#     all. Without this, no OGM write path can put a topic on a parameter: it is
-#     dropped at materialization, silently, with one warning.
-#     Requires SAWeindel/kapps_ogm#7 (merge anonymous ranges across subPropertyOf*)
-#     to take effect; this file is correct ahead of it, the merged shape is simply
-#     not computed yet.
-#   - inf:accessMode MOVED OUT of both parameter restrictions onto
-#     inf:isInterfaceAccessibleParameter. It is generic interface content — every
-#     interface-accessible parameter has an access mode — so restating it per
-#     parameter made twenty domain engineers carry a fact that is not theirs.
-#   - EVERY owl:someValuesFrom BECAME owl:allValuesFrom. someValuesFrom sets
-#     min_count=1 in kapps_ogm, which NodeValidator downgrades to a warning "per the
-#     OWA" while to_pydantic_field turns it into a required field. Since the
-#     2026-07-27 locator rewrite removed every inf:hasValue literal, materializing a
-#     seeded belt raises `ValidationError: inf-hasValue Field required` — the file
-#     and the code disagreed. Under the OWA absence is incompleteness, never
-#     falsity; allValuesFrom types without requiring (ADR 0025), and requiredness
-#     belongs to SHACL sh:minCount (SAWeindel/kapps_ogm#3, #11).
-#     Verified offline against the pinned pydantic; not reproduced against a live
-#     store — GraphDB returned 401 during the session.
-#
-#   The rdfs:subPropertyOf markers stay, and are now documented as OPTIONAL.
-#   Instance data is unchanged: parameter nodes keep their metadata and still carry
-#   no inf:hasValue literals (ADR 0024).
-#
-# 2026-07-23  #25  DRAFT — initial authoring. SUPERSEDED, see below.
-#
-# 2026-07-27  #25  REWRITTEN against ADR 0015-0024. The 2026-07-23 draft modelled
-#   states as svc:StateProperty subclasses with their own Capability classes and
-#   dropped the parameter blank nodes entirely. Every one of those decisions has
-#   since been reversed:
-#
-#   - REMOVED tu:ConveyorSpeedProperty / tu:LightBarrierProperty
-#     (svc:StateProperty subclasses). ADR 0015 retires StateProperty into
-#     inf:InterfaceAccessibleParameter: a state IS a protocol-interface parameter,
-#     one node carrying value + unit + the metadata a connector needs to reach the
-#     device. Settability is a FACET (inf:accessMode), not a subclass — ADR 0015
-#     supersedes ADR 0013 on this point.
-#   - REMOVED tu:ConveyorSpeedCapability / tu:LightBarrierCapability. States have
-#     no capabilities; the authoritative sfb1574 ontology has none either, and the
-#     draft carried two "#TODO ... this is wrong modeling, delete" markers saying
-#     so. A light barrier does not have a "light-barrier capability".
-#   - RESTORED the parameter blank nodes the draft dropped, but WITHOUT values —
-#     see the locator note below.
-#   - ADDED the inf: interface-property hierarchy and the MQTT connection metadata
-#     (ADR 0016), which is what lets a connector register itself from the graph
-#     (ADR 0020/0023).
-#   - ADDED tu:hasConveyorSpeed / tu:isOccupied as parameter properties.
-#
-# 2026-07-27  #25  CORRECTED — the TBoxes must not be connected.
-#   The first rewrite put the whole MQTT contract (topic, set topic, broker) into
-#   each parameter property's rdfs:range. That was wrong on two counts, and
-#   re-reading the authoritative sfb1574 ontology settles both:
-#     * It duplicates protocol TBox into the domain ontology, so every domain
-#       engineer would restate the MQTT contract on every parameter.
-#     * It would MATERIALIZE the broker address into the served datamodel, which
-#       is precisely the bypass the IT-OT boundary exists to prevent.
-#   Upstream declares only inf:hasValue + tu:hasUnit, comments the property
-#   "MQTT-accessible speed attribute of a conveyor belt (value and unit)", and puts
-#   inf:hasMQTTTopic in NO restriction anywhere. The domain TBox carries WHAT the
-#   parameter is and a MARKER that it is interface-accessible; the connector's
-#   TBox lives in inf:; the two are joined at RUNTIME by the middleware when the
-#   resource is instantiated and its connectors registered.
-#   Consequences: connection metadata never materializes, so ADR 0019's northbound
-#   projection is unnecessary (retired, with issue #51). inf:accessMode IS declared
-#   in the restrictions — it is northbound content, telling a peer whether it may
-#   write — and like the connector marker it is OPTIONAL: a domain ontology may
-#   omit it and the middleware may add it to the ABox at runtime.
-#   Also corrected: an earlier warning here claimed a range on an inf: superproperty
-#   would give every subproperty two ranges. It would not — RDFS does not entail a
-#   range triple for a subproperty, and neither GraphDB repository materializes one
-#   (measured: 0 inherited ranges with include_implicit=True on both).
-#
-#   NAMESPACE (provisional). The inf: terms are authored under the existing
-#   CrcInterfaces IRI, which already defines hasValue, hasMQTTTopic,
-#   hasMQTTBrokerIP and the isInterfaceAccessible* hierarchy — so the TransferUnit
-#   stays vocabulary-compatible with the minimal example shared across
-#   graph_db_interface and kapps_ogm. CrcInterfaces is deprecated; the consolidation
-#   capstone (#39) re-homes these terms under the inf: name it mints, which is one
-#   constant in vocabulary.py plus this file (ADR 0021).
-#
-#   NO VALUES — this scenario is a LOCATOR (ADR 0024). The graph records WHERE a
-#   value lives (unit, access mode, topic, broker) and never the value itself; the
-#   live value exists only in the datamodel and over REST. The inf:hasValue
-#   literals in the upstream example were test scaffolding from before the
-#   middleware existed. A parameter that has not been observed yet materializes as
-#   an empty list, which NodeValidator accepts under the Open World Assumption
-#   (min_count shortfalls are warnings, not errors — verified in #29). A domain
-#   whose data changes slowly may instead COMMIT its values; the middleware is
-#   agnostic between the two patterns (ADR 0024).
-#
-#   NO SHACL shapes. Deferred with the rest of SHACL Interop; the setter payload
-#   shape (e.g. speed within [0, maxSpeed]) is explicitly out of map #24's scope.
-#################################################################
-
-#################################################################
-# Minimal Core class stubs referenced by the scenario (kept local for
-# self-containment, matching scenarios 1 and 2).
-#################################################################
 cfc:Resource rdf:type owl:Class .
 cfc:Capability rdf:type owl:Class .
 cfc:EquippedCapability rdf:type owl:Class ; rdfs:subClassOf cfc:Capability .
 cfc:Task rdf:type owl:Class .
 cfc:Operation rdf:type owl:Class ; rdfs:subClassOf cfc:Task .
 
-# The Operation->Capability link is declared so create_operation persists an Operation
-# through the OGM's validated write path (ADR 0008) rather than raw triples.
 cfc:implementsCapability rdf:type owl:ObjectProperty ;
     rdfs:domain cfc:Operation ;
     rdfs:range cfc:Capability ;
     rdfs:label "implements capability" .
 
-#################################################################
-# Interface-parameter vocabulary (inf:, provisional — see NAMESPACE above)
-#
-# *** THE TWO TBoxes STAY SEPARATE, AND ARE JOINED AT RUNTIME. ***
-# The domain ontology says only TWO things about a parameter:
-#   1. WHAT IT IS  — its rdfs:range: a value, a unit. Domain content.
-#   2. THAT IT IS INTERFACE-ACCESSIBLE — rdfs:subPropertyOf a protocol interface
-#      property. A marker, and an OPTIONAL one (ADR 0026).
-# It still says NOTHING about what MQTT connection metadata looks like. That TBox
-# lives here in the connector's own ontology (inf:), on the interface properties
-# themselves, and the two are joined at RUNTIME by the middleware — by walking
-# rdfs:subPropertyOf* and merging the anonymous ranges it finds, which is the
-# entailment the reasoner does not materialize (rdfs7 then rdfs3 put the value node
-# in BOTH range classes, hence in their intersection). Not by inheritance: RDFS
-# entails no range triple for a subproperty, and GraphDB materializes none.
-#
-# This keeps the authoritative sfb1574 shape intact — tu:hasConveyorSpeed's own
-# restriction still declares inf:hasValue + tu:hasUnit and nothing else — while
-# giving the connector's contract a home that twenty domain engineers never have to
-# restate.
-#
-# THE PROJECTION IS MERGE DEPTH (ADR 0026). A consumer merging only up to
-# inf:isInterfaceAccessibleParameter gets value, unit and access mode; one merging
-# the protocol subproperty as well gets the topic and broker. So the northbound
-# datamodel still physically cannot carry a broker address, and no filtering step
-# is needed to remove one — the restriction IS the projection (ADR 0019 stays
-# retired, #51 stays closed). The ordering below is therefore load-bearing:
-# northbound-safe content on the parent property, connection details on the
-# protocol subproperty, never the other way round.
-#
-# ALSO NOTE (ADR 0025): every restriction here uses owl:allValuesFrom, not
-# owl:someValuesFrom. Under the Open World Assumption an existential says a value
-# exists in the world, not that the triple is in this graph — and kapps_ogm turns
-# someValuesFrom into a REQUIRED pydantic field, which is a closed-world reading of
-# an open-world axiom. allValuesFrom types the property without requiring it.
-# Requiredness belongs to SHACL sh:minCount (SAWeindel/kapps_ogm#3).
-#################################################################
-
 inf:isInterfaceAccessibleParameter rdf:type owl:ObjectProperty ;
     rdfs:label "is interface-accessible parameter" ;
-    rdfs:comment "Marks a property whose value is reachable over some protocol interface. The generic term the middleware core is allowed to know; the protocol-specific subproperties below are known only to their connectors (ADR 0021). Its range carries the interface content that IS safe to serve northbound — the access mode and nothing else." ;
+    rdfs:comment "Marks a property whose value is reachable over some protocol interface. Its range carries the interface content that is safe to serve northbound: the access mode and nothing else." ;
     rdfs:range [ rdf:type owl:Class ;
         owl:intersectionOf (
             [ rdf:type owl:Restriction ; owl:onProperty inf:accessMode ; owl:allValuesFrom xsd:string ]
@@ -197,7 +30,7 @@ inf:isInterfaceAccessibleParameter rdf:type owl:ObjectProperty ;
 inf:isInterfaceAccessibleMQTTParameter rdf:type owl:ObjectProperty ;
     rdfs:subPropertyOf inf:isInterfaceAccessibleParameter ;
     rdfs:label "is interface-accessible MQTT parameter" ;
-    rdfs:comment "Marks a parameter reached over MQTT. A binding descriptor registers itself against this property and matches candidates by rdfs:subPropertyOf* (ADR 0023). Its range carries the MQTT connection contract — SOUTHBOUND ONLY: a consumer merging only up to the parent property never sees it (ADR 0026)." ;
+    rdfs:comment "Marks a parameter reached over MQTT. Its range carries the MQTT connection contract, which is southbound only: a consumer merging only up to the parent property never sees it." ;
     rdfs:range [ rdf:type owl:Class ;
         owl:intersectionOf (
             [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTTopic    ; owl:allValuesFrom xsd:string ]
@@ -205,27 +38,13 @@ inf:isInterfaceAccessibleMQTTParameter rdf:type owl:ObjectProperty ;
             [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTSetTopic ; owl:allValuesFrom xsd:string ]
         ) ] .
 
-# --- the metadata a parameter node carries -------------------------------------
-# No rdfs:domain on any of these: they appear only inside range restrictions, from
-# which kapps_ogm derives their types directly (owl:allValuesFrom). Giving them a
-# domain would make them separately specifiable and then their missing global range
-# would raise.
-
 inf:hasValue rdf:type owl:DatatypeProperty ;
     rdfs:label "has value" ;
-    rdfs:comment "The parameter's value. Deliberately NOT typed globally — each parameter's restriction declares its own datatype (float for a speed, boolean for an occupancy). Under the locator pattern this is never authored in instance data (ADR 0024)." .
+    rdfs:comment "The parameter's value. Not typed globally: each parameter's restriction declares its own datatype. Under the locator pattern it is never authored in instance data." .
 
 inf:accessMode rdf:type owl:DatatypeProperty ;
     rdfs:label "access mode" ;
-    rdfs:comment "The settability facet: \"read\" or \"readwrite\". Not a subclass — ADR 0015 supersedes ADR 0013 here. Unlike a topic or a broker address this IS northbound content — it tells a peer whether it may write — so it is declared on inf:isInterfaceAccessibleParameter, the generic interface property, and reaches every parameter of every protocol without any domain ontology restating it. An OPTIONAL marker: a domain ontology that omits the interface marker entirely is still valid, and the interface may be resolved from ABox evidence or from embedding code at runtime (ADR 0026)." .
-
-# --- MQTT connection metadata: SOUTHBOUND ONLY --------------------------------
-# Declared on inf:isInterfaceAccessibleMQTTParameter's range, so a binding
-# descriptor gets them in its wiring view (ADR 0023) and provisioning can WRITE
-# them through the OGM. They stay out of a user-facing view because that view
-# merges only up to the parent property (ADR 0026) — which is what keeps a broker
-# address away from every peer that GETs the resource. Putting any of them on the
-# parent property would leak it.
+    rdfs:comment "The settability facet, \"read\" or \"readwrite\". Northbound content: it tells a peer whether it may write." .
 
 inf:hasMQTTTopic rdf:type owl:DatatypeProperty ;
     rdfs:label "has MQTT topic" ;
@@ -233,15 +52,11 @@ inf:hasMQTTTopic rdf:type owl:DatatypeProperty ;
 
 inf:hasMQTTSetTopic rdf:type owl:DatatypeProperty ;
     rdfs:label "has MQTT set topic" ;
-    rdfs:comment "The topic a setpoint is published to. Present only on a readwrite parameter. A separate topic is required because MqttClientConnector publishes to the topic it subscribes to, so read and write need two connector instances against one binding (ADR 0023)." .
+    rdfs:comment "The topic a setpoint is published to. Present only on a readwrite parameter." .
 
 inf:hasMQTTBrokerIP rdf:type owl:DatatypeProperty ;
     rdfs:label "has MQTT broker IP" ;
     rdfs:comment "Address of the broker carrying this parameter's topics." .
-
-#################################################################
-# Resource types (topology carried over from the sfb1574 `tu:` example)
-#################################################################
 
 tu:TransferUnit rdf:type owl:Class ;
     rdfs:subClassOf cfc:Resource ;
@@ -258,14 +73,6 @@ tu:LightBarrier rdf:type owl:Class ;
     rdfs:label "Light Barrier" ;
     rdfs:comment "A photoelectric occupancy sensor of a TransferUnit. Its blocked/clear state is read-only." .
 
-#################################################################
-# Composition object properties (carried over from the sfb1574 `tu:` example)
-#
-# A TransferUnit is a unit, and a belt a part of it, because the middleware's user
-# view is ROOTED at the unit and reaches the belt — not because of any part-of
-# semantics here. Rootedness is a property of the view (ADR 0018).
-#################################################################
-
 tu:hasConveyorBelt rdf:type owl:ObjectProperty ;
     rdfs:label "hasConveyorBelt" ;
     rdfs:comment "Relates a TransferUnit to a ConveyorBelt component it is composed of." ;
@@ -277,31 +84,6 @@ tu:hasLightBarrier rdf:type owl:ObjectProperty ;
     rdfs:comment "Relates a TransferUnit to a LightBarrier component it is composed of." ;
     rdfs:domain tu:TransferUnit ;
     rdfs:range tu:LightBarrier .
-
-#################################################################
-# Parameter properties
-#
-# Each says exactly two things: WHAT IT IS (the range — PURE DOMAIN CONTENT) and
-# THAT IT IS MQTT-ACCESSIBLE (the subproperty marker). The ranges now mirror the
-# authoritative sfb1574 ontology exactly: value and unit for a speed, value alone
-# for an occupancy. Nothing else.
-#
-# NO INTERFACE CONTENT HERE AT ALL — not connection metadata, and no longer
-# inf:accessMode either. Both arrive from the interface properties above, merged at
-# runtime (ADR 0026). A domain engineer writes domain facts; the access mode reaches
-# every parameter of every protocol without anyone restating it.
-#
-# THE SUBPROPERTY MARKER IS OPTIONAL. It is stated here because scenario 3's
-# hardware has a fixed protocol, which is exactly the case it is for. Own-built
-# hardware whose protocol is not known at deployment time, or two machines of one
-# class on different protocols, simply omit it: the interface is then resolved from
-# the instance's own metadata or from embedding code (ADR 0026).
-#
-# No owl:cardinality and no owl:someValuesFrom on inf:hasValue: under the locator
-# pattern it is legitimately absent until the device publishes. NodeValidator treats
-# a min-count shortfall as warn-only under the OWA — but the generated pydantic
-# field does NOT, which is why the datatype is carried by allValuesFrom (ADR 0025).
-#################################################################
 
 tu:hasConveyorSpeed rdf:type owl:ObjectProperty ;
     rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter ;
@@ -317,7 +99,7 @@ tu:hasConveyorSpeed rdf:type owl:ObjectProperty ;
 tu:isOccupied rdf:type owl:ObjectProperty ;
     rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter ;
     rdfs:label "is occupied" ;
-    rdfs:comment "MQTT-accessible occupancy attribute of a light barrier (value only — an occupancy has no unit). Read-only: its ABox carries inf:accessMode \"read\" and no set topic, so no write registration is ever emitted (ADR 0023)." ;
+    rdfs:comment "MQTT-accessible occupancy attribute of a light barrier (value only; an occupancy has no unit). Read-only: its ABox carries inf:accessMode \"read\" and no set topic." ;
     rdfs:domain tu:LightBarrier ;
     rdfs:range [ rdf:type owl:Class ;
         owl:intersectionOf (
@@ -326,43 +108,12 @@ tu:isOccupied rdf:type owl:ObjectProperty ;
 
 tu:hasUnit rdf:type owl:DatatypeProperty ;
     rdfs:label "has unit" ;
-    rdfs:comment "The unit of a parameter's value. A static facet: cached by the binding at wiring time and reassembled into the payload on every inbound message, because the write path replaces the whole parameter node (ADR 0023)." .
-
-#################################################################
-# Service type (one Service wraps the whole TransferUnit)
-#
-# One Service per MIDDLEWARE INSTANCE, not per resource — several instances may be
-# bound to one TransferUnit, each owning its own Service node, address and
-# heartbeat (ADR 0022). The Service, its endpoint and its heartbeat are minted at
-# runtime by registration, never authored here (ADR 0003).
-#################################################################
+    rdfs:comment "The unit of a parameter's value." .
 
 tu:TransferUnitService rdf:type owl:Class ;
     rdfs:subClassOf svc:Service ;
     rdfs:label "Transfer Unit Service" ;
     rdfs:comment "The middleware Service wrapping a TransferUnit, exposing its belts' and barriers' parameters over REST and registering its reachability in the graph." .
-
-#################################################################
-# Instance data — TransferUnit1 (two conveyor belts + two light barriers)
-#
-# Topic scheme (instance convention, not baked into the classes — ADR 0016):
-#   TransferUnit<n>/<component>/<position>/<param>, setpoint appends _set
-#
-# The MockTransferUnit publishes 4 topics and subscribes to 2. Broker 127.0.0.1,
-# no auth — a local test broker; a real/deployed broker with auth and TLS is out
-# of scope for map #24.
-#
-# LIFECYCLE. In production these parameter nodes are written by the MIDDLEWARE
-# when the resource is first set up: that is the moment the INF connection
-# metadata is joined to the domain parameter, and from then on the middleware
-# works ABox-only. Seeding them here stands in for "this TransferUnit was
-# instantiated by a previous run", which is what lets the scenario exercise the
-# connector self-registration path from a cold start.
-#
-# Note what these nodes do and do not carry: the MQTT metadata and the access-mode
-# marker, but NO inf:hasValue — this scenario is a locator (ADR 0024). They say
-# where each value lives, not what it is.
-#################################################################
 
 tui:TransferUnit1 rdf:type owl:NamedIndividual ,
         tu:TransferUnit ;
@@ -379,7 +130,7 @@ tui:ConveyorBelt1_left rdf:type owl:NamedIndividual ,
         inf:accessMode      "readwrite" ;
         inf:hasMQTTTopic    "TransferUnit1/ConveyorBelt/left/speed" ;
         inf:hasMQTTSetTopic "TransferUnit1/ConveyorBelt/left/speed_set" ;
-        inf:hasMQTTBrokerIP "127.0.0.1" ;
+        inf:hasMQTTBrokerIP "127.0.0.1"
     ] ;
     rdfs:comment "Left conveyor belt of TransferUnit1." .
 
@@ -390,7 +141,7 @@ tui:ConveyorBelt1_right rdf:type owl:NamedIndividual ,
         inf:accessMode      "readwrite" ;
         inf:hasMQTTTopic    "TransferUnit1/ConveyorBelt/right/speed" ;
         inf:hasMQTTSetTopic "TransferUnit1/ConveyorBelt/right/speed_set" ;
-        inf:hasMQTTBrokerIP "127.0.0.1" ;
+        inf:hasMQTTBrokerIP "127.0.0.1"
     ] ;
     rdfs:comment "Right conveyor belt of TransferUnit1." .
 
@@ -399,7 +150,7 @@ tui:LightBarrier1_front rdf:type owl:NamedIndividual ,
     tu:isOccupied [
         inf:accessMode      "read" ;
         inf:hasMQTTTopic    "TransferUnit1/LightBarrier/front/occupied" ;
-        inf:hasMQTTBrokerIP "127.0.0.1" ;
+        inf:hasMQTTBrokerIP "127.0.0.1"
     ] ;
     rdfs:comment "Front light barrier of TransferUnit1." .
 
@@ -408,6 +159,6 @@ tui:LightBarrier1_back rdf:type owl:NamedIndividual ,
     tu:isOccupied [
         inf:accessMode      "read" ;
         inf:hasMQTTTopic    "TransferUnit1/LightBarrier/back/occupied" ;
-        inf:hasMQTTBrokerIP "127.0.0.1" ;
+        inf:hasMQTTBrokerIP "127.0.0.1"
     ] ;
     rdfs:comment "Back light barrier of TransferUnit1." .
