@@ -6,18 +6,6 @@
 @prefix svc:  <https://w3id.org/circularfactory/Service#> .
 @prefix inf:  <https://www.sfb1574.kit.edu/ontologies/CrcInterfaces#> .
 @prefix tu:   <https://www.sfb1574.kit.edu/ontologies/TransferUnit#> .
-@prefix tui:  <https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#> .
-
-cfc:Resource rdf:type owl:Class .
-cfc:Capability rdf:type owl:Class .
-cfc:EquippedCapability rdf:type owl:Class ; rdfs:subClassOf cfc:Capability .
-cfc:Task rdf:type owl:Class .
-cfc:Operation rdf:type owl:Class ; rdfs:subClassOf cfc:Task .
-
-cfc:implementsCapability rdf:type owl:ObjectProperty ;
-    rdfs:domain cfc:Operation ;
-    rdfs:range cfc:Capability ;
-    rdfs:label "implements capability" .
 
 inf:isInterfaceAccessibleParameter rdf:type owl:ObjectProperty ;
     rdfs:label "is interface-accessible parameter" ;
@@ -114,51 +102,3 @@ tu:TransferUnitService rdf:type owl:Class ;
     rdfs:subClassOf svc:Service ;
     rdfs:label "Transfer Unit Service" ;
     rdfs:comment "The middleware Service wrapping a TransferUnit, exposing its belts' and barriers' parameters over REST and registering its reachability in the graph." .
-
-tui:TransferUnit1 rdf:type owl:NamedIndividual ,
-        tu:TransferUnit ;
-    tu:hasConveyorBelt tui:ConveyorBelt1_left ,
-        tui:ConveyorBelt1_right ;
-    tu:hasLightBarrier tui:LightBarrier1_front ,
-        tui:LightBarrier1_back ;
-    rdfs:comment "Example transfer unit with two conveyor belts and two light barriers (scenario3 integration test)." .
-
-tui:ConveyorBelt1_left rdf:type owl:NamedIndividual ,
-        tu:ConveyorBelt ;
-    tu:hasConveyorSpeed [
-        tu:hasUnit          "m/s" ;
-        inf:accessMode      "readwrite" ;
-        inf:hasMQTTTopic    "TransferUnit1/ConveyorBelt/left/speed" ;
-        inf:hasMQTTSetTopic "TransferUnit1/ConveyorBelt/left/speed_set" ;
-        inf:hasMQTTBrokerIP "127.0.0.1"
-    ] ;
-    rdfs:comment "Left conveyor belt of TransferUnit1." .
-
-tui:ConveyorBelt1_right rdf:type owl:NamedIndividual ,
-        tu:ConveyorBelt ;
-    tu:hasConveyorSpeed [
-        tu:hasUnit          "m/s" ;
-        inf:accessMode      "readwrite" ;
-        inf:hasMQTTTopic    "TransferUnit1/ConveyorBelt/right/speed" ;
-        inf:hasMQTTSetTopic "TransferUnit1/ConveyorBelt/right/speed_set" ;
-        inf:hasMQTTBrokerIP "127.0.0.1"
-    ] ;
-    rdfs:comment "Right conveyor belt of TransferUnit1." .
-
-tui:LightBarrier1_front rdf:type owl:NamedIndividual ,
-        tu:LightBarrier ;
-    tu:isOccupied [
-        inf:accessMode      "read" ;
-        inf:hasMQTTTopic    "TransferUnit1/LightBarrier/front/occupied" ;
-        inf:hasMQTTBrokerIP "127.0.0.1"
-    ] ;
-    rdfs:comment "Front light barrier of TransferUnit1." .
-
-tui:LightBarrier1_back rdf:type owl:NamedIndividual ,
-        tu:LightBarrier ;
-    tu:isOccupied [
-        inf:accessMode      "read" ;
-        inf:hasMQTTTopic    "TransferUnit1/LightBarrier/back/occupied" ;
-        inf:hasMQTTBrokerIP "127.0.0.1"
-    ] ;
-    rdfs:comment "Back light barrier of TransferUnit1." .

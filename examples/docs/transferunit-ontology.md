@@ -1,7 +1,31 @@
 # The scenario-3 TransferUnit ontology
 
 Design notes and change history for `examples/transferunit.ttl`. The Turtle file itself is **plain RDF
-with no comment blocks** — everything that explains *why* it looks the way it does lives here.
+with no comment blocks, and classes only** — everything that explains *why* it looks the way it does
+lives here, and its instances are created through the OGM by `seed.seed_scenario3`.
+
+## How scenario 3 is seeded
+
+Three layers, deliberately separated:
+
+| Layer | Where it lives | Why |
+|---|---|---|
+| Published / general ontologies — Core, `svc:`, `mes:` | **one named graph per ontology** (`…/Core`, `…/Service`, `…/MES`) | needed by every scenario and never changed during a run. `clear_repository` clears only the default graph, so a seed wipes the scenario's own data and leaves these standing. GraphDB reasons across all graphs, so `tu:TransferUnit rdfs:subClassOf cfc:Resource` still resolves |
+| TransferUnit **classes** | `examples/transferunit.ttl`, default graph | the domain TBox: the `inf:` interface vocabulary and the `tu:` terms |
+| TransferUnit **instances** | created by `seed.seed_scenario3` via `ogm.create` | the seed then exercises the same validated write path a running middleware uses (root ADR 0008) instead of asserting Turtle behind the OGM's back |
+
+Core is **vendored** at `src/kapps_semantic_middleware/ontology/core.ttl` — a verbatim copy of the
+published 0.9.0 release — rather than fetched at seed time, so seeding stays reproducible offline per
+examples ADR 0001. It is imported and specialized, never modified (ADR 0012). The local `cfc:` class
+stubs the Turtle used to carry are gone: Core now loads in full.
+
+**One documented exception.** `ogm.create` cannot write the MQTT connection metadata, because the write
+path serializes only what the range restriction declares and silently drops the rest (#52). So
+`_attach_connection_metadata` writes it with a targeted SPARQL `INSERT … WHERE`, matching the parameter
+node from its resource — an explicit exception to root ADR 0008, to be deleted when the provisioning
+flow (#54) lands on top of `SAWeindel/kapps_ogm#6`/`#7`. It matches by pattern rather than by name
+because the parameter node is anonymous and the OGM does not report the identifier it minted, which is
+the limitation `kapps_ogm#6` removes.
 
 ## What it is
 
@@ -18,13 +42,11 @@ the scenario needs and imports nothing.
 
 | Block | Contents |
 |---|---|
-| Core stubs | `cfc:Resource`, `Capability`, `EquippedCapability`, `Task`, `Operation`, `implementsCapability` — kept local for self-containment, matching scenarios 1 and 2. The Operation→Capability link is declared so `create_operation` persists through the OGM's validated write path (root ADR 0008) rather than raw triples. |
 | Interface vocabulary (`inf:`) | The two interface marker properties with their range restrictions, plus the parameter-node metadata terms. |
 | Resource types (`tu:`) | `TransferUnit`, `ConveyorBelt`, `LightBarrier` — topology carried over from the sfb1574 `tu:` example. |
 | Composition properties | `hasConveyorBelt`, `hasLightBarrier`. |
 | Parameter properties | `hasConveyorSpeed`, `isOccupied`, `hasUnit`. |
 | Service type | `tu:TransferUnitService`. |
-| Instance data | `TransferUnit1` with two belts and two barriers. |
 
 ## The two TBoxes stay separate and are joined at runtime
 
@@ -146,6 +168,14 @@ From ADR 0025/0026, grilled under #52.
 The `rdfs:subPropertyOf` markers stay and are now documented as optional. Instance data is unchanged:
 parameter nodes keep their metadata and still carry no `inf:hasValue` literals.
 
+### 2026-07-28 — split into classes, instances and shared modules
+
+The file became **classes only**. Its instance data moved into `seed.seed_scenario3`, which creates the
+TransferUnit, two belts and two barriers through `ogm.create`; the local `cfc:` stubs were deleted in
+favour of the full published Core; and Core, `svc:` and `mes:` moved into one named graph each. See
+*How scenario 3 is seeded* above. Covered by `tests/test_scenario3_seed_integration.py`, which is the
+first thing to exercise this ontology against a live store.
+
 ### 2026-07-28 — comment blocks removed
 
 All `#` comment blocks were stripped from the Turtle and moved into this document. The file is now
@@ -191,10 +221,23 @@ and dropped the parameter blank nodes entirely. Every one of those decisions was
 
 Superseded by the rewrite above.
 
-## Known problem
+## Resolved: why this file could not be loaded (#55)
 
-**#55 — the file cannot be loaded into GraphDB.** The TBox imports; the instance data returns
-`500 - Unexpected exception`, through both the RDF4J import endpoint and a SPARQL `INSERT DATA`. It
-parses cleanly in rdflib (158 triples), and the failure predates the 2026-07-28 corrections. Until it
-is resolved, scenario 3 has never actually been seeded and nothing in this file has been exercised
-against a live store.
+For a while every write of a `tu:` predicate returned `500 - Unexpected exception`, through the import
+endpoint and `INSERT DATA` alike, and scenario 3 could not be seeded at all. The cause had nothing to do
+with the ontology: **two stale Kafka connector instances** in the `Tests` repository. GraphDB's
+connector plugin re-indexes an entity whenever a watched predicate changes, and with no broker to reach
+it threw `com.ontotext.trree.plugin.externalsync.api.ConnectorServerException`, which RDF4J wrapped as a
+`SailException` and the REST layer flattened to an opaque 500.
+
+Dropping both connectors fixed it. Worth remembering, because the symptom is thoroughly misleading: it
+looks like malformed data, it survives every simplification of the file, and it does not reproduce on a
+different namespace. If a write starts failing with a bare 500, list the connectors first:
+
+```sparql
+SELECT ?c ?s WHERE { ?c <http://www.ontotext.com/connectors/kafka#listConnectors> ?s }
+```
+
+Two incidental corrections from the same investigation: the ~70 triples that survive `clear_graph()` are
+GraphDB's ruleset axioms, not residue; and a bisect that lands on a blank-node triple does not mean
+blank nodes are the problem — here it was a coincidence of statement ordering.
