@@ -1,5 +1,25 @@
 # Multiple `rdfs:range` assertions are conjunctive, so `kapps_ogm` raising on them is a defect
 
+> **MOTIVATION RESTORED AND CHANGED 2026-07-28 (#52). Now load-bearing again, on a different basis.**
+>
+> The 2026-07-27 retirement below stands as a record of what was believed then, and its *measurement*
+> is still correct: RDFS does not entail a `rdfs:range` triple for a subproperty, and GraphDB
+> materializes none. What changed is that we no longer need it to. ADR 0026 has the OGM **walk
+> `rdfs:subPropertyOf*` itself** and merge the anonymous restriction ranges it finds, which is the
+> entailment the reasoner does not materialize (rdfs7 then rdfs3: the value node is an instance of
+> every range class along the chain, hence of their intersection). Range-on-superproperty therefore
+> *does* work as a mechanism — not by inheritance, but by explicit resolution.
+>
+> So the second bullet's conclusion ("range-on-superproperty does not work as a mechanism here") is
+> superseded: it is true of the reasoner and false of the OGM we are asking for. The first bullet is
+> also superseded — we do extend upstream properties again, though from the interface side rather than
+> by adding ranges to `tu:` properties, and per instance rather than in the TBox.
+>
+> `SAWeindel/kapps_ogm#1` is now one requirement (R7) of
+> `docs/prd/kapps-ogm-anonymous-node-identity.md`, not an independent fix, and it gates scenario 3's
+> provisioning flow. See also root ADR 0003 for why the surrounding work is specified rather than
+> patched.
+
 > **MOTIVATION RETIRED 2026-07-27 (#25). Still correct; no longer urgent, and no longer gating.**
 >
 > Both driving use cases below have gone away, and one rested on a factual error:
