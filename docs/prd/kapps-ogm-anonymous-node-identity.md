@@ -319,6 +319,24 @@ then finds its metadata and takes ADR 0015 row 1.**
 5. **`_specify_complex_property` ignores `nested_scope`** (`property_spec.py:320`) — a scope below a
    COMPLEX property is silently discarded. Known from `#29`; recorded here because R9 makes merge
    depth, not scope, the projection mechanism, so this stops being a blocker.
+6. **`examples/transferunit.ttl` cannot be imported into GraphDB.** Its TBox loads; its instance data
+   returns `500 - Unexpected exception`, before and after the 2026-07-28 ontology corrections alike.
+   Not caused by the comment blocks or the non-ASCII characters, and the file parses cleanly in
+   rdflib. Tracked as `EHoffm/kapps_semantic_middleware#55`. It is why the two predictions below are
+   still unverified against a live store.
+
+## Verification status
+
+Defects 1–4 above are **verified**, offline, against the pinned pydantic and the OGM's own code — the
+inert `extra="forbid"`, the required field produced from `someValuesFrom`, and the strict-subset
+missing-required check were each reproduced directly. R11's failure mode is verified by capturing the
+SPARQL that `triples_update` generates. The `kapps_semantic_middleware` integration suite runs green
+against the live GraphDB, so the store is reachable and usable.
+
+Two things are **not** verified end-to-end, because the scenario-3 seed file will not load (defect 6):
+that materialising the seeded belt raises `ValidationError: inf-hasValue Field required`, and that a
+fetch-then-commit round trip relocates the parameter node and orphans its metadata. Both are traced
+through code and follow from the verified mechanisms, but neither has been observed in a repository.
 
 ## Non-goals
 
