@@ -31,7 +31,7 @@ from kapps_ogm import OGM
 from kapps_ogm.utils.class_scope import ClassScope
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
-from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.connectors.semantic import default_registry
 from kapps_semantic_middleware.projection import carries_southbound
 from kapps_semantic_middleware.vocabulary import INF
@@ -131,7 +131,7 @@ def step_2_start_the_middleware(db: GraphDB) -> SemanticMiddleware:
     """
     print("\nStep 2 — Construct the Middleware (connectors are wired in the constructor)")
     unit = SemanticMiddleware(
-        mode="resource",
+        mode=Mode.RESOURCE,
         resource_iri=seed.TRANSFER_UNIT_1,
         service_class=f"{seed.TU_NS}TransferUnitService",
         ogm=OGM(db=db),

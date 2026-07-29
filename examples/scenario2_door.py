@@ -19,14 +19,15 @@ import time
 
 import httpx
 import uvicorn
-from graph_db_interface import GraphDB
+from graph_db_interface import GraphDB, IRI
 from rdflib.namespace import RDF
 
 from handlers import door_close, door_open, door_status, reset_door
 from kapps_ogm import OGM
-from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
+    mint_service_iri,
     mint_state_property_iri,
     mint_workflow_iri,
 )
@@ -71,7 +72,7 @@ def step_2_start_door_middleware(db: GraphDB) -> tuple[SemanticMiddleware, uvico
     """Register the door's two workflows + live status StateProperty, and start its server."""
     print("\nStep 2 — Start the Door Middleware")
     door = SemanticMiddleware(
-        mode="resource",
+        mode=Mode.RESOURCE,
         resource_iri=seed.DOOR_RESOURCE,
         service_class=seed.DOOR_SERVICE_CLASS,
         ogm=OGM(db=db),
@@ -173,17 +174,35 @@ def step_5_verify_state_not_persisted(db: GraphDB, service_iri: str) -> None:
     print("Confirmed: no 'opened'/'closed' literal is written onto the state property.")
 
 
-def step_6_shutdown(db: GraphDB, service_iri: str, server: uvicorn.Server, thread: threading.Thread) -> None:
-    """Stop the door server and verify reachability is removed while the individual remains."""
+def step_6_shutdown(
+    db: GraphDB,
+    service_iri: str,
+    servers: list[tuple[uvicorn.Server, threading.Thread]],
+) -> None:
+    """Stop both servers and verify reachability is removed while individuals remain.
+
+    Both, because both are served (#44). A client that registers on startup must deregister
+    on shutdown like any other peer, or the graph keeps an address nobody answers on.
+    """
     print("\nStep 6 — Shutdown and Deregistration")
-    server.should_exit = True
-    thread.join(timeout=SERVER_STOP_TIMEOUT_SECONDS)
+    for server, thread in servers:
+        server.should_exit = True
+        thread.join(timeout=SERVER_STOP_TIMEOUT_SECONDS)
     time.sleep(0.5)
+
     status_sp = mint_state_property_iri(service_iri, "door_status")
     endpoint_gone = len(list(db.triples_get(sub=status_sp, pred=SVC.endpoint))) == 0
     preserved = db.triple_exists((status_sp, RDF.type, seed.DOOR_STATUS_STATE_CLASS))
+    robot_service = mint_service_iri(IRI(seed.MOBILE_ROBOT))
+    robot_address_gone = len(list(db.triples_get(sub=robot_service, pred=SVC.address))) == 0
+
     print(f"  State property endpoint removed:    {endpoint_gone}")
     print(f"  State property individual preserved: {preserved}")
+    print(f"  Robot address removed:               {robot_address_gone}")
+    print(
+        "  Robot Service individual preserved:  "
+        f"{db.triple_exists((robot_service, SVC.isServiceOf, seed.MOBILE_ROBOT))}"
+    )
 
 
 def main() -> None:
@@ -193,28 +212,44 @@ def main() -> None:
 
     step_1_seed_clean_repository(db)
     _door_mw, server, thread = step_2_start_door_middleware(db)
+    running: list[tuple[uvicorn.Server, threading.Thread]] = [(server, thread)]
     service_iri: str | None = None
     try:
         service_iri = step_3_inspect_registration(db)
         # The mobile robot: a minimal second middleware. Its scripted logic discovers and
         # drives the door through the graph + REST, using its own OGM for the SPARQL query.
         robot = SemanticMiddleware(
-            mode="resource",
+            mode=Mode.RESOURCE,
             resource_iri=seed.MOBILE_ROBOT,
             service_class=seed.MOBILE_ROBOT_SERVICE_CLASS,
             ogm=OGM(db=GraphDB.from_env()),
             host="127.0.0.1",
             port=ROBOT_PORT,
         )
+        # The robot is *served*, not merely constructed (#44). Constructing a resource-mode
+        # instance and never running it means `on_start_up` never fires: no Service, no
+        # `svc:address`, no heartbeat. The robot would exist only to hold an `ogm`, making
+        # `mode=Mode.RESOURCE` a label with no runtime consequence. A robot that drives a
+        # door is a peer, and peers are discoverable — the door could ring it back.
+        robot_server, robot_thread = _start_server(robot, ROBOT_PORT)
+        running.append((robot_server, robot_thread))
+        robot_service = mint_service_iri(IRI(seed.MOBILE_ROBOT))
+        robot_address = list(db.triples_get(sub=robot_service, pred=SVC.address))
+        print(f"\nMobile robot served on port {ROBOT_PORT}")
+        print(f"  Service registered:   {bool(robot_address)}")
+        print(f"  svc:address in graph: {robot_address[0][2] if robot_address else 'NONE'}")
+        assert robot_address, "the robot is served, so it must be discoverable in the graph"
+
         step_4_robot_passes_through_door(robot.ogm, seed.DOOR_RESOURCE)
         step_5_verify_state_not_persisted(db, service_iri)
     finally:
         reset_door()
         if service_iri is not None:
-            step_6_shutdown(db, service_iri, server, thread)
+            step_6_shutdown(db, service_iri, running)
         else:
-            server.should_exit = True
-            thread.join(timeout=SERVER_STOP_TIMEOUT_SECONDS)
+            for srv, thr in running:
+                srv.should_exit = True
+                thr.join(timeout=SERVER_STOP_TIMEOUT_SECONDS)
 
 
 if __name__ == "__main__":

@@ -17,9 +17,11 @@ from aas_middleware import (
     connectors,
 )
 from kapps_semantic_middleware.middleware import SemanticMiddleware
+from kapps_semantic_middleware.modes import Mode
 
 __all__ = [
     "SemanticMiddleware",
+    "Mode",
     "Middleware",
     "AasMiddleware",
     "Reference",

@@ -1,9 +1,8 @@
 """KAPPS Semantic Middleware.
 
 Extends aas_middleware.Middleware with knowledge-graph registration, discovery,
-and execution capabilities. Supports three modes per ADR 0005: "resource" (wraps
-one resource_iri with REST-facing workflows), "server" (reserved for data-serving
-with no physical resource), and "watchdog" (reserved for liveness-sweeping).
+and execution capabilities. Supports three modes per ADR 0005 -- see `modes.Mode`
+for what each one means and which are implemented.
 
 Operation execution follows ADR 0002: an Operation resolves via its implemented
 Capability to a Workflow endpoint, which is then invoked over HTTP.
@@ -33,6 +32,8 @@ from kapps_semantic_middleware.connectors.semantic import (
     default_registry,
 )
 from kapps_semantic_middleware.connectors.wiring import WiringPlan, plan_wiring
+from kapps_semantic_middleware import modes
+from kapps_semantic_middleware.modes import Mode
 from kapps_semantic_middleware.registration import (
     HandoverPreconditionError,
     OperationQueueEmpty,
@@ -67,7 +68,7 @@ from kapps_semantic_middleware.vocabulary import OperationStatus
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SemanticMiddleware", "OperationResolutionError"]
+__all__ = ["SemanticMiddleware", "OperationResolutionError", "Mode"]
 
 
 class _EventTriggerPayload(BaseModel):
@@ -113,12 +114,13 @@ class _ClaimedOperation:
 class SemanticMiddleware(Middleware):
     """KAPPS Semantic Middleware extending aas_middleware.Middleware.
 
-    Adds knowledge-graph registration, discovery, and execution. Supports three
-    modes: "resource" (wraps one resource_iri with REST-facing
-    workflows), "server" (reserved, data-serving with no physical resource), and
-    "watchdog" (reserved, liveness-sweeping). Resource mode registers the
-    Service/Workflow/Capability instances on startup and deregisters them on
-    shutdown.
+    Adds knowledge-graph registration, discovery, and execution. Supports the three
+    modes of :class:`~kapps_semantic_middleware.modes.Mode`; resource mode registers
+    the Service/Workflow/Capability instances on startup and deregisters them on
+    shutdown, and is the only one with runtime consequence today.
+
+    ``mode`` accepts a ``Mode`` constant or the equivalent bare string -- ``Mode`` is a
+    ``str`` subclass, so existing ``mode="resource"`` callers are unaffected.
 
     Operation execution: an Operation resolves via its implemented
     Capability to a Workflow endpoint, which is then invoked over HTTP.
@@ -127,7 +129,7 @@ class SemanticMiddleware(Middleware):
     def __init__(
         self,
         *,
-        mode: str = "resource",
+        mode: Mode = Mode.RESOURCE,
         resource_iri: Optional[str] = None,
         service_class: Optional[str] = None,
         ogm: Any = None,
@@ -145,9 +147,10 @@ class SemanticMiddleware(Middleware):
     ) -> None:
         super().__init__()
 
-        if mode not in ("resource", "server", "watchdog"):
+        if mode not in modes.ALL:
             raise ValueError(
-                f"mode must be one of 'resource', 'server', 'watchdog'; got {mode!r}"
+                f"mode must be one of {', '.join(repr(str(m)) for m in modes.ALL)}; "
+                f"got {mode!r}"
             )
 
         self.mode = mode
@@ -164,7 +167,7 @@ class SemanticMiddleware(Middleware):
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._sweep_task: Optional[asyncio.Task] = None
 
-        if mode == "resource":
+        if mode == Mode.RESOURCE:
             missing = []
             if resource_iri is None:
                 missing.append("resource_iri")
@@ -218,7 +221,7 @@ class SemanticMiddleware(Middleware):
                 self.add_callback("on_start_up", self._start_heartbeat)
                 self.add_callback("on_shutdown", self._stop_heartbeat)
 
-        elif mode == "watchdog":
+        elif mode == Mode.WATCHDOG:
             if ogm is None:
                 raise ValueError("watchdog mode requires: ogm")
             self.resource_iri = None
@@ -227,7 +230,7 @@ class SemanticMiddleware(Middleware):
             self.add_callback("on_start_up", self._start_sweep)
             self.add_callback("on_shutdown", self._stop_sweep)
 
-        elif mode == "server":
+        elif mode == Mode.SERVER:
             self.resource_iri = None
             self.service_class = None
             self.service_iri = None
@@ -358,7 +361,7 @@ class SemanticMiddleware(Middleware):
             RuntimeError: If called outside resource mode.
             ValueError: If capability_class or workflow_class is missing.
         """
-        if self.mode != "resource":
+        if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"@workflow decorator only valid in resource mode; current mode is {self.mode!r}"
             )
@@ -421,7 +424,7 @@ class SemanticMiddleware(Middleware):
             RuntimeError: If called outside resource mode.
             ValueError: If capability_class or state_property_class is missing.
         """
-        if self.mode != "resource":
+        if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"@state decorator only valid in resource mode; current mode is {self.mode!r}"
             )
@@ -540,7 +543,7 @@ class SemanticMiddleware(Middleware):
 
         This is the in-process caller face — not REST-exposed (ADR 0005/0010).
         """
-        if self.mode != "resource":
+        if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"request() is only valid in resource mode; current mode is {self.mode!r}"
             )
@@ -612,7 +615,7 @@ class SemanticMiddleware(Middleware):
 
         This is the in-process receiver face — not REST-exposed (ADR 0005/0010).
         """
-        if self.mode != "resource":
+        if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"claim_next() is only valid in resource mode; current mode is {self.mode!r}"
             )
@@ -691,7 +694,7 @@ class SemanticMiddleware(Middleware):
         (`cfc:PossessionState`); the "possessed by exactly one" cardinality is Core's own
         Workpiece restriction, the commit-time SHACL backstop.
         """
-        if self.mode != "resource":
+        if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"handover() is only valid in resource mode; current mode is {self.mode!r}"
             )
@@ -739,7 +742,7 @@ class SemanticMiddleware(Middleware):
         Operation is left `queued` for a manual `claim_next`. `scope` is the domain
         ClassScope used to re-fetch the Operation.
         """
-        if self.mode != "resource":
+        if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"register_callback() is only valid in resource mode; current mode is {self.mode!r}"
             )
