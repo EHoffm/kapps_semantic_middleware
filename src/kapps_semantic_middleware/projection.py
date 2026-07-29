@@ -40,9 +40,17 @@ def prune_southbound(class_spec: Any, southbound: Collection[str]) -> Any:
     The input spec is left untouched: the caller needs both shapes at once. The full spec is
     what the bindings read to build their connectors, and the pruned one is what gets served
     (ADR 0028).
+
+    Copying is deliberately **shallow, per spec node**, never ``copy.deepcopy``. A spec's
+    property keys are ``IRI``, which subclasses ``rdflib.URIRef``, which subclasses ``str`` —
+    and deep-copying one reconstructs it through ``str``'s ``__reduce_ex__``, yielding a plain
+    ``URIRef``. The keys survive the copy but silently lose the ``lined`` accessor that
+    ``ClassSpec.to_pydantic_model`` needs, so the pruned spec would raise ``AttributeError``
+    on materialization. Rebuilding the dicts around the original key objects avoids the whole
+    class of problem.
     """
-    pruned = copy.deepcopy(class_spec)
-    removed = _prune_in_place(pruned, {str(prop) for prop in southbound})
+    removed: Set[str] = set()
+    pruned = _pruned_copy(class_spec, {str(prop) for prop in southbound}, removed)
     if removed:
         logger.debug(
             "Northbound projection removed %d southbound propert%s: %s",
@@ -53,22 +61,26 @@ def prune_southbound(class_spec: Any, southbound: Collection[str]) -> Any:
     return pruned
 
 
-def _prune_in_place(class_spec: Any, southbound: Set[str]) -> Set[str]:
-    """Strip southbound properties from a spec and its nested specs; report what went."""
+def _pruned_copy(class_spec: Any, southbound: Set[str], removed: Set[str]) -> Any:
+    """A shallow copy of one spec node whose properties dict has the southbound ones gone."""
     properties = getattr(class_spec, "properties", None)
     if not properties:
-        return set()
+        return class_spec
 
-    removed = set()
-    for prop_iri in list(properties):
+    kept = {}
+    for prop_iri, prop_spec in properties.items():
         if str(prop_iri) in southbound:
-            del properties[prop_iri]
             removed.add(str(prop_iri))
             continue
-        nested = getattr(properties[prop_iri], "nested", None)
+        nested = getattr(prop_spec, "nested", None)
         if nested is not None:
-            removed |= _prune_in_place(nested, southbound)
-    return removed
+            prop_spec = copy.copy(prop_spec)
+            prop_spec.nested = _pruned_copy(nested, southbound, removed)
+        kept[prop_iri] = prop_spec
+
+    pruned = copy.copy(class_spec)
+    pruned.properties = kept
+    return pruned
 
 
 def carries_southbound(value: Any, southbound: Collection[str]) -> Set[str]:

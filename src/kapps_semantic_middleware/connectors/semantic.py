@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from typing import (
     Any,
+    ClassVar,
     Dict,
     Iterable,
     Iterator,
@@ -147,13 +148,17 @@ class BindingDescriptor(Protocol):
     not owning the connector's source.
     """
 
-    connector_cls: Type[Any]
-    """The framework connector class this binding constructs. Never subclassed."""
+    connector_cls: ClassVar[Any]
+    """The framework connector class this binding constructs. Never subclassed.
 
-    interface_property: IRI
+    Typed loosely and declared ``ClassVar`` because a descriptor is configuration on a class,
+    not state on an instance, and because a connector behind an optional extra may legitimately
+    resolve to ``None`` until its dependency is installed."""
+
+    interface_property: ClassVar[IRI]
     """The ``inf:`` marker property a domain property must be a subproperty of to match."""
 
-    connection_metadata: Tuple[IRI, ...]
+    connection_metadata: ClassVar[Tuple[IRI, ...]]
     """The properties this protocol reads. Also, exactly, the properties that must never go
     north — the registry takes the union as the projection's prune set (ADR 0028)."""
 

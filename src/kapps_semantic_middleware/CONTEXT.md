@@ -108,14 +108,23 @@ _Avoid_: The datamodel, Schema (it is one view among many; a connector's view of
 a different one).
 
 **Projection** (northbound):
-What keeps connection metadata out of the served datamodel — and it is **the TBox restriction itself**,
-not a middleware step. A Parameter materializes to exactly what its property's `rdfs:range` restriction
-declares; anything else on the node is dropped. Since the domain ontology declares only domain content
-plus the access-mode marker, and never protocol metadata, a broker address physically cannot reach a
-peer. The domain TBox and a connector's `inf:` TBox are deliberately unconnected; the middleware joins
-them at runtime, when the resource is instantiated (ADR 0019 superseded, ADR 0023/0024).
-_Avoid_: Filter, Deny-list, Stripping (nothing is removed — it never arrives); View (the view is the
-ClassScope, which selects *which* Parameters, not which parts of one).
+What keeps connection metadata out of the served datamodel: the middleware **removes the southbound
+properties from the ClassSpec before fetching**, and materializes the pruned spec (ADR 0028). The prune
+set is the union of every registered **Binding descriptor**'s connection metadata, so the core names no
+protocol term and a domain expert's own connector is projected for free. It runs for **every Flavour**,
+including one that wires nothing — gating it would make the least-privileged instance the one that leaks.
+
+Earlier this was recorded as *not* a middleware step at all: a Parameter materializes to exactly what its
+property's restriction declares, so on the merge-depth reading a broker address physically could not
+reach a peer. That premise died when the `inf:` interface properties gained their own ranges (#53) —
+necessary so provisioning can write connection metadata through the OGM — because `PropertySpec` merges
+the entire `rdfs:subPropertyOf*` chain with no depth parameter. Measured: the unpruned belt materializes
+carrying topic, set topic and broker. Merge depth remains the right *description* of the two views; the
+middleware has to realize the shallow one itself (ADR 0019 stays retired as written; ADR 0026's
+projection claim is superseded).
+_Avoid_: Filter, Stripping *of data* (the prune is on the shape, before any data is read — the northbound
+model has no field to carry a broker address in); View (the view is the ClassScope, which selects *which*
+Parameters, not which parts of one).
 
 **Interface property**:
 The property a **Semantic connector** binds to — `inf:isInterfaceAccessibleMQTTParameter` and its
@@ -156,9 +165,15 @@ building is one method on it).
 
 **Static facet**:
 A part of a Parameter that does not change with a reading — unit, access mode. Captured by the **Binding
-descriptor** at wiring time and reassembled into the payload on every inbound message, because the write
-path replaces the whole Parameter node and nothing downstream can read the previous value back. Free to
-carry, since `OGM.commit` filters unchanged triples (ADR 0018, ADR 0023).
+descriptor** at wiring time and reassembled into the payload on every inbound message, because
+`setattr` replaces the whole Parameter node and `Formatter.deserialize` sees only the payload, with no
+access to the current value. Free to carry, since `OGM.commit` filters unchanged triples (ADR 0018,
+ADR 0023).
+
+ADR 0027 retired the *graph* reason for this — a skolemised Parameter node is addressable, so a commit
+diffs per triple and an unchanged facet cannot be wiped. The **in-memory** reason stands and is why the
+reassembly remains: without it, a bare inbound scalar blanks the unit in the very model that is served
+over REST.
 _Avoid_: Constant, Config (a facet belongs to the Parameter and is authored in the ontology, not to the
 deployment).
 

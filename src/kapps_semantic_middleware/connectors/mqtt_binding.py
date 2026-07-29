@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from graph_db_interface import IRI
@@ -36,18 +36,26 @@ from kapps_semantic_middleware.vocabulary import INF
 logger = logging.getLogger(__name__)
 
 
+try:
+    from aas_middleware.connect.connectors.mqtt_client_connector import (
+        MqttClientConnector,
+    )
+except ImportError:  # pragma: no cover - depends on the optional extra being installed
+    # Importing this module must not require a working MQTT stack. The registry has to exist
+    # for every flavour, including one that wires nothing (ADR 0028), so an inspector on a
+    # host without aiomqtt must still get recognition and the projection. The failure is
+    # deferred to the moment something actually tries to build a connector.
+    MqttClientConnector = None  # type: ignore[assignment]
+
+
 def _mqtt_client_connector_cls():
-    """Import ``MqttClientConnector`` on demand, with an actionable error if it is absent."""
-    try:
-        from aas_middleware.connect.connectors.mqtt_client_connector import (
-            MqttClientConnector,
-        )
-    except ImportError as exc:  # pragma: no cover - depends on the optional extra
+    """The framework connector class, or an actionable error if the extra is missing."""
+    if MqttClientConnector is None:  # pragma: no cover - depends on the optional extra
         raise ImportError(
             "The MQTT semantic connector needs aiomqtt, an optional extra of "
             "aas_middleware. Install it with `uv add aiomqtt`, or construct the middleware "
             "with autoregister_connectors=False to run as an inspector."
-        ) from exc
+        )
     return MqttClientConnector
 
 
@@ -154,17 +162,14 @@ class MQTTParameterFormatter:
 class MQTTBinding:
     """Binds an MQTT-reachable parameter to one or two ``MqttClientConnector`` instances."""
 
-    interface_property = INF.isInterfaceAccessibleMQTTParameter
-    connection_metadata = (
+    connector_cls: ClassVar[Any] = MqttClientConnector
+    interface_property: ClassVar[IRI] = INF.isInterfaceAccessibleMQTTParameter
+    connection_metadata: ClassVar[Tuple[IRI, ...]] = (
         INF.hasMQTTTopic,
         INF.hasMQTTBrokerIP,
         INF.hasMQTTSetTopic,
         INF.hasMQTTValuePath,
     )
-
-    @property
-    def connector_cls(self):  # pragma: no cover - thin lazy accessor
-        return _mqtt_client_connector_cls()
 
     @staticmethod
     def build(

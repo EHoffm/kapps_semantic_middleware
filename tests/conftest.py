@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 import pytest
+import pytest_asyncio
 
 REQUIRED_GRAPHDB_ENV = (
     "GRAPHDB_URL",
@@ -38,3 +39,40 @@ def graphdb():
     from graph_db_interface import GraphDB
 
     return GraphDB.from_env()
+
+
+MQTT_TEST_PORT = 18831
+"""Not 1883: a developer machine may already run a broker there, and a test that silently
+joined it would pass against the wrong state and leak its topics into someone's session."""
+
+
+@pytest_asyncio.fixture
+async def mqtt_broker():
+    """A real MQTT broker on 127.0.0.1, in-process, for the duration of one test.
+
+    ``amqtt`` is a pure-Python broker, so this needs no ``mosquitto`` and no root — which
+    matters because installing a system broker is exactly what a CI runner and a fresh
+    checkout cannot assume. The round trip it serves is genuinely live: real sockets, real
+    publish and subscribe, the same ``aiomqtt`` client the framework connector uses.
+    """
+    from amqtt.broker import Broker
+
+    broker = Broker(
+        {
+            "listeners": {
+                "default": {
+                    "type": "tcp",
+                    "bind": f"127.0.0.1:{MQTT_TEST_PORT}",
+                    "max_connections": 100,
+                }
+            },
+            "sys_interval": 0,
+            "auth": {"allow-anonymous": True},
+            "topic-check": {"enabled": False},
+        }
+    )
+    await broker.start()
+    try:
+        yield f"127.0.0.1:{MQTT_TEST_PORT}"
+    finally:
+        await broker.shutdown()

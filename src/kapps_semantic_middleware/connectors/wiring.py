@@ -46,6 +46,15 @@ class WiringPlan:
     northbound_spec: Any
     """The pruned ClassSpec, safe to materialize and serve."""
 
+    class_scope: Any
+    """The scope the specs were resolved under.
+
+    Kept because a fetch needs **both**: ``_fetch_object_property`` decides whether a nested
+    individual is hydrated or fetched as a bare reference from the *class_scope*
+    (``as_reference = nested_class_scope is None``), not from whether the spec it was handed
+    has a ``nested``. Passing only the pruned spec yields belts and barriers with empty
+    parameters. Use :func:`northbound_fetch_kwargs` rather than restating this."""
+
     bindings: List[ParameterBinding]
     """Every recognised interface-accessible parameter. Populated for every flavour,
     including one that wires nothing — recognition is never gated (ADR 0020, ADR 0028)."""
@@ -55,6 +64,14 @@ class WiringPlan:
 
     southbound_properties: frozenset
     """The prune set that was applied, kept for assertions and diagnostics."""
+
+    def northbound_fetch_kwargs(self) -> Dict[str, Any]:
+        """The arguments that materialize this resource's northbound view."""
+        return {
+            "class_spec": self.northbound_spec,
+            "class_scope": self.class_scope,
+            "materialize": True,
+        }
 
 
 def plan_wiring(
@@ -100,6 +117,7 @@ def plan_wiring(
 
     return WiringPlan(
         northbound_spec=northbound_spec,
+        class_scope=class_scope,
         bindings=bindings,
         registrations=registrations,
         southbound_properties=southbound,
@@ -141,8 +159,10 @@ def _recognise(
         bindings.append(
             ParameterBinding(
                 resource_iri=holder_iri,
-                parameter_property=prop_iri,
-                field_id=prop_iri.lined,
+                parameter_property=IRI(str(prop_iri)),
+                # ClassSpec keys arrive as rdflib URIRef, not IRI, so the mangling has to go
+                # through a converted copy -- URIRef has no `lined`.
+                field_id=IRI(str(prop_iri)).lined,
                 metadata=normalize_metadata(metadata),
                 descriptor=descriptor,
                 node_model_type=prop_spec.nested.to_pydantic_model(),
@@ -291,16 +311,47 @@ def _parameter_metadata(
     return metadata
 
 
+# Types every individual carries that say nothing about what it *is*. An OGM ClassSpec
+# resolved against one of these fails outright, and `owl:NamedIndividual` in particular is
+# asserted on everything the OGM writes.
+_META_TYPE_NAMESPACES = (
+    "http://www.w3.org/2002/07/owl#",
+    "http://www.w3.org/2000/01/rdf-schema#",
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+)
+
+
 def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
-    """The individual's asserted class, so a caller need not restate what the graph knows."""
+    """The individual's asserted domain class, so a caller need not restate what the graph knows.
+
+    An individual carries several ``rdf:type`` assertions and their order is not meaningful,
+    so the structural ones are filtered out rather than trusted to sort last — picking
+    ``owl:NamedIndividual`` yields a ClassSpec that cannot resolve at all.
+    """
     rows = ogm.db.query(
         f"SELECT ?c FROM <http://www.ontotext.com/explicit> "
         f"WHERE {{ <{instance_iri}> a ?c . FILTER(isIRI(?c)) }}",
         convert_bindings=True,
     )["results"]["bindings"]
-    if not rows:
+
+    candidates = [
+        IRI(str(row["c"]))
+        for row in rows
+        if not str(row["c"]).startswith(_META_TYPE_NAMESPACES)
+    ]
+
+    if not candidates:
         raise ValueError(
-            f"{instance_iri} has no asserted rdf:type, so its ClassSpec cannot be resolved. "
-            f"Pass resource_class explicitly, or seed the instance first."
+            f"{instance_iri} has no asserted domain rdf:type, so its ClassSpec cannot be "
+            f"resolved. Pass resource_class explicitly, or seed the instance first."
         )
-    return IRI(str(rows[0]["c"]))
+    if len(candidates) > 1:
+        logger.warning(
+            "%s asserts %d domain classes (%s); resolving its ClassSpec against %s. Pass "
+            "resource_class explicitly to choose.",
+            instance_iri,
+            len(candidates),
+            ", ".join(str(c) for c in candidates),
+            candidates[0],
+        )
+    return candidates[0]

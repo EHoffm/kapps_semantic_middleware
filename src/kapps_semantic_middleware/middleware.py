@@ -26,7 +26,13 @@ from graph_db_interface import IRI
 from pydantic import BaseModel
 
 from aas_middleware import Middleware
+from aas_middleware.middleware.sync.synced_connector import SyncDirection
 
+from kapps_semantic_middleware.connectors.semantic import (
+    SemanticConnectorRegistry,
+    default_registry,
+)
+from kapps_semantic_middleware.connectors.wiring import WiringPlan, plan_wiring
 from kapps_semantic_middleware.registration import (
     HandoverPreconditionError,
     OperationQueueEmpty,
@@ -126,6 +132,10 @@ class SemanticMiddleware(Middleware):
         heartbeat_interval: Optional[float] = 30.0,
         staleness_threshold: float = 90.0,
         sweep_interval: float = 30.0,
+        class_scope: Any = None,
+        autoregister_connectors: bool = True,
+        connector_sync_direction: SyncDirection = SyncDirection.BIDIRECTIONAL,
+        connector_registry: Optional[SemanticConnectorRegistry] = None,
     ) -> None:
         super().__init__()
 
@@ -162,6 +172,21 @@ class SemanticMiddleware(Middleware):
             self.resource_iri = IRI(resource_iri)
             self.service_class = IRI(service_class)
             self.service_iri = mint_service_iri(self.resource_iri)
+
+            # Connector wiring (ADR 0022/0023/0028). The class_scope is the consumer's view,
+            # rooted at this resource and configured in embedding code rather than in the
+            # ontology (ADR 0018) -- a TransferUnit's parameters hang off its belts and
+            # barriers, so reaching them needs a two-level chain the ontology cannot guess.
+            self.class_scope = class_scope
+            self.autoregister_connectors = autoregister_connectors
+            self.connector_sync_direction = connector_sync_direction
+            self.connector_registry = connector_registry or default_registry
+            # None until a class_scope is given: without a consumer's view there is nothing
+            # to root recognition at, and the datamodel fetch stays unscoped as it is for
+            # scenarios 1 and 2.
+            self._wiring: Optional[WiringPlan] = None
+            if class_scope is not None:
+                self._wire_semantic_connectors()
 
             # Event-trigger coordination (ADR 0009/0010): an in-memory operation queue
             # (the graph is the source of truth; durability/reconstruction is #17) and the
@@ -787,6 +812,65 @@ class SemanticMiddleware(Middleware):
                 )
             )
 
+    def _wire_semantic_connectors(self) -> None:
+        """Recognise this resource's interface parameters and connect what the flavour allows.
+
+        Called from ``__init__`` rather than from an ``on_start_up`` callback, and that is
+        not a stylistic choice: ``lifespan`` calls ``connect()`` on everything in the
+        connection registry *before* running ``on_start_up``, and ``initiate_sync`` — what
+        ``add_synced_connector`` defers — starts ``run_receive()`` but never calls
+        ``connect()``. A connector registered later never connects, its listener never
+        starts, and ``receive()`` blocks forever while outbound limps on through
+        ``consume()``'s reconnect. Silent, one-directional failure (ADR 0023).
+
+        Recognition and the northbound projection run whatever the flavour;
+        ``autoregister_connectors`` gates only the connecting. An inspector that skipped
+        recognition would treat each parameter node as ordinary data and serve its broker
+        address northbound — the least-privileged instance would leak the most (ADR 0028).
+        """
+        try:
+            self._wiring = plan_wiring(
+                ogm=self.ogm,
+                resource_iri=self.resource_iri,
+                class_scope=self.class_scope,
+                registry=self.connector_registry,
+                flavour=self.connector_sync_direction,
+                autoregister=self.autoregister_connectors,
+            )
+        except Exception as exc:  # noqa: BLE001 - a resource may legitimately have no parameters
+            logger.warning(
+                "Could not resolve semantic connectors for %s: %s. The resource will be "
+                "served, but no parameter values will flow.",
+                self.resource_iri,
+                exc,
+            )
+            return
+
+        for binding, registration in self._wiring.registrations:
+            self.add_synced_connector(
+                connector_id=f"{binding.resource_iri}#{binding.field_id}#{registration.suffix}",
+                connector=registration.connector,
+                model_type=registration.model_type,
+                data_model_name="resource",
+                model_id=str(self.resource_iri),
+                # The COMPLEX property is the deepest addressable thing: ConnectionInfo has
+                # three levels and field_id is a plain getattr, so inf:hasValue is out of
+                # reach. Same atomic unit ADR 0017 reached from the routing side.
+                contained_model_id=str(binding.resource_iri),
+                field_id=binding.field_id,
+                formatter=registration.formatter,
+                sync_role=registration.sync_role,
+                sync_direction=registration.sync_direction,
+            )
+
+        if self._wiring.registrations:
+            logger.info(
+                "Wired %d connector(s) across %d parameter(s) on %s",
+                len(self._wiring.registrations),
+                len(self._wiring.bindings),
+                self.resource_iri,
+            )
+
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
 
@@ -796,13 +880,23 @@ class SemanticMiddleware(Middleware):
         event-trigger and workflow routes are the load-bearing surface for this slice, so
         a resource with no materializable data is skipped with a warning rather than
         failing startup.
+
+        When a ``class_scope`` was given, the fetch goes through the **pruned** spec, so the
+        served datamodel has no field that could carry a broker address or a topic
+        (ADR 0028). Without one, the fetch is unscoped and returns the bare individual —
+        which is what scenarios 1 and 2 rely on and why the projection cannot leak there.
         """
         try:
-            node = await anyio.to_thread.run_sync(
-                functools.partial(
-                    self.ogm.fetch, instance_iri=self.resource_iri, materialize=True
-                )
+            fetch = functools.partial(
+                self.ogm.fetch, instance_iri=self.resource_iri, materialize=True
             )
+            if self._wiring is not None:
+                fetch = functools.partial(
+                    self.ogm.fetch,
+                    instance_iri=self.resource_iri,
+                    **self._wiring.northbound_fetch_kwargs(),
+                )
+            node = await anyio.to_thread.run_sync(fetch)
             instance = getattr(node, "instance", None)
             if instance is None:
                 return
