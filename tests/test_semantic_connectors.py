@@ -25,7 +25,12 @@ from kapps_semantic_middleware.connectors.semantic import (
     normalize_metadata,
     resolve_direction,
 )
-from kapps_semantic_middleware.projection import carries_southbound, prune_southbound
+from kapps_semantic_middleware.projection import (
+    ProjectionError,
+    carries_southbound,
+    cross_check,
+    prune_southbound,
+)
 from kapps_semantic_middleware.vocabulary import INF, AccessMode
 
 BELT = IRI("https://example.org/tu#Belt1")
@@ -73,7 +78,7 @@ def _binding(access_mode=AccessMode.READWRITE, value_path=None, set_topic="belt/
 
 
 class TestRegistry:
-    """Resolution is by interface property, and the registry knows the prune set."""
+    """Resolution is by interface property; the registry knows what each binding reads."""
 
     def test_resolves_a_registered_descriptor(self):
         registry = SemanticConnectorRegistry([MQTTBinding])
@@ -102,21 +107,20 @@ class TestRegistry:
 
         assert len(registry) == 2
         assert registry.for_interface_property(StubBinding.interface_property) is StubBinding
-        # And the newcomer's terms are projected out for free (ADR 0028).
-        assert str(IRI(f"{OTHER_NS}hasStubEndpoint")) in registry.southbound_properties()
+        assert str(IRI(f"{OTHER_NS}hasStubEndpoint")) in registry.declared_connection_metadata()
 
-    def test_southbound_set_is_the_union_of_every_binding(self):
+    def test_declared_metadata_is_the_union_of_every_binding(self):
         registry = SemanticConnectorRegistry([MQTTBinding])
-        assert registry.southbound_properties() == {
+        assert registry.declared_connection_metadata() == {
             str(INF.hasMQTTTopic),
             str(INF.hasMQTTBrokerIP),
             str(INF.hasMQTTSetTopic),
             str(INF.hasMQTTValuePath),
         }
 
-    def test_hasvalue_and_accessmode_are_never_southbound(self):
+    def test_no_binding_declares_hasvalue_or_accessmode(self):
         """Northbound-safe content must survive the projection, or the view is useless."""
-        southbound = SemanticConnectorRegistry([MQTTBinding]).southbound_properties()
+        southbound = SemanticConnectorRegistry([MQTTBinding]).declared_connection_metadata()
         assert str(INF.hasValue) not in southbound
         assert str(INF.accessMode) not in southbound
 
@@ -125,11 +129,13 @@ class TestDefaultRegistry:
     """The default registry must be populated by import alone.
 
     A middleware constructed without an explicit ``connector_registry`` gets the default one.
-    If nothing imported the binding modules, that registry would be empty — and an empty
-    registry means an empty prune set, which means the northbound projection removes nothing
-    and every served parameter carries its broker address and topics (ADR 0028). Every test
-    that builds ``SemanticConnectorRegistry([MQTTBinding])`` explicitly is structurally blind
-    to this, which is exactly how it went unnoticed.
+    If nothing imported the binding modules, no protocol is recognised, so nothing is wired
+    and every parameter comes up dead. Every test that builds
+    ``SemanticConnectorRegistry([MQTTBinding])`` explicitly is structurally blind to this,
+    which is exactly how it went unnoticed.
+
+    Note the *projection* no longer depends on this being populated — it asks the ontology
+    (ADR 0028) — so an empty registry is now a wiring failure rather than a leak.
     """
 
     def test_importing_the_package_registers_the_builtin_bindings(self):
@@ -137,10 +143,10 @@ class TestDefaultRegistry:
 
         assert len(default_registry) >= 1
 
-    def test_the_default_prune_set_covers_the_mqtt_metadata(self):
+    def test_the_default_registry_declares_the_mqtt_metadata(self):
         from kapps_semantic_middleware.connectors.semantic import default_registry
 
-        southbound = default_registry.southbound_properties()
+        southbound = default_registry.declared_connection_metadata()
 
         assert {
             str(INF.hasMQTTTopic),
@@ -306,11 +312,53 @@ class TestMQTTFormatter:
         assert json.loads(formatter.serialize([node])) is None
 
 
+class _FakeOGM:
+    """Answers the two SPARQL shapes `projection` issues, from a declared hierarchy.
+
+    The projection reads the ontology, so a unit test has to supply one. Rather than mock the
+    functions under test, this mocks the *store* — the queries stay real, and a mistake in one
+    still shows up here.
+    """
+
+    def __init__(self, markers, declares):
+        self.markers = markers  # parameter property -> [protocol marker, ...]
+        self.declares = declares  # marker -> [property, ...]
+        self.db = self
+
+    def query(self, q, convert_bindings=False):
+        if "?marker" in q and "onProperty" not in q:
+            param = q.split("<", 1)[1].split(">", 1)[0]
+            rows = [{"marker": m} for m in self.markers.get(param, [])]
+            return {"results": {"bindings": rows}}
+        wanted = [m for m in self.declares if f"<{m}>" in q]
+        props = {p for m in wanted for p in self.declares[m]}
+        return {"results": {"bindings": [{"p": p} for p in sorted(props)]}}
+
+
+MQTT_MARKER = str(INF.isInterfaceAccessibleMQTTParameter)
+OPCUA_MARKER = f"{OTHER_NS}isInterfaceAccessibleOPCUAParameter"
+OPCUA_ENDPOINT = f"{OTHER_NS}hasOPCUAEndpoint"
+
+
+def _ogm(*markers):
+    return _FakeOGM(
+        markers={str(SPEED): list(markers)},
+        declares={
+            MQTT_MARKER: [
+                str(INF.hasMQTTTopic),
+                str(INF.hasMQTTBrokerIP),
+                str(INF.hasMQTTSetTopic),
+            ],
+            OPCUA_MARKER: [OPCUA_ENDPOINT],
+        },
+    )
+
+
 class TestProjection:
-    """The northbound view is the pruned spec, and the prune is what makes it safe."""
+    """The northbound view is the pruned spec, and the ontology decides what is pruned."""
 
     class _Spec:
-        """A minimal stand-in with the two attributes prune_southbound walks."""
+        """A minimal stand-in with the two attributes the prune walks."""
 
         def __init__(self, properties):
             self.properties = properties
@@ -319,52 +367,121 @@ class TestProjection:
         def __init__(self, nested=None):
             self.nested = nested
 
-    def _resource_spec(self):
-        node = self._Spec(
-            {
-                INF.hasValue: self._Prop(),
-                INF.accessMode: self._Prop(),
-                INF.hasMQTTTopic: self._Prop(),
-                INF.hasMQTTBrokerIP: self._Prop(),
-                INF.hasMQTTSetTopic: self._Prop(),
-            }
-        )
-        return self._Spec({SPEED: self._Prop(nested=node)})
+    def _resource_spec(self, extra=()):
+        fields = {
+            INF.hasValue: self._Prop(),
+            INF.accessMode: self._Prop(),
+            INF.hasMQTTTopic: self._Prop(),
+            INF.hasMQTTBrokerIP: self._Prop(),
+            INF.hasMQTTSetTopic: self._Prop(),
+        }
+        for name in extra:
+            fields[IRI(name)] = self._Prop()
+        return self._Spec({SPEED: self._Prop(nested=self._Spec(fields))})
 
-    def test_prune_removes_southbound_properties_from_the_nested_spec(self):
-        southbound = SemanticConnectorRegistry([MQTTBinding]).southbound_properties()
-
-        pruned = prune_southbound(self._resource_spec(), southbound)
+    def test_prune_removes_what_the_ontology_calls_protocol_metadata(self):
+        pruned = prune_southbound(self._resource_spec(), ogm=_ogm(MQTT_MARKER))
 
         assert set(pruned.properties[SPEED].nested.properties) == {
             INF.hasValue,
             INF.accessMode,
         }
 
+    def test_an_unregistered_protocol_is_pruned_too(self):
+        """The regression this whole mechanism exists for.
+
+        A belt reachable over MQTT *and* OPC-UA, with no OPC-UA binding registered anywhere.
+        The old registry-derived prune set removed the MQTT metadata and served the OPC-UA
+        endpoint, because a set built from registered code only knows the protocols we happen
+        to have written. Asking the ontology finds it.
+        """
+        spec = self._resource_spec(extra=[OPCUA_ENDPOINT])
+
+        pruned = prune_southbound(spec, ogm=_ogm(MQTT_MARKER, OPCUA_MARKER))
+
+        assert set(pruned.properties[SPEED].nested.properties) == {
+            INF.hasValue,
+            INF.accessMode,
+        }
+        assert IRI(OPCUA_ENDPOINT) not in pruned.properties[SPEED].nested.properties
+
+    def test_a_property_with_no_protocol_marker_is_untouched(self):
+        """An ordinary object property is not interface-accessible and loses nothing."""
+        pruned = prune_southbound(self._resource_spec(), ogm=_ogm())
+
+        assert set(pruned.properties[SPEED].nested.properties) == {
+            INF.hasValue,
+            INF.accessMode,
+            INF.hasMQTTTopic,
+            INF.hasMQTTBrokerIP,
+            INF.hasMQTTSetTopic,
+        }
+
     def test_prune_does_not_mutate_the_input_spec(self):
         """Both shapes are needed at once: the full one wires, the pruned one serves."""
         spec = self._resource_spec()
-        southbound = SemanticConnectorRegistry([MQTTBinding]).southbound_properties()
 
-        prune_southbound(spec, southbound)
+        prune_southbound(spec, ogm=_ogm(MQTT_MARKER))
 
         assert INF.hasMQTTBrokerIP in spec.properties[SPEED].nested.properties
 
+    def test_unreadable_protocol_ranges_refuse_to_serve(self):
+        """A projection that cannot prove a payload safe must not serve it.
+
+        The ontology says the parameter is reached over a protocol, but nothing can be read
+        from that protocol's range — a missing TBox, or a range shape we do not understand.
+        Continuing would mean serving fields we have not classified.
+        """
+        blind = _FakeOGM(markers={str(SPEED): [MQTT_MARKER]}, declares={})
+
+        with pytest.raises(ProjectionError) as exc:
+            prune_southbound(self._resource_spec(), ogm=blind)
+
+        assert "cannot prove what is safe" in str(exc.value)
+
+
+class TestCrossCheck:
+    """The ontology governs; a binding's declaration is compared against it and reported."""
+
+    def test_agreement_is_silent(self, caplog):
+        cross_check(SPEED, [INF.hasMQTTTopic], [INF.hasMQTTTopic])
+
+        assert not caplog.text
+
+    def test_a_term_only_the_ontology_declares_is_reported(self, caplog):
+        cross_check(SPEED, [INF.hasMQTTTopic, INF.hasMQTTValuePath], [INF.hasMQTTTopic])
+
+        assert "hasMQTTValuePath" in caplog.text
+
+    def test_a_term_only_the_binding_declares_is_reported(self, caplog):
+        """The direction that costs debugging time: it will not survive a write."""
+        cross_check(SPEED, [INF.hasMQTTTopic], [INF.hasMQTTTopic, INF.hasMQTTSetTopic])
+
+        assert "hasMQTTSetTopic" in caplog.text
+        assert "may come up with no value flowing" in caplog.text
+
+    def test_a_binding_that_declares_nothing_is_not_cross_checked(self, caplog):
+        cross_check(SPEED, [INF.hasMQTTTopic], None)
+
+        assert not caplog.text
+
+
+class TestLeakDetector:
     def test_carries_southbound_detects_a_raw_iri(self):
-        southbound = SemanticConnectorRegistry([MQTTBinding]).southbound_properties()
+        southbound = SemanticConnectorRegistry([MQTTBinding]).declared_connection_metadata()
         payload = {str(INF.hasMQTTBrokerIP): ["127.0.0.1"]}
 
         assert carries_southbound(payload, southbound) == {str(INF.hasMQTTBrokerIP)}
 
     def test_carries_southbound_detects_a_mangled_field_name(self):
         """A served JSON body carries IRI-mangled field names, not raw IRIs."""
-        southbound = SemanticConnectorRegistry([MQTTBinding]).southbound_properties()
+        southbound = SemanticConnectorRegistry([MQTTBinding]).declared_connection_metadata()
         payload = {INF.hasMQTTBrokerIP.lined: ["127.0.0.1"]}
 
         assert carries_southbound(payload, southbound) == {str(INF.hasMQTTBrokerIP)}
 
     def test_a_clean_payload_carries_nothing(self):
-        southbound = SemanticConnectorRegistry([MQTTBinding]).southbound_properties()
+        southbound = SemanticConnectorRegistry([MQTTBinding]).declared_connection_metadata()
         payload = {INF.hasValue.lined: [12.1], INF.accessMode.lined: ["readwrite"]}
 
         assert carries_southbound(payload, southbound) == set()

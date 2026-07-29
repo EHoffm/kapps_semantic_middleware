@@ -34,7 +34,7 @@ from kapps_semantic_middleware.connectors.semantic import (
     normalize_metadata,
     resolve_direction,
 )
-from kapps_semantic_middleware.projection import prune_southbound
+from kapps_semantic_middleware.projection import cross_check, prune_southbound
 
 logger = logging.getLogger(__name__)
 
@@ -102,15 +102,40 @@ def plan_wiring(
     treat every parameter node as ordinary data and serve its broker address — the
     least-privileged flavour would leak the most (ADR 0028).
     """
-    southbound = registry.southbound_properties()
-
     resource_class = resource_class or _class_of(ogm, resource_iri)
     full_spec = ogm.get_class_spec(class_iri=resource_class, class_scope=class_scope)
-    northbound_spec = prune_southbound(full_spec, southbound)
+
+    # The projection asks the *ontology* what is protocol metadata, not the registry. A
+    # registry-derived set only knows the protocols this middleware has code for, and a
+    # parameter reachable over an unregistered protocol would have its endpoint served
+    # (measured, ADR 0028). Recomputed here on every construction, because the ontology may
+    # have grown a protocol since this instance last started.
+    # `cache` is shared with the loop below so the ontology is asked once per distinct property
+    # rather than once per use. Every one of these is a live SPARQL round trip, and the store
+    # this runs against refuses distinct/group-by queries under memory pressure — so redundant
+    # queries are not merely slow, they raise the chance of a spurious startup failure.
+    southbound_by_property: Dict[str, frozenset] = {}
+    northbound_spec = prune_southbound(full_spec, ogm=ogm, cache=southbound_by_property)
 
     bindings = _recognise(
         ogm=ogm, resource_iri=resource_iri, spec=full_spec, registry=registry
     )
+
+    southbound = frozenset(
+        prop
+        for binding in bindings
+        for prop in southbound_by_property.get(str(binding.parameter_property), ())
+    )
+
+    # Cross-check the two declarations against each other. The ontology governs what is hidden;
+    # a descriptor's connection_metadata says what it reads. Disagreement is a real deployment
+    # state rather than an error, so it is reported and not raised.
+    for binding in bindings:
+        cross_check(
+            binding.parameter_property,
+            southbound_by_property.get(str(binding.parameter_property), ()),
+            getattr(binding.descriptor, "connection_metadata", None),
+        )
 
     registrations: List[Tuple[ParameterBinding, Registration]] = []
     if autoregister:

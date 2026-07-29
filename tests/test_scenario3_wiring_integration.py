@@ -14,12 +14,16 @@ from pathlib import Path
 
 import pytest
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
+from graph_db_interface import IRI
 from kapps_ogm import OGM
 
 from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding
 from kapps_semantic_middleware.connectors.semantic import SemanticConnectorRegistry
 from kapps_semantic_middleware.connectors.wiring import plan_wiring
-from kapps_semantic_middleware.projection import carries_southbound
+from kapps_semantic_middleware.projection import (
+    carries_southbound,
+    southbound_properties,
+)
 from kapps_semantic_middleware.vocabulary import INF, AccessMode
 
 from conftest import requires_graphdb  # noqa: E402
@@ -218,6 +222,57 @@ class TestNorthboundProjection:
         )
         return node.instance.model_dump()
 
+    def test_a_protocol_with_no_registered_binding_is_still_hidden(
+        self, scenario3, unit_scope
+    ):
+        """The regression the ontology-derived projection exists for (ADR 0028).
+
+        A belt made reachable over MQTT *and* OPC-UA, with no OPC-UA binding registered
+        anywhere. The earlier registry-derived prune set removed the MQTT metadata and served
+        `inf:hasOPCUAEndpoint` with its address, because a set built from registered
+        descriptors only knows the protocols this middleware happens to have code for.
+
+        Two protocols on one parameter is not hypothetical: ADR 0026 names it as own-built
+        hardware whose protocol is not known when the ontology is authored.
+        """
+        graphdb, ogm = scenario3
+        opcua_marker = IRI(f"{seed.INF_NS}isInterfaceAccessibleOPCUAParameter")
+        opcua_endpoint = IRI(f"{seed.INF_NS}hasOPCUAEndpoint")
+        owl, rdfs, xsd = (
+            "http://www.w3.org/2002/07/owl#",
+            "http://www.w3.org/2000/01/rdf-schema#",
+            "http://www.w3.org/2001/XMLSchema#",
+        )
+
+        graphdb.query(
+            f"""
+            INSERT DATA {{
+              <{opcua_marker}> a <{owl}ObjectProperty> ;
+                  <{rdfs}subPropertyOf> <{seed.INF_NS}isInterfaceAccessibleParameter> ;
+                  <{rdfs}range> [ a <{owl}Class> ; <{owl}intersectionOf> (
+                      [ a <{owl}Restriction> ; <{owl}onProperty> <{opcua_endpoint}> ;
+                        <{owl}allValuesFrom> <{xsd}string> ] ) ] .
+              <{opcua_endpoint}> a <{owl}DatatypeProperty> .
+              <{seed.TU_HAS_CONVEYOR_SPEED}> <{rdfs}subPropertyOf> <{opcua_marker}> .
+            }}
+            """,
+            update=True,
+        )
+        graphdb.query(
+            f'INSERT {{ ?n <{opcua_endpoint}> "opc.tcp://10.0.0.5:4840/belt" }} '
+            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n }}",
+            update=True,
+        )
+
+        plan = _plan(ogm, unit_scope)
+        served = str(self._served(ogm, plan))
+
+        assert "opc.tcp://10.0.0.5:4840/belt" not in served
+        assert opcua_endpoint.lined not in served
+        # And the northbound content still survives, so this is not passing by serving nothing.
+        assert INF.accessMode.lined in served
+        assert seed.TU_HAS_UNIT.lined in served
+
     def test_the_unpruned_spec_would_have_leaked(self, scenario3, unit_scope):
         """Guards the premise. If this ever stops leaking, the OGM gained a merge-depth
         knob and ADR 0028's prune can retire."""
@@ -235,7 +290,7 @@ class TestNorthboundProjection:
 
         assert carries_southbound(
             leaked.instance.model_dump(),
-            SemanticConnectorRegistry([MQTTBinding]).southbound_properties(),
+            southbound_properties(ogm, seed.TU_HAS_CONVEYOR_SPEED),
         )
 
     @pytest.mark.parametrize(

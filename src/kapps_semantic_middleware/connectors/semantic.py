@@ -159,8 +159,15 @@ class BindingDescriptor(Protocol):
     """The ``inf:`` marker property a domain property must be a subproperty of to match."""
 
     connection_metadata: ClassVar[Tuple[IRI, ...]]
-    """The properties this protocol reads. Also, exactly, the properties that must never go
-    north — the registry takes the union as the projection's prune set (ADR 0028)."""
+    """The properties this binding reads in order to construct a connector.
+
+    **Not** the projection's source of truth. It once was, and that was wrong: a set built from
+    the registered bindings only knows the protocols this middleware has code for, so a
+    parameter reachable over an unregistered protocol had its endpoint served northbound. The
+    projection asks the *ontology* instead (ADR 0028). This declaration is cross-checked against
+    it at construction, and a disagreement is reported — the two should coincide, and where they
+    do not, either the contract grew a term this binding ignores or the binding expects one the
+    ontology never declares."""
 
     @staticmethod
     def build(
@@ -211,13 +218,13 @@ class SemanticConnectorRegistry:
         """The descriptor registered for exactly this interface property, if any."""
         return self._by_property.get(str(iri))
 
-    def southbound_properties(self) -> frozenset:
-        """Every property any registered binding reads — the projection's prune set.
+    def declared_connection_metadata(self) -> frozenset:
+        """Every property any registered binding reads, keyed by IRI string.
 
-        Keyed by IRI string, because a prune compares against ClassSpec keys. This is the
-        whole reason the core needs no hardcoded list of protocol terms: a domain expert who
-        registers a binding for their own protocol gets their terms projected out for free
-        (ADR 0021, ADR 0028).
+        **Not the projection's prune set** — see ``BindingDescriptor.connection_metadata``.
+        This is one side of the construction-time cross-check against what the ontology
+        declares; the projection itself follows the ontology
+        (:func:`kapps_semantic_middleware.projection.southbound_properties`).
         """
         return frozenset(
             str(prop)

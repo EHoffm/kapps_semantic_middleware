@@ -111,11 +111,22 @@ _Avoid_: The datamodel, Schema (it is one view among many; a connector's view of
 a different one).
 
 **Projection** (northbound):
-What keeps connection metadata out of the served datamodel: the middleware **removes the southbound
-properties from the ClassSpec before fetching**, and materializes the pruned spec (ADR 0028). The prune
-set is the union of every registered **Binding descriptor**'s connection metadata, so the core names no
-protocol term and a domain expert's own connector is projected for free. It runs for **every Flavour**,
-including one that wires nothing — gating it would make the least-privileged instance the one that leaks.
+What keeps connection metadata out of the served datamodel: the middleware **removes the protocol
+properties from the ClassSpec before fetching**, and materializes the pruned spec (ADR 0028). What
+counts as protocol metadata is **read from the ontology**, per Parameter, at every startup: everything
+contributed by an **Interface property** strictly between the Parameter's own property and
+`inf:isInterfaceAccessibleParameter`. The Parameter's own range (value, unit) and the root's own range
+(`inf:accessMode`) stay. It runs for **every Flavour**, including one that wires nothing — gating it
+would make the least-privileged instance the one that leaks.
+
+Deriving the set from the **registry** instead was tried and **fails open**: it knows only the
+protocols this middleware has code for, so a Parameter reachable over an unregistered protocol had its
+endpoint served (measured). A **Binding descriptor**'s connection metadata is now a *cross-check*
+against the ontology, not the source. A keep-list — naming what is safe — was rejected: it is a second
+closed-world moment (ADR 0025 allows exactly one) and it hides new domain content by default.
+_Avoid_: Deny-list *of field names* (the point is that the list is derived from the authoritative
+ontology, not enumerated); Access control (the Projection stops a peer *learning* the broker address
+from this REST surface, not someone who already knows it — that is future work).
 
 Earlier this was recorded as *not* a middleware step at all: a Parameter materializes to exactly what its
 property's restriction declares, so on the merge-depth reading a broker address physically could not
