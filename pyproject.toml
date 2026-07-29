@@ -9,6 +9,11 @@ dependencies = [
     "graph-db-interface>=2.0.1",
     "aas-middleware>=0.2.6",
     "httpx>=0.27.0",
+    # aas_middleware keeps aiomqtt in an optional "industrial" extra, but the MQTT semantic
+    # connector is a first-class part of this middleware (#40), so it is a plain dependency
+    # here. Declaring it is also what stops the OGM repo's #15 failure -- importing a module
+    # the manifest never mentions -- from recurring.
+    "aiomqtt>=2.1.0",
 ]
 
 [dependency-groups]
@@ -22,6 +27,10 @@ dev = [
     "nbconvert>=7.16.0",
     "jupytext>=1.16.0",
     "httpx>=0.27.0",
+    # A pure-Python MQTT broker, run in-process as a pytest fixture. mosquitto would need
+    # root to install, which no CI runner and no fresh checkout can assume; this keeps the
+    # MockTransferUnit round-trip genuinely live and portable (#40).
+    "amqtt>=0.11.0",
 ]
 
 [build-system]
