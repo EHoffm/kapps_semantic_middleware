@@ -16,8 +16,6 @@ from __future__ import annotations
 from importlib import resources
 from pathlib import Path
 
-from typing import Optional
-
 from graph_db_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
 from rdflib.namespace import RDF
@@ -242,15 +240,21 @@ def seed_scenario3(db, ogm) -> None:
             class_iri=CONVEYOR_BELT_CLASS,
             instance_iri=belt,
             class_scope=ClassScope.from_property_chains([[TU_HAS_CONVEYOR_SPEED]]),
-            data={TU_HAS_CONVEYOR_SPEED: [{TU_HAS_UNIT: ["m/s"]}]},
-        )
-        _attach_connection_metadata(
-            db,
-            resource_iri=belt,
-            parameter_property=TU_HAS_CONVEYOR_SPEED,
-            access_mode="readwrite",
-            topic=f"TransferUnit1/ConveyorBelt/{position}/speed",
-            set_topic=f"TransferUnit1/ConveyorBelt/{position}/speed_set",
+            data={
+                TU_HAS_CONVEYOR_SPEED: [
+                    {
+                        TU_HAS_UNIT: ["m/s"],
+                        INF_ACCESS_MODE: ["readwrite"],
+                        INF_HAS_MQTT_TOPIC: [
+                            f"TransferUnit1/ConveyorBelt/{position}/speed"
+                        ],
+                        INF_HAS_MQTT_SET_TOPIC: [
+                            f"TransferUnit1/ConveyorBelt/{position}/speed_set"
+                        ],
+                        INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
+                    }
+                ]
+            },
         )
 
     for barrier, position in (
@@ -261,14 +265,17 @@ def seed_scenario3(db, ogm) -> None:
             class_iri=LIGHT_BARRIER_CLASS,
             instance_iri=barrier,
             class_scope=ClassScope.from_property_chains([[TU_IS_OCCUPIED]]),
-            data={TU_IS_OCCUPIED: [{}]},
-        )
-        _attach_connection_metadata(
-            db,
-            resource_iri=barrier,
-            parameter_property=TU_IS_OCCUPIED,
-            access_mode="read",
-            topic=f"TransferUnit1/LightBarrier/{position}/occupied",
+            data={
+                TU_IS_OCCUPIED: [
+                    {
+                        INF_ACCESS_MODE: ["read"],
+                        INF_HAS_MQTT_TOPIC: [
+                            f"TransferUnit1/LightBarrier/{position}/occupied"
+                        ],
+                        INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
+                    }
+                ]
+            },
         )
 
     ogm.create(
@@ -287,45 +294,6 @@ def seed_scenario3(db, ogm) -> None:
                 {"id": LIGHT_BARRIER_BACK},
             ],
         },
-    )
-
-
-def _attach_connection_metadata(
-    db,
-    *,
-    resource_iri: IRI,
-    parameter_property: IRI,
-    access_mode: str,
-    topic: str,
-    set_topic: Optional[str] = None,
-) -> None:
-    """Attach the MQTT connection metadata to a parameter node the OGM just created.
-
-    **A documented stand-in, not the intended flow.** In production the middleware writes
-    this metadata itself when the resource is first set up (ADR 0015 row 3; issue #54) —
-    that is the moment the interface metadata is joined to the domain parameter.
-
-    It cannot go through the OGM today: the write path serializes only what the range
-    restriction declares, so ``ogm.create`` silently drops the topic, set topic and broker
-    (issue #52; ``SAWeindel/kapps_ogm#7`` is the fix). Hence a targeted SPARQL INSERT, as
-    an explicit exception to root ADR 0008 — to be deleted once #54 lands.
-
-    The parameter node is anonymous and the OGM does not report the identifier it minted,
-    so the node is reached by matching from the resource rather than by name — which is the
-    same limitation ``SAWeindel/kapps_ogm#6`` removes.
-    """
-    inserts = [
-        f'?parameter <{INF_ACCESS_MODE}> "{access_mode}" .',
-        f'?parameter <{INF_HAS_MQTT_TOPIC}> "{topic}" .',
-        f'?parameter <{INF_HAS_MQTT_BROKER_IP}> "{MQTT_BROKER_IP}" .',
-    ]
-    if set_topic is not None:
-        inserts.append(f'?parameter <{INF_HAS_MQTT_SET_TOPIC}> "{set_topic}" .')
-
-    db.query(
-        f"INSERT {{ {' '.join(inserts)} }} "
-        f"WHERE {{ <{resource_iri}> <{parameter_property}> ?parameter }}",
-        update=True,
     )
 
 

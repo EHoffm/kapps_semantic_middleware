@@ -19,13 +19,17 @@ published 0.9.0 release — rather than fetched at seed time, so seeding stays r
 examples ADR 0001. It is imported and specialized, never modified (ADR 0012). The local `cfc:` class
 stubs the Turtle used to carry are gone: Core now loads in full.
 
-**One documented exception.** `ogm.create` cannot write the MQTT connection metadata, because the write
-path serializes only what the range restriction declares and silently drops the rest (#52). So
-`_attach_connection_metadata` writes it with a targeted SPARQL `INSERT … WHERE`, matching the parameter
-node from its resource — an explicit exception to root ADR 0008, to be deleted when the provisioning
-flow (#54) lands on top of `SAWeindel/kapps_ogm#6`/`#7`. It matches by pattern rather than by name
-because the parameter node is anonymous and the OGM does not report the identifier it minted, which is
-the limitation `kapps_ogm#6` removes.
+**No exceptions to root ADR 0008.** The seed writes every triple through `ogm.create`, connection
+metadata included. This was not true until `SAWeindel/kapps_ogm#7` landed: the write path serialized
+only what a property's *own* range restriction declared, so a topic, set topic or broker passed to
+`ogm.create` was silently dropped (#52), and the seed had to fall back to a targeted SPARQL
+`INSERT … WHERE` in a helper called `_attach_connection_metadata` — a documented exception to root
+ADR 0008. `#7` made `PropertySpec.specify` walk `rdfs:subPropertyOf*` and merge the anonymous
+restriction ranges it finds, so the effective shape of `tu:hasConveyorSpeed` now resolves all six of
+`inf:hasValue`, `tu:hasUnit`, `inf:accessMode`, `inf:hasMQTTTopic`, `inf:hasMQTTSetTopic` and
+`inf:hasMQTTBrokerIP`. The helper and the exception were deleted on 2026-07-29; the metadata is now
+passed in `ogm.create`'s `data`, and `tests/test_scenario3_seed_integration.py` — unchanged, because it
+always asserted the resulting graph rather than the mechanism — verifies it live.
 
 ## What it is
 
@@ -141,6 +145,25 @@ runtime state).
 
 Root ADR 0001 requires a detailed changelog for ontology changes; it lives here now rather than in the
 Turtle.
+
+### 2026-07-29 — the seed's last raw-SPARQL write is gone
+
+No change to the Turtle; this records the seed catching up to it. The 2026-07-28 entry below noted that
+the declared MQTT metadata "takes effect only once `SAWeindel/kapps_ogm#7` lands". It has landed, and
+the effect was measured against the live store before anything was deleted: with the metadata passed in
+`ogm.create`'s `data`, a settable belt parameter comes back carrying `hasUnit`, `accessMode`,
+`hasMQTTTopic`, `hasMQTTSetTopic` and `hasMQTTBrokerIP`, and a read-only barrier parameter carries
+`accessMode`, `hasMQTTTopic` and `hasMQTTBrokerIP` and no set topic — exactly what the old SPARQL
+`INSERT` produced. `_attach_connection_metadata` was then deleted along with its root-ADR-0008
+exception, and `examples/seed.py` now has no raw write path at all.
+
+The scenario-3 integration tests needed no edit, which is the useful part: they assert the shape of the
+seeded graph, never how the triples got there, so they were already the acceptance test for this
+change.
+
+This is an enabling step for **#54**, not #54 itself. The seed still *authors* the connection metadata;
+#54 is the middleware provisioning it at first setup and writing back what it wired. What has changed is
+that the write path #54 needs now exists and is proven.
 
 ### 2026-07-28 (#53) — the interface TBox gets its own ranges, the domain TBox gets smaller
 
