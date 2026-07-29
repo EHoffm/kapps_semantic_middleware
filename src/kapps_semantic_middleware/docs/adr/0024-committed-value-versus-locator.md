@@ -21,10 +21,10 @@ simply leaves it empty.
 
 ### "The live value is never persisted" was a pattern, described as an invariant
 
-ADR 0014 states that "the live value is still never *persisted to the graph*", and the Parameter glossary
+ADR 0015 states that "the live value is still never *persisted to the graph*", and the Parameter glossary
 entry repeated it. Read as a middleware guarantee, that would require the write path to know which fields
 are live and strip them — and it would forbid a legitimate use we should support. It is really a property
-of the **locator** pattern, which ADR 0014 was describing because the scenario in front of it was a
+of the **locator** pattern, which ADR 0015 was describing because the scenario in front of it was a
 fast-changing one.
 
 Enforcing it would also break the middleware's ontology-agnosticism. A parameter with a daily update
@@ -61,8 +61,8 @@ untouched.
 
 ## Consequences
 
-- Amends **ADR 0014**: "the live value is never persisted to the graph" is scoped to the locator pattern
-  rather than stated as a middleware invariant. ADR 0013 and ADR 0015 make no such claim and are
+- Amends **ADR 0015**: "the live value is never persisted to the graph" is scoped to the locator pattern
+  rather than stated as a middleware invariant. ADR 0015 make no such claim and are
   unaffected.
 - **#25** authors `transferunit.ttl` with parameter metadata but **no value literals**. Ordinary complex
   properties that are not interface parameters — a manufacturer, a serial number — keep their literals;

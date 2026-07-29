@@ -50,7 +50,7 @@ below.
 
 ### The blanknode has no class to match on
 
-ADR 0016 speaks of an **interface class** resolved by `rdf:type`. Checked against the live graph
+ADR 0023 speaks of an **interface class** resolved by `rdf:type`. Checked against the live graph
 (#29), the parameter blanknode carries **no named type at all**: its only `rdf:type` values are the
 anonymous `owl:Restriction` nodes of the property's range, they exist solely under inference, and
 `_fetch_complex_property` queries `FROM <http://www.ontotext.com/explicit>`, so they are not even
@@ -73,7 +73,7 @@ The core must not hardcode domain IRIs, and a connector may hardcode only terms 
 ontology (ADR 0021). Putting the interface property and the metadata list *in the connector class*
 satisfies both: the core holds a registry of opaque entries and asks it questions, and the MQTT
 vocabulary exists in exactly one place — the MQTT connector. A new protocol is a new class plus its
-ontology description, registered the same way, with no core change. That is ADR 0016's
+ontology description, registered the same way, with no core change. That is ADR 0023's
 protocol-extensibility seam, relocated from the ontology to the pairing and made concrete.
 
 ### Recognition, not a whitelist
@@ -94,7 +94,7 @@ regular data of the complex property.
 
 This is what makes the projection safe to state simply: **hide what a connector claims, show
 everything else.** A view that asked for a parameter never asked for its transport details, because
-a ClassScope cannot reach them (ADR 0019); a view that asked for a manufacturer asked for exactly
+a ClassScope cannot reach them (ADR 0028); a view that asked for a manufacturer asked for exactly
 what it got.
 
 ### A resolved connector missing its metadata is loud
@@ -138,7 +138,7 @@ Core paradigms change only where the semantic layer genuinely needs something th
 
 ## Consequences
 
-- ADR 0016's "registry keyed on `rdf:type`" is amended to "keyed on the interface property,
+- ADR 0023's "registry keyed on `rdf:type`" is amended to "keyed on the interface property,
   matched through `rdfs:subPropertyOf*`". The interface-class↔connector pairing, the MQTT contract
   and the `provide`/`consume` semantics are unchanged.
 - Recognition needs one TBox query per distinct complex property (batchable), not per instance.
@@ -152,6 +152,6 @@ Core paradigms change only where the semantic layer genuinely needs something th
 - The consolidation (#39) must keep the interface-property hierarchy under the `inf:` name and must
   declare every connection-metadata property in the parameter property's range restriction, or the
   metadata is dropped before any connector sees it.
-- Amends ADR 0016. Depends on root ADR 0002 for the restriction to be extensible at all.
+- Amends ADR 0023. Depends on root ADR 0002 for the restriction to be extensible at all.
 
 Resolves part of wayfinder ticket #29 under map #24.

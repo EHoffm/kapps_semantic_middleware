@@ -47,7 +47,7 @@ already exists — verified:
 
 `OGM._fetch_complex_property` issues `?bnode ?property ?value` — unfiltered, scope never consulted —
 and `PropertySpec._specify_complex_property` takes no `nested_scope` argument. Case D's extra level
-produces no error and no effect. **→ ADR 0019.**
+produces no error and no effect. **→ ADR 0028.**
 
 ### 3. The blanknode's shape is the TBox restriction; the rest is silently dropped
 
@@ -153,7 +153,7 @@ and #41 inherits nothing.
 
 | # | Decision | Record |
 |---|---|---|
-| 1 | Northbound projection is middleware-side; a scope cannot select within a parameter | ADR 0019 (amends 0018) |
+| 1 | Northbound projection is middleware-side; a scope cannot select within a parameter | ADR 0028 (amends 0018) |
 | 2 | Conjunctive `rdfs:range`; the raise is a `kapps_ogm` defect | root ADR 0002 |
 | 3 | Connectors match on the interface property; registry built from connector classes | ADR 0020 (amends 0016) |
 | 4 | Unrecognised complex content is plain data, shown and readable, nothing wired | ADR 0020 |

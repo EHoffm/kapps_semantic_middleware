@@ -75,7 +75,7 @@ deliberate restriction with a rationale to be weighed; it is an incorrect readin
 a legal, meaningful ontology as malformed. Fixing it makes `kapps_ogm` agree with the specification
 it implements. The rejected alternatives — mint parallel subproperties in our own namespace, or keep
 connection metadata out of the graph entirely and configure connectors in Python — both work around
-correct ontologies that the OGM mishandles, and the second would gut ADR 0016's premise that a
+correct ontologies that the OGM mishandles, and the second would gut ADR 0023's premise that a
 domain expert can register a resource by authoring instance data.
 
 ## Consequences

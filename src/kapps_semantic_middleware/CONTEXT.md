@@ -51,7 +51,9 @@ exposes — see the paper's explicit divergence from the AAS capability-skill-se
 **Parameter** (interface-accessible parameter) — _supersedes StateProperty (ADR 0015)_:
 A readable and/or settable state of a Resource, modelled as **one graph node** carrying its
 value/unit **and** the metadata a protocol connector needs to reach the device (e.g. an MQTT
-topic + broker). Typed by a protocol **interface class** under `inf:InterfaceAccessibleParameter`.
+topic + broker). It carries **no named `rdf:type`** — its only types are anonymous restriction nodes,
+which exist by inference and never survive an explicit-graph fetch — so it is recognised by the
+**Interface property** its domain property specializes, never by its class (ADR 0020).
 The middleware's former "readable state" and the shop-floor "parameter" are one thing seen from
 two directions — southbound (how the middleware reaches the device) and northbound (how peers
 reach the middleware). Whether it is externally settable is a **facet** (an access mode), not a
@@ -60,7 +62,7 @@ and access mode are read and written together as one dict, because they share on
 locked circular-factory pattern for metadata about a property, RDF having no properties-about-
 properties (ADR 0017). Its **shape is the TBox restriction** on its property's `rdfs:range`, not the
 instance data: anything the restriction does not declare is dropped at materialization with only a
-warning, so metadata a connector needs must be declared there or it never arrives (ADR 0019).
+warning, so metadata a connector needs must be declared there or it never arrives (ADR 0028).
 A complex property that matches no registered connector is **not** a Parameter — it is ordinary
 data the consumer asked for, displayed and readable, with nothing wired (ADR 0020).
 Whether its value lives in the graph is the domain's choice — see **Committed value** / **Locator**. It is
@@ -69,12 +71,13 @@ value inside it (ADR 0023).
 _Avoid_: StateProperty (retired term, ADR 0015); Sensor value / Observation (those describe the
 data, not the graph node); Capability (states have none — there is no "light-barrier capability").
 
-**Interface class**:
-A protocol-specific parameter class — `inf:MQTTParameter`, `inf:OPCUAParameter`, … under
-`inf:InterfaceAccessibleParameter` — that declares what connection metadata its protocol needs and
-is paired **one-to-one with a connector** in the middleware. The protocol-extensibility seam: a new
-protocol is a new interface class plus a new connector, no core change.
-_Avoid_: Adapter, Driver (the interface class is the ontology term; the connector is its runtime pair).
+**Interface class** — _retired term, do not use_:
+A protocol-specific parameter *class* (`inf:MQTTParameter`, `inf:OPCUAParameter`) that a connector was
+paired with one-to-one, resolved by the parameter's `rdf:type`. **The parameter node has no named
+type**, so nothing could ever match on it (ADR 0020, measured). The concept it was reaching for — the
+protocol-extensibility seam — survives intact as the **Interface property**, and the ontology terms it
+named are gone from the scenario-3 TBox. Use **Interface property**.
+_Avoid_: the term itself. Also Adapter, Driver.
 
 **ClassScope**:
 A **projection — a view** — over the graph, expressed (in the OGM) as a tree of property-chains
@@ -83,7 +86,7 @@ about. There is no single "the datamodel" for a resource. This is how one centra
 both the IT-OT boundary and the control/factory layer without duplicating concepts (ADR 0018).
 A view **terminates at a Parameter and cannot select within one**: below a complex property the
 chain is silently discarded, and the blanknode's contents are fixed by the TBox restriction, the
-same for every consumer (ADR 0019). A scope chooses *which* parameters, never *which parts* of one.
+same for every consumer (ADR 0028). A scope chooses *which* parameters, never *which parts* of one.
 An **empty** projection is legitimate — the graph holds the information, and a resource whose view
 is a bare individual serves a one-field datamodel and starts normally.
 _Avoid_: Filter, Query (a ClassScope is a reusable named view of which metadata to materialise).
@@ -102,7 +105,7 @@ datamodel it REST-exposes: the **northbound** projection. Stated by the domain c
 library, since only that code knows what the instance is for. Omitting it falls back to an unscoped
 fetch, which materializes the `id` alone — a legitimate, if minimal, projection.
 Connection metadata is absent from it not because the view declines to fetch it (it cannot — see
-**ClassScope**) but because the **Projection** removes it (ADR 0019), so a peer cannot learn the
+**ClassScope**) but because the **Projection** removes it (ADR 0028), so a peer cannot learn the
 broker address and bypass the middleware.
 _Avoid_: The datamodel, Schema (it is one view among many; a connector's view of the same resource is
 a different one).
@@ -120,7 +123,7 @@ reach a peer. That premise died when the `inf:` interface properties gained thei
 necessary so provisioning can write connection metadata through the OGM — because `PropertySpec` merges
 the entire `rdfs:subPropertyOf*` chain with no depth parameter. Measured: the unpruned belt materializes
 carrying topic, set topic and broker. Merge depth remains the right *description* of the two views; the
-middleware has to realize the shallow one itself (ADR 0019 stays retired as written; ADR 0026's
+middleware has to realize the shallow one itself (ADR 0028 stays retired as written; ADR 0026's
 projection claim is superseded).
 _Avoid_: Filter, Stripping *of data* (the prune is on the shape, before any data is read — the northbound
 model has no field to carry a broker address in); View (the view is the ClassScope, which selects *which*

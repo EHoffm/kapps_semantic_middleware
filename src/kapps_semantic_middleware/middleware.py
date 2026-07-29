@@ -73,7 +73,13 @@ __all__ = ["SemanticMiddleware", "OperationResolutionError"]
 class _EventTriggerPayload(BaseModel):
     """REST body of the event trigger: the IRI of the Operation now in the graph (ADR 0009)."""
 
-    operation_iri: str #TODO: Why is this not an iri? 
+    # `str`, not `IRI`, and deliberately so (#45). `IRI.__get_pydantic_core_schema__` returns
+    # `any_schema()` — permissive by design, on the grounds that IRI validates itself — so
+    # annotating this `IRI` would neither validate nor convert the incoming value: the
+    # attribute would hold a plain `str` while claiming to be an `IRI`. Taking `str` at the
+    # boundary and converting explicitly in `_handle_event_trigger` puts the validation where
+    # a malformed IRI actually raises. The safer-looking annotation is the less safe one.
+    operation_iri: str
 
 
 class _OperationDraft:

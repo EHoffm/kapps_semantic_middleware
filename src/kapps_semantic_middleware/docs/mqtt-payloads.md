@@ -1,7 +1,7 @@
 # MQTT payloads: raw scalar and JSON envelope
 
 How the MQTT semantic connector reads and writes a parameter's value on the wire
-(ADR 0016, ADR 0023). One property decides it, and it is honoured symmetrically on read and
+(ADR 0023). One property decides it, and it is honoured symmetrically on read and
 write.
 
 ## Raw scalar — the default

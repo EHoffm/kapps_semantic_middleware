@@ -5,6 +5,12 @@ realized not as a connector subclass but as a **binding descriptor**: an object 
 class it builds, the interface property it binds to, the connection metadata its protocol needs, and
 how to turn one parameter's metadata into one or more `add_synced_connector` registrations.
 
+> **Consolidated 2026-07-29.** This ADR absorbs **ADR 0016** ("a semantic connector is a bare connector
+> + a protocol metadata ontology, resolved through a universal registry"), whose file is deleted. ADR
+> 0016's headline was directly contradicted here — a semantic connector is *not* itself an
+> `aas_middleware` Connector — so leaving both standing meant the first ADR a reader met on the subject
+> told them the wrong thing. What survives from it is below; **How we got here** preserves the route.
+
 ```python
 @semantic_connector
 class MQTTBinding:
@@ -124,8 +130,51 @@ is never writable by accident of omission.
   memory address (`id_136553861392864`), which do not survive a restart.
 - A connector-bound parameter's REST payload is whatever its range restriction declares — domain
   content plus the access-mode marker — and its live value is absent until the device first publishes
-  (ADR 0024). **ADR 0019's projection step is not needed**: connection metadata is never declared in a
-  restriction, so it never materializes. The binding reads it straight from the ABox at registration,
-  which is the moment the middleware joins the domain TBox to the connector's `inf:` TBox.
+  (ADR 0024). The binding reads its connection metadata straight from the ABox at registration, which is
+  the moment the middleware joins the domain TBox to the connector's `inf:` TBox.
 
-Resolves wayfinder ticket #28 under map #24.
+  > **Corrected 2026-07-29 (ADR 0028).** This consequence originally continued "*a projection step is
+  > not needed: connection metadata is never declared in a restriction, so it never materializes*". That
+  > became false when #53 gave the `inf:` interface properties their own ranges. The metadata now does
+  > materialize, and the northbound projection prunes it out of the ClassSpec before fetching. Reading
+  > it from the ABox at registration — the part above — is unaffected and still correct.
+
+## What survives from ADR 0016
+
+**`provide`/`consume` map to read/write of the parameter.** `provide` yields the current value (MQTT:
+the latest message on the read topic, held from a subscription); `consume` writes one (MQTT: publish to
+the set topic). A `read` parameter uses `provide` only; a `readwrite` parameter uses both. This is how a
+connector backs ADR 0015's Path-1 auto-wiring.
+
+**The registry is the extensibility seam.** Adding a protocol is registering a new descriptor — no core
+change — and a domain expert may bring their own connector and their own metadata ontology. The `inf:`
+bindings this repo ships (MQTT now, OPC-UA reserved) are just the ones that come in the box. This is the
+connector-side analogue of ADR 0015's Path-2 escape hatch.
+
+**The MQTT contract** (scenario 3's, an *instance* convention — never baked into the class ontology):
+
+- Metadata: `inf:hasMQTTBrokerIP`, `inf:hasMQTTTopic`, `inf:hasMQTTSetTopic` (present iff `accessMode`
+  is `readwrite`), optional `inf:hasMQTTValuePath`.
+- Topic scheme `TransferUnit<n>/<component>/<position>/<param>`, setpoint appending `_set`.
+- `MockTransferUnit` **publishes 4** and **subscribes to 2**; the middleware is its mirror image.
+- Payload: **raw scalar by default**, parsed per the parameter's ontology datatype — which falls out of
+  the node model generated from the effective shape, not from hand-written coercion. With
+  `inf:hasMQTTValuePath`, a **JSON envelope** read and written at that path, symmetric across both
+  directions. Documented at `../mqtt-payloads.md`.
+
+## How we got here
+
+1. **ADR 0016 (2026-07-26, ticket #30)** established the concept — a connector that registers itself
+   from the graph — and got two things right that survive: the registry as the extensibility seam, and
+   the MQTT contract above. It got two things wrong, both from assuming the framework's connectors were
+   ours to extend: that a semantic connector *is* an `aas_middleware` Connector (root ADR 0001 forbids
+   adding self-registration to a sibling, so it cannot be), and that resolution keys on the parameter's
+   `rdf:type` (ADR 0020: the node has no named type — matching is on the interface property).
+2. **ADR 0020 (2026-07-27, ticket #29)** replaced the type key with the interface-property hierarchy.
+3. **This ADR (2026-07-27, ticket #28)** replaced "is a Connector" with "names a `connector_cls`", which
+   is what makes the extension universal across connectors we neither own nor can subclass.
+
+The through-line: each step moved the seam *outward*, away from requiring anything of the code being
+integrated.
+
+Resolves wayfinder ticket #28 under map #24; absorbs #30 (ADR 0016).

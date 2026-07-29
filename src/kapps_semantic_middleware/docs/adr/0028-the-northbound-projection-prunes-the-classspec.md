@@ -5,6 +5,35 @@ before fetching**, and passing that pruned spec to `OGM.fetch(class_spec=…)`. 
 properties is the union of every registered binding descriptor's `connection_metadata`. The pruning
 runs **unconditionally**, for every flavour, including one that wires no connectors at all.
 
+> **Consolidated 2026-07-29.** This ADR absorbs **ADR 0019** ("the northbound projection is
+> middleware-side; a ClassScope cannot select within a parameter"), whose file is deleted. The
+> projection question was decided three times in five days — ADR 0019, then ADR 0026, then here — and
+> reconstructing the answer from three documents was itself a hazard. Everything still true is below;
+> **How we got here** preserves the route.
+
+## The mechanic that constrains every answer
+
+*(established by ADR 0019, reproduced live against `tui:TransferUnit1` under ticket #29, and still
+true)*
+
+**A `ClassScope` selects which parameters a consumer sees. It cannot select within one.** Three
+mechanics in `kapps_ogm` combine to make a parameter node's contents fixed and identical for every
+consumer:
+
+1. `OGM._fetch_complex_property` issues a bare `?bnode ?property ?value` — every property of the node,
+   no filter, no scope consulted.
+2. `PropertySpec.specify` routes a `COMPLEX` property to `_specify_complex_property`, which takes no
+   `nested_scope` argument at all. A chain element below a complex property is dropped silently — not
+   even a warning.
+3. The node's shape therefore comes entirely from the property's `rdfs:range` restriction — the TBox.
+
+ADR 0018's worked example, which scoped three levels deep to reach `INF.hasValue` and `TU.hasUnit`
+inside the parameter, was silently discarded when run. That example was corrected in place.
+
+This is why `inf:accessMode` — which a peer legitimately needs — has to be **declared in a
+restriction** rather than filtered in per consumer, and it is why the projection cannot be expressed as
+a view "simply declining to fetch" the connection metadata. Something has to act.
+
 ## Why
 
 ### "The restriction is the projection" is not true as built
@@ -108,4 +137,32 @@ byte-identical northbound payloads.
 - The southbound spec is still built, once, and is what the bindings read. Two specs exist per resource:
   the full one for wiring and the pruned one for serving.
 
-Part of #40 under map #24.
+## How we got here
+
+The projection was decided three times. Preserving the route matters, because two of the three answers
+were correct on the evidence available when they were written:
+
+1. **ADR 0019 (2026-07-27, ticket #29)** — *the projection is middleware-side, over the materialized
+   data.* Reached after discovering live that a ClassScope cannot select within a parameter, so ADR
+   0018's mechanism did not exist. Correct about the mechanic; its chosen remedy was to strip fields
+   from a materialized model.
+2. **ADR 0026 (2026-07-28, ticket #52)** — *there is no projection step; the restriction is the
+   projection.* ADR 0019 was retired and its implementation ticket **#51 closed unbuilt**. The reasoning
+   was sound at the time: the domain TBox declared only `inf:hasValue` and `tu:hasUnit`, put
+   `inf:hasMQTTTopic` in no restriction anywhere, and the two TBoxes were deliberately unconnected — so
+   a broker address was dropped before a datamodel existed. Nothing had to act, because nothing arrived.
+3. **This ADR (2026-07-29, ticket #40)** — *the premise died.* Ticket **#53** gave the `inf:` interface
+   properties their own `rdfs:range` restrictions, which was necessary and is not being reverted: it is
+   what lets provisioning write connection metadata through the OGM at all, and it is what let the seed
+   retire its last raw SPARQL `INSERT`. The moment those ranges existed, the metadata *did* arrive, and
+   `_resolve_effective_ranges` merges the whole `subPropertyOf*` chain with no depth control. Measured,
+   not inferred: the served belt carried topic, set topic and broker.
+
+The lesson worth keeping: **#51 was closed unbuilt on reasoning that a later, correct ontology change
+invalidated.** A decision that rests on "the data never arrives" is only as durable as the schema that
+keeps it away — and here the schema had to change for an unrelated and better reason.
+
+ADR 0019 and this ADR agree that the middleware must act; they disagree only on *what* it acts on, and
+acting on the shape rather than the data is the stronger form.
+
+Part of #40 under map #24; absorbs #29 (ADR 0019).

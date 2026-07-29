@@ -62,7 +62,7 @@ plus a distinct `inf:hasMQTTSetTopic`, so a settable parameter needs **two** ins
 
 `ConnectionRegistry.connections` is `Dict[ConnectionInfo, List[str]]`. Both connectors bind to one
 `ConnectionInfo` and differ only in `sync_direction` — exactly what `SyncDirection` exists for. So the
-ticket's "one connector per topic" and ADR 0016's "one connector per parameter" are both right, at
+ticket's "one connector per topic" and ADR 0023's "one connector per parameter" are both right, at
 different layers.
 
 ### 6. The connector is asymmetric
@@ -78,7 +78,7 @@ list — and `Formatter.deserialize(body)` / `Mapper.map(body)` receive **only t
 inbound scalar would wipe `hasUnit` and every other facet, and no framework signature can restore it.
 
 Hence static facets are cached at wiring time and the formatter reassembles the node (ADR 0023). A
-device that genuinely publishes more than a value uses ADR 0016's `inf:hasMQTTValuePath` envelope.
+device that genuinely publishes more than a value uses ADR 0023's `inf:hasMQTTValuePath` envelope.
 
 ### 8. Registration after startup silently kills inbound traffic
 

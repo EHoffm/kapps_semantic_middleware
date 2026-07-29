@@ -283,7 +283,7 @@ class TestMQTTFormatter:
         assert json.loads(formatter.serialize(formatter.deserialize(7.25))) == 7.25
 
     def test_round_trips_a_json_envelope(self):
-        """inf:hasMQTTValuePath is one property, honoured symmetrically (ADR 0016)."""
+        """inf:hasMQTTValuePath is one property, honoured symmetrically (ADR 0023)."""
         formatter = self._formatter(value_path="payload.speed")
 
         [node] = formatter.deserialize({"payload": {"speed": 4.5}, "ts": 123})

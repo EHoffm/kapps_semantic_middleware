@@ -73,10 +73,18 @@ that twenty domain engineers never have to restate.
 
 ## The projection is merge depth
 
-A consumer merging only up to `inf:isInterfaceAccessibleParameter` gets value, unit and access mode;
-one that also merges the protocol subproperty gets topic, set topic and broker. So the northbound
-datamodel still physically cannot carry a broker address, and no filtering step is needed to remove
-one — **the restriction is the projection** (ADR 0026; ADR 0019 stays retired and #51 stays closed).
+A consumer merging only up to `inf:isInterfaceAccessibleParameter` should get value, unit and access
+mode; one that also merges the protocol subproperty gets topic, set topic and broker.
+
+**The ordering is the design; the merge is not selectable.** `PropertySpec._resolve_effective_ranges`
+walks the *entire* `rdfs:subPropertyOf*` chain, and no merge-depth parameter exists on `specify`,
+`get_class_spec` or `fetch` — so every ClassSpec is the deep one, and a materialized parameter *does*
+carry the broker address. Measured live, 2026-07-29. The middleware therefore realizes the shallow view
+itself, by pruning the southbound properties out of the ClassSpec before fetching (**ADR 0028**). An
+earlier reading — "the restriction is the projection, no filtering step needed" — held only while the
+`inf:` interface properties had no ranges of their own, which the 2026-07-28 change below deliberately
+ended. `SAWeindel/kapps_ogm#8` would let the OGM produce the shallow shape directly and retire the
+prune.
 
 **The ordering is load-bearing:** northbound-safe content on the parent property, connection details on
 the protocol subproperty, never the other way round. Putting a topic or broker on the parent property
@@ -102,7 +110,7 @@ metadata or from embedding code (ADR 0026).
 
 ## Instance data
 
-**Topic scheme** (an instance convention, not baked into the classes — ADR 0016):
+**Topic scheme** (an instance convention, not baked into the classes — ADR 0023):
 `TransferUnit<n>/<component>/<position>/<param>`, with a setpoint appending `_set`. The
 MockTransferUnit publishes 4 topics and subscribes to 2. Broker `127.0.0.1`, no auth — a local test
 broker; a real deployed broker with auth and TLS is out of scope for map #24.
@@ -236,7 +244,7 @@ and dropped the parameter blank nodes entirely. Every one of those decisions was
   the authoritative sfb1574 ontology has none either, and the draft carried two "this is wrong
   modeling, delete" markers saying so. A light barrier does not have a "light-barrier capability".
 - **Restored** the parameter blank nodes the draft dropped, but without values (locator pattern).
-- **Added** the `inf:` interface-property hierarchy and the MQTT connection metadata (ADR 0016), which
+- **Added** the `inf:` interface-property hierarchy and the MQTT connection metadata (ADR 0023), which
   is what lets a connector register itself from the graph (ADR 0020/0023).
 - **Added** `tu:hasConveyorSpeed` / `tu:isOccupied` as parameter properties.
 

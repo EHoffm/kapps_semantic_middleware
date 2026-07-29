@@ -40,7 +40,7 @@ async def _collect(broker: str, topics, count, timeout=5.0):
 
 
 class TestTopicScheme:
-    """The scheme is TransferUnit<n>/<component>/<position>/<param>, +_set (ADR 0016)."""
+    """The scheme is TransferUnit<n>/<component>/<position>/<param>, +_set (ADR 0023)."""
 
     def test_publishes_four_topics(self):
         unit = MockTransferUnit()

@@ -1,4 +1,4 @@
-"""MockTransferUnit — the edge-device PLC stand-in for scenario 3 (#40, ADR 0016).
+"""MockTransferUnit — the edge-device PLC stand-in for scenario 3 (#40, ADR 0023).
 
 Stands in for the decentralized PLC controlling one TransferUnit. It speaks only MQTT and
 knows nothing about the middleware, the ontology or the graph: that asymmetry is the point of
@@ -9,7 +9,7 @@ as dumb as a real one.
 **Subscribes to 2** — the two conveyor speed setpoints. A setpoint moves the speed the unit
 publishes, which is what closes the loop end to end.
 
-Topic scheme (an instance convention, never baked into the classes — ADR 0016)::
+Topic scheme (an instance convention, never baked into the classes — ADR 0023)::
 
     TransferUnit<n>/<component>/<position>/<param>          # read
     TransferUnit<n>/ConveyorBelt/<position>/speed_set        # setpoint

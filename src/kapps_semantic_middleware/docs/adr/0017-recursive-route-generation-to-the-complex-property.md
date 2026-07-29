@@ -39,7 +39,7 @@ descent rather than one, and nothing about the nesting can be inherited from the
 So "set ConveyorBelt1_left's speed to 3.0" was expressible only as a **read-modify-write of the
 entire belt list**: every setpoint re-asserting the sibling belt's speed and the light barriers'
 sensor readings, with two controllers clobbering each other. That is a bulk state replacement
-masquerading as a control action. **ADR 0014 decided "reads and writes reuse the framework CRUD"
+masquerading as a control action. **ADR 0015 decided "reads and writes reuse the framework CRUD"
 before this limit was known**; this ADR is what that decision looks like once it is.
 
 ### The blanknode dict is the right atom, because that pattern is locked
@@ -70,11 +70,11 @@ becomes the first piece migrated. `aas_middleware_inf` is untouched.
 
 ## Considered and rejected
 
-- **Whole-list read-modify-write** — honours ADR 0014 literally and needs no new code, but makes a
+- **Whole-list read-modify-write** — honours ADR 0015 literally and needs no new code, but makes a
   setpoint clobber its siblings and read-only sensor values.
 - **A bespoke per-parameter route** (`/parameters/{component}/{param}`) generated beside the CRUD
   API, with its URL written onto the parameter node — clean for consumers, but resurrects the
-  `/state/{name}` surface ADR 0014 retired and leaves two parallel REST surfaces to keep consistent.
+  `/state/{name}` surface ADR 0015 retired and leaves two parallel REST surfaces to keep consistent.
 - **Fixing recursion upstream in `aas_middleware_inf`** — every consumer would benefit, but it is a
   feature in a sibling repo, which the dependency policy forbids without amendment.
 

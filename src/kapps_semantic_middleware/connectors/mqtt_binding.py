@@ -1,4 +1,4 @@
-"""The MQTT semantic connector: the first instance of the binding seam (ADR 0016, ADR 0023).
+"""The MQTT semantic connector: the first instance of the binding seam (ADR 0023).
 
 A parameter is reached over MQTT when its domain property is a subproperty of
 ``inf:isInterfaceAccessibleMQTTParameter``. The parameter node then carries a broker address,
@@ -70,7 +70,7 @@ class MQTTParameterFormatter:
 
     **Payload shape.** Raw scalar by default; if the parameter declares
     ``inf:hasMQTTValuePath``, a JSON envelope with the value at that dotted path. The path is
-    one property and is honoured symmetrically on both read and write (ADR 0016).
+    one property and is honoured symmetrically on both read and write (ADR 0023).
 
     **Symmetry.** ``MqttClientConnector`` is asymmetric: its listener runs
     ``json.loads(payload)`` on everything it receives, while ``consume()`` publishes its
@@ -191,7 +191,7 @@ class MQTTBinding:
         if not broker or not topic:
             # A parameter marked MQTT-accessible whose metadata is incomplete would come up
             # silently dead: no listener, no value, and nothing to say why. Name the property
-            # and what is missing (ADR 0016).
+            # and what is missing (ADR 0023).
             logger.warning(
                 "Not binding %s on %s over MQTT: missing %s. The parameter will be served "
                 "but no value will flow.",

@@ -10,7 +10,7 @@ marker — and a domain ontology never has to name a protocol. Which view a cons
 
 ### The protocol is not a type-level fact
 
-ADR 0015 and ADR 0016 both assumed a parameter's protocol is known when the ontology is written. Two
+ADR 0015 and ADR 0023 both assumed a parameter's protocol is known when the ontology is written. Two
 ordinary cases break that:
 
 - **Own-built hardware.** The protocol is not decided when the domain ontology is deployed. It is
@@ -56,7 +56,7 @@ The interface hierarchy is ordered by northbound-safety, so the projection needs
 | wiring (connector registry) | the above + `inf:isInterfaceAccessible<Protocol>Parameter` | + topic, set topic, broker |
 
 A broker address is physically absent from the served model — the restriction *is* the projection.
-This retires the middleware-side filtering that ADR 0019 proposed and that `#51` closed unbuilt, and it
+This retires the middleware-side filtering that ADR 0028 proposed and that `#51` closed unbuilt, and it
 keeps ADR 0018's principle intact: a view belongs to its consumer.
 
 ## Consequences
@@ -72,7 +72,7 @@ keeps ADR 0018's principle intact: a view belongs to its consumer.
   (`SAWeindel/kapps_ogm#1`, root ADR 0002), extended to walk `rdfs:subPropertyOf*`.
 - ADR 0015's row 3 (auto-provision) is answered: the embedding-code source supplies the shape for the
   first write, and the write-back rule persists it, after which ABox evidence carries the node.
-- Amends ADR 0016 and ADR 0020: recognition may now drive *specification*, not only wiring.
+- Amends ADR 0023 and ADR 0020: recognition may now drive *specification*, not only wiring.
 
 Resolves wayfinder ticket #52 under map #24. See `docs/prd/kapps-ogm-anonymous-node-identity.md`
 requirements R7–R9.

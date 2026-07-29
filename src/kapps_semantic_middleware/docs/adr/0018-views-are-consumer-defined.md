@@ -19,12 +19,12 @@ mw = SemanticMiddleware(
 )
 ```
 
-> **Corrected 2026-07-27 (#29, ADR 0019).** This example originally scoped a third level, reaching
+> **Corrected 2026-07-27 (#29, ADR 0028).** This example originally scoped a third level, reaching
 > inside the parameter blanknode (`[TU.hasConveyorBelt, TU.hasConveyorSpeed, INF.hasValue]`).
 > Reproduced live, that third element is **silently discarded**: a `ClassScope` terminates at a
 > `COMPLEX` property and cannot select within it. A view names properties down to the parameter and
 > no further. Connection metadata is excluded not by the view and not by a middleware step, but by the
-> `rdfs:range` restriction never declaring it — see the correction below (ADR 0019 superseded).
+> `rdfs:range` restriction never declaring it — see the correction below (ADR 0028 superseded).
 
 A connector for the same resource does not see the TransferUnit at all. Its scope is rooted at the
 component it serves:
@@ -54,7 +54,7 @@ exists to remove.
 > unit and MQTT topic share one blanknode, so a scopeless fetch would serve the broker address to
 > every peer — and that the *view* prevents it by not projecting it. Both halves were wrong.
 >
-> A scope cannot decline to project part of a blanknode (ADR 0019), so it was never the view's doing.
+> A scope cannot decline to project part of a blanknode (ADR 0028), so it was never the view's doing.
 > But no middleware step is needed either: a parameter materializes to exactly what its property's
 > `rdfs:range` restriction declares, and the domain ontology deliberately declares **only** domain
 > content plus the access-mode marker. Connection metadata is in **no** restriction — the domain TBox
@@ -63,7 +63,7 @@ exists to remove.
 >
 > **The restriction is the projection**, and it is excluded by default in the strongest sense: a new
 > protocol's metadata is invisible northbound because nobody ever declared it, not because anybody
-> remembered a deny-list. ADR 0019 is superseded and its implementation issue closed unbuilt.
+> remembered a deny-list. ADR 0028 is superseded and its implementation issue closed unbuilt.
 
 ### Configured in code, not authored in the ontology
 
@@ -95,7 +95,7 @@ live-value response costs nothing, because `OGM.commit` filters unchanged triple
 
 ### A standard path with an escape hatch, again
 
-Discovery follows the same shape as ADR 0015's Path 1/Path 2 and ADR 0016's connector registry.
+Discovery follows the same shape as ADR 0015's Path 1/Path 2 and ADR 0023's connector registry.
 **Standard path:** name a resource class, get its individuals with the standard metadata rendered —
 no SPARQL required, because the middleware and the OGM wrote that metadata and know what it means.
 **Escape hatch:** supply SPARQL binding `?resource`, and every other bound variable becomes a
