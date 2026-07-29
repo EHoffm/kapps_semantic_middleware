@@ -41,6 +41,29 @@ def graphdb():
     return GraphDB.from_env()
 
 
+@pytest.fixture
+def unit_scope():
+    """The consumer's view of a scenario-3 TransferUnit, rooted at the unit.
+
+    Two levels, because a TransferUnit's parameters hang off its belts and barriers. A view
+    belongs to its consumer and is configured in embedding code rather than in the ontology
+    (ADR 0018), so it is stated once here rather than in each test that needs a wired unit.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
+    import seed
+    from kapps_ogm.utils.class_scope import ClassScope
+
+    return ClassScope.from_property_chains(
+        [
+            [seed.TU_HAS_CONVEYOR_BELT, seed.TU_HAS_CONVEYOR_SPEED],
+            [seed.TU_HAS_LIGHT_BARRIER, seed.TU_IS_OCCUPIED],
+        ]
+    )
+
+
 MQTT_TEST_PORT = 18831
 """Not 1883: a developer machine may already run a broker there, and a test that silently
 joined it would pass against the wrong state and leak its topics into someone's session."""

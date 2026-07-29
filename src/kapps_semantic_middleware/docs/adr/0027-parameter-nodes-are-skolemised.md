@@ -42,6 +42,17 @@ whole-group-replacement option are in the PRD.
   every inbound payload existed only because the write replaced the whole node. With a per-property
   write, an unchanged facet appears on neither side of the diff. The rest of ADR 0023 — binding
   descriptors, registration at construction, direction from `accessMode` × flavour — is untouched.
+
+  **Amended 2026-07-29, on building #40: they retire for the graph, not for the model.** This
+  consequence addressed one of two mechanisms and treated it as both. The graph half is genuinely
+  gone, exactly as recorded. The in-memory half is not: `update_persistence_with_value` still does
+  `setattr(contained_model, field_id, value)`, replacing the whole parameter node in the *persistence
+  model that is served over REST*, and `Formatter.deserialize` still receives only the payload with no
+  access to the current value. A bare inbound scalar therefore still blanks the unit and the access
+  mode northbound — nothing about skolemisation touches that path, because it never reaches the store.
+  So `MQTTParameterFormatter` reassembles the node from the facets the binding already read. It is a
+  pure function per message and reads no current state, which is what the original objection was
+  about. Retire it for real when a formatter can see the value it is replacing.
 - **ADR 0024's committed-value pattern is unblocked.** Its warning that committing a parameter orphans
   its connection metadata was the same defect; it can be lifted when the OGM change lands.
 - Domain experts keep authoring `[ … ]`; authored Turtle is never rewritten, and a `genid` IRI must

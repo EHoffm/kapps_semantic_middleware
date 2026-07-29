@@ -828,23 +828,20 @@ class SemanticMiddleware(Middleware):
         recognition would treat each parameter node as ordinary data and serve its broker
         address northbound — the least-privileged instance would leak the most (ADR 0028).
         """
-        try:
-            self._wiring = plan_wiring(
-                ogm=self.ogm,
-                resource_iri=self.resource_iri,
-                class_scope=self.class_scope,
-                registry=self.connector_registry,
-                flavour=self.connector_sync_direction,
-                autoregister=self.autoregister_connectors,
-            )
-        except Exception as exc:  # noqa: BLE001 - a resource may legitimately have no parameters
-            logger.warning(
-                "Could not resolve semantic connectors for %s: %s. The resource will be "
-                "served, but no parameter values will flow.",
-                self.resource_iri,
-                exc,
-            )
-            return
+        # Deliberately not wrapped in a try/except. Asking for a class_scope is asking for the
+        # parameters under it to be wired, and a resource that cannot resolve them has not
+        # "come up with a smaller surface" — it has come up unable to reach its device, with
+        # the projection that keeps broker addresses off the wire never having been computed.
+        # Failing construction is the honest outcome; a warning here would produce exactly
+        # the silent half-alive resource ADR 0023 is written to avoid.
+        self._wiring = plan_wiring(
+            ogm=self.ogm,
+            resource_iri=self.resource_iri,
+            class_scope=self.class_scope,
+            registry=self.connector_registry,
+            flavour=self.connector_sync_direction,
+            autoregister=self.autoregister_connectors,
+        )
 
         for binding, registration in self._wiring.registrations:
             self.add_synced_connector(

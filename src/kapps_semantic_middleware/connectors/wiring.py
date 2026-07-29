@@ -38,6 +38,17 @@ from kapps_semantic_middleware.projection import prune_southbound
 
 logger = logging.getLogger(__name__)
 
+EXPLICIT_GRAPH = "FROM <http://www.ontotext.com/explicit>"
+"""Restrict a query to asserted triples.
+
+Not an ontology term, so it does not belong in ``vocabulary.py`` — it names a GraphDB
+*feature*, the pseudo-graph of explicit statements. It is a constant rather than three inline
+copies because every recognition query needs it for the same reason: the default graph
+includes materialised inference, and a parameter node's only types are anonymous restriction
+nodes that exist by inference alone (ADR 0020). Counting or reading without this returns
+inferred triples and inflates every result.
+"""
+
 
 @dataclass
 class WiringPlan:
@@ -203,7 +214,7 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
 def _linked_individuals(ogm: Any, subject: IRI, prop_iri: IRI) -> List[IRI]:
     """The individuals a resource points at through one object property."""
     rows = ogm.db.query(
-        f"SELECT ?o FROM <http://www.ontotext.com/explicit> "
+        f"SELECT ?o {EXPLICIT_GRAPH} "
         f"WHERE {{ <{subject}> <{prop_iri}> ?o . FILTER(isIRI(?o)) }}",
         convert_bindings=True,
     )["results"]["bindings"]
@@ -271,7 +282,7 @@ def _parameter_metadata(
     declared = {str(p) for p in getattr(prop_spec.nested, "properties", {})}
 
     rows = ogm.db.query(
-        f"SELECT ?p ?v FROM <http://www.ontotext.com/explicit> "
+        f"SELECT ?p ?v {EXPLICIT_GRAPH} "
         f"WHERE {{ <{holder_iri}> <{prop_iri}> ?node . ?node ?p ?v }}",
         convert_bindings=True,
     )["results"]["bindings"]
@@ -329,7 +340,7 @@ def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
     ``owl:NamedIndividual`` yields a ClassSpec that cannot resolve at all.
     """
     rows = ogm.db.query(
-        f"SELECT ?c FROM <http://www.ontotext.com/explicit> "
+        f"SELECT ?c {EXPLICIT_GRAPH} "
         f"WHERE {{ <{instance_iri}> a ?c . FILTER(isIRI(?c)) }}",
         convert_bindings=True,
     )["results"]["bindings"]

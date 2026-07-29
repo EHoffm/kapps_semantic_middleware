@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from kapps_ogm import OGM
-from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding
 from kapps_semantic_middleware.connectors.semantic import SemanticConnectorRegistry
@@ -35,22 +34,6 @@ def scenario3(graphdb):
     ogm = OGM(db=graphdb)
     seed.seed_scenario3(graphdb, ogm)
     return graphdb, OGM(db=graphdb)
-
-
-@pytest.fixture
-def unit_scope():
-    """The consumer's view: rooted at the TransferUnit, reaching its parameters.
-
-    Two levels, because a TransferUnit's parameters hang off its belts and barriers. A view
-    belongs to its consumer and is configured in embedding code, not in the ontology
-    (ADR 0018).
-    """
-    return ClassScope.from_property_chains(
-        [
-            [seed.TU_HAS_CONVEYOR_BELT, seed.TU_HAS_CONVEYOR_SPEED],
-            [seed.TU_HAS_LIGHT_BARRIER, seed.TU_IS_OCCUPIED],
-        ]
-    )
 
 
 def _plan(ogm, unit_scope, **kwargs):
@@ -103,6 +86,63 @@ class TestRecognition:
         assert left.get(INF.hasMQTTTopic) == "TransferUnit1/ConveyorBelt/left/speed"
         assert left.get(INF.hasMQTTSetTopic) == "TransferUnit1/ConveyorBelt/left/speed_set"
         assert left.get(INF.hasMQTTBrokerIP) == seed.MQTT_BROKER_IP
+
+    def test_an_envelope_path_reaches_the_binding_from_the_graph(
+        self, scenario3, unit_scope
+    ):
+        """inf:hasMQTTValuePath must be *declared* to survive the write and the read.
+
+        `_parameter_metadata` keeps only properties the effective shape declares, so a term
+        missing from the range restriction is filtered out and envelope mode could never
+        activate from real data — the formatter would be correct and unreachable. This pins
+        the declaration, not just the formatter logic.
+        """
+        graphdb, ogm = scenario3
+        graphdb.query(
+            f'INSERT {{ ?n <{INF.hasMQTTValuePath}> "payload.speed" }} '
+            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n }}",
+            update=True,
+        )
+
+        plan = _plan(ogm, unit_scope)
+        left = next(
+            b for b in plan.bindings if str(b.resource_iri) == str(seed.CONVEYOR_BELT_LEFT)
+        )
+
+        assert left.get(INF.hasMQTTValuePath) == "payload.speed"
+
+    def test_the_value_is_parsed_per_the_ontology_datatype(self, scenario3, unit_scope):
+        """"Raw scalar, parsed per the parameter's ontology datatype" (#40).
+
+        The parsing is not done by hand and is not what ``Registration.model_type`` is for —
+        that is the persistence type of the bound field, which is a list. It falls out of the
+        node model generated from the effective shape: `tu:hasConveyorSpeed` restricts
+        `inf:hasValue` to `xsd:float` and `tu:isOccupied` to `xsd:boolean`, so pydantic
+        coerces on construction. A device publishing a quoted number still lands as a number.
+        """
+        _, ogm = scenario3
+        plan = _plan(ogm, unit_scope)
+
+        speed = next(
+            r for _, r in plan.registrations if r.connector.topic.endswith("left/speed")
+        )
+        occupied = next(
+            r for _, r in plan.registrations if "occupied" in r.connector.topic
+        )
+
+        [speed_node] = speed.formatter.deserialize("12.5")
+        [occupied_node] = occupied.formatter.deserialize("true")
+
+        assert getattr(speed_node, INF.hasValue.lined) == [12.5]
+        assert getattr(occupied_node, INF.hasValue.lined) == [True]
+
+    def test_an_envelope_path_is_still_southbound(self, scenario3, unit_scope):
+        """Declaring it must not let it reach a peer."""
+        _, ogm = scenario3
+
+        plan = _plan(ogm, unit_scope)
+
+        assert str(INF.hasMQTTValuePath) in plan.southbound_properties
 
     def test_binds_to_the_complex_property_not_hasvalue(self, scenario3, unit_scope):
         """ConnectionInfo has three levels and field_id is a plain getattr, so the parameter

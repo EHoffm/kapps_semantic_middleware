@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from kapps_ogm import OGM
-from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware import SemanticMiddleware
 from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding
@@ -32,16 +31,6 @@ SERVICE_CLASS = f"{seed.TU_NS}TransferUnitService"
 def seeded_unit(graphdb):
     seed.seed_scenario3(graphdb, OGM(db=graphdb))
     return graphdb
-
-
-@pytest.fixture
-def unit_scope():
-    return ClassScope.from_property_chains(
-        [
-            [seed.TU_HAS_CONVEYOR_BELT, seed.TU_HAS_CONVEYOR_SPEED],
-            [seed.TU_HAS_LIGHT_BARRIER, seed.TU_IS_OCCUPIED],
-        ]
-    )
 
 
 def _middleware(graphdb, **kwargs):

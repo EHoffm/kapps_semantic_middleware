@@ -121,6 +121,45 @@ class TestRegistry:
         assert str(INF.accessMode) not in southbound
 
 
+class TestDefaultRegistry:
+    """The default registry must be populated by import alone.
+
+    A middleware constructed without an explicit ``connector_registry`` gets the default one.
+    If nothing imported the binding modules, that registry would be empty — and an empty
+    registry means an empty prune set, which means the northbound projection removes nothing
+    and every served parameter carries its broker address and topics (ADR 0028). Every test
+    that builds ``SemanticConnectorRegistry([MQTTBinding])`` explicitly is structurally blind
+    to this, which is exactly how it went unnoticed.
+    """
+
+    def test_importing_the_package_registers_the_builtin_bindings(self):
+        from kapps_semantic_middleware.connectors.semantic import default_registry
+
+        assert len(default_registry) >= 1
+
+    def test_the_default_prune_set_covers_the_mqtt_metadata(self):
+        from kapps_semantic_middleware.connectors.semantic import default_registry
+
+        southbound = default_registry.southbound_properties()
+
+        assert {
+            str(INF.hasMQTTTopic),
+            str(INF.hasMQTTSetTopic),
+            str(INF.hasMQTTBrokerIP),
+            str(INF.hasMQTTValuePath),
+        } <= southbound
+
+    def test_mqtt_is_reachable_through_the_default_registry(self):
+        from kapps_semantic_middleware.connectors.semantic import default_registry
+
+        assert (
+            default_registry.for_interface_property(
+                INF.isInterfaceAccessibleMQTTParameter
+            )
+            is MQTTBinding
+        )
+
+
 class TestDirection:
     """Direction is the most restrictive of accessMode x flavour; neither may widen."""
 

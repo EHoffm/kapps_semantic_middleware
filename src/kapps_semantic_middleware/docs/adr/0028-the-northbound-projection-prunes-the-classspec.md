@@ -95,8 +95,12 @@ byte-identical northbound payloads.
   round. What changes is that the middleware must *realize* the shallow view by pruning, because the OGM
   only ever computes the deep one.
 - **Amends ADR 0023's fourth consequence.** "ADR 0019's projection step is not needed" was true when
-  written and is now false; the binding still reads connection metadata from the resolved spec rather
-  than re-querying the ABox.
+  written and is now false. The rest of that consequence stands unchanged: the binding reads the
+  connection metadata **from the ABox at registration**, which is the moment the middleware joins the
+  domain TBox to the connector's `inf:` TBox. It has to — recognition runs at construction, before any
+  datamodel exists to read it from. What the *spec* supplies is the effective shape: only properties the
+  resolved restriction declares are kept, since a property the restriction does not declare would not
+  survive a write either, and binding to one would yield a connector whose values silently vanish.
 - A merge-depth parameter in `kapps_ogm` would let the OGM produce the shallow shape directly and make
   the prune unnecessary. It was considered and not pursued: root ADR 0001 admits only bugfixes to the
   siblings, this is a feature, and it would block #40 behind a cross-repo release. The prune is local,

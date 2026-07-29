@@ -21,9 +21,10 @@ inf:isInterfaceAccessibleMQTTParameter rdf:type owl:ObjectProperty ;
     rdfs:comment "Marks a parameter reached over MQTT. Its range carries the MQTT connection contract, which is southbound only: a consumer merging only up to the parent property never sees it." ;
     rdfs:range [ rdf:type owl:Class ;
         owl:intersectionOf (
-            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTTopic    ; owl:allValuesFrom xsd:string ]
-            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTBrokerIP ; owl:allValuesFrom xsd:string ]
-            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTSetTopic ; owl:allValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTTopic     ; owl:allValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTBrokerIP  ; owl:allValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTSetTopic  ; owl:allValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTValuePath ; owl:allValuesFrom xsd:string ]
         ) ] .
 
 inf:hasValue rdf:type owl:DatatypeProperty ;
@@ -45,6 +46,10 @@ inf:hasMQTTSetTopic rdf:type owl:DatatypeProperty ;
 inf:hasMQTTBrokerIP rdf:type owl:DatatypeProperty ;
     rdfs:label "has MQTT broker IP" ;
     rdfs:comment "Address of the broker carrying this parameter's topics." .
+
+inf:hasMQTTValuePath rdf:type owl:DatatypeProperty ;
+    rdfs:label "has MQTT value path" ;
+    rdfs:comment "Dotted path to the value inside a JSON envelope, honoured symmetrically on read and write. Absent means the payload is a raw scalar." .
 
 tu:TransferUnit rdf:type owl:Class ;
     rdfs:subClassOf cfc:Resource ;
