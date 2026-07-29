@@ -8,6 +8,9 @@ resolution-markers = [
     "python_full_version >= '4'",
 ]
 
+[manifest]
+overrides = [{ name = "graph-db-interface", editable = "../graph_db_interface" }]
+
 [[package]]
 name = "aas-middleware"
 version = "0.2.6"
@@ -1577,7 +1580,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "graph-db-interface", specifier = ">=2.0.1,<3.0.0" },
+    { name = "graph-db-interface", git = "https://github.com/SAWeindel/graph_db_interface.git?rev=fix%2Fbnode-identity-in-triples-update" },
     { name = "pydantic", specifier = ">=2.12.4,<3.0.0" },
     { name = "rdflib", specifier = ">=7.1.3,<8.0.0" },
 ]
