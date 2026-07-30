@@ -27,6 +27,7 @@ from kapps_semantic_middleware import SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
     mint_workflow_iri,
+    services_of_resource,
 )
 from kapps_semantic_middleware.vocabulary import CFC, OperationStatus, SVC
 
@@ -98,10 +99,17 @@ def step_2_start_hello_world_middleware(db: GraphDB) -> tuple[SemanticMiddleware
     return middleware, server, thread
 
 
-def step_3_inspect_registration(db: GraphDB) -> Registration:
-    """Verify the Service/Capability/Workflow structure and reachability triples."""
+def step_3_inspect_registration(db: GraphDB, ogm: OGM) -> Registration:
+    """Verify the Service/Capability/Workflow structure and reachability triples.
+
+    The Service IRI is *discovered* through ``svc:isServiceOf``, not rebuilt from the resource
+    IRI: it carries an instance discriminator now, and one resource may carry several Services
+    (ADR 0022). This scenario runs a single instance, so exactly one is reachable.
+    """
     print("\nStep 3 — Inspect What Registration Wrote")
-    service_iri = seed.HELLO_RESOURCE + "_service"
+    reachable = services_of_resource(ogm, seed.HELLO_RESOURCE, reachable_only=True)
+    assert len(reachable) == 1, f"expected one reachable hello service, found {len(reachable)}"
+    service_iri = reachable[0]
     capability_iri = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
     workflow_iri = mint_workflow_iri(service_iri, "hello_world")
 
@@ -202,7 +210,7 @@ def main() -> None:
     hello_mw, server, thread = step_2_start_hello_world_middleware(db)
     registration: Registration | None = None
     try:
-        registration = step_3_inspect_registration(db)
+        registration = step_3_inspect_registration(db, hello_mw.ogm)
         operation_iri = step_4_dispatch_and_run(db, hello_mw, registration)
         step_5_inspect_decision_provenance(db, operation_iri)
     finally:

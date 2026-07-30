@@ -26,6 +26,7 @@ from kapps_semantic_middleware import SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     OperationQueueEmpty,
     mint_capability_iri,
+    mint_service_iri,
     mint_workflow_iri,
     register_service,
     register_workflow,
@@ -72,7 +73,6 @@ def test_event_trigger_dispatch_enqueues_over_rest(graphdb):
     db = graphdb
     seed.seed_scenario1(db)
 
-    b_service = seed.HELLO_RESOURCE + "_service"
     cap_instance = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
 
     # B: the hello resource, exposing helloworld + the built-in event trigger over REST.
@@ -91,7 +91,7 @@ def test_event_trigger_dispatch_enqueues_over_rest(graphdb):
 
     server, thread = _start_server(mw_b, B_PORT)
     try:
-        assert db.triples_get(sub=b_service, pred=SVC.address)
+        assert db.triples_get(sub=mw_b.service_iri, pred=SVC.address)
 
         # A: the planner, dispatching an Operation for B's capability (no hardcoded peer).
         mw_a = SemanticMiddleware(
@@ -132,7 +132,8 @@ def test_event_trigger_revert_on_undeliverable(graphdb):
 
     # Seed a reachable-looking receiver whose address points at a dead port (no server is
     # started), so resolution succeeds but the event-trigger POST fails to connect.
-    dead_service = seed.HELLO_RESOURCE + "_service"
+    dead_address = "http://127.0.0.1:9"  # nothing listens on port 9
+    dead_service = mint_service_iri(seed.HELLO_RESOURCE, dead_address)
     cap_instance = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
     ogm = OGM(db=db)
     register_service(
@@ -140,13 +141,13 @@ def test_event_trigger_revert_on_undeliverable(graphdb):
         resource_iri=seed.HELLO_RESOURCE,
         service_iri=dead_service,
         service_class=seed.HELLO_SERVICE_CLASS,
-        address="http://127.0.0.1:9",  # nothing listens on port 9
+        address=dead_address,
     )
     register_workflow(
         ogm,
         resource_iri=seed.HELLO_RESOURCE,
         service_iri=dead_service,
-        workflow_iri=seed.HELLO_RESOURCE + "_service_workflow_hello_world",
+        workflow_iri=mint_workflow_iri(dead_service, "hello_world"),
         workflow_class=seed.HELLO_WORKFLOW_CLASS,
         capability_iri=cap_instance,
         capability_class=seed.HELLO_CAPABILITY_CLASS,
@@ -222,9 +223,9 @@ def test_pull_and_run_completes_operation(graphdb):
     """Full loop: A dispatches -> B enqueues -> B pull-and-runs helloworld -> Operation done + provenance."""
     db = graphdb
     seed.seed_scenario1(db)
-    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
-
     mw_b = _hello_resource(graphdb, B_PORT)
+    # Per-instance since ADR 0022: derived from the instance, not from the resource.
+    wf_instance = mint_workflow_iri(mw_b.service_iri, "hello_world")
     server, thread = _start_server(mw_b, B_PORT)
     try:
         op_iri = _dispatch_hello_op(graphdb)  # queued on B via the REST event trigger
@@ -256,9 +257,9 @@ def test_pull_and_run_failure_marks_failed(graphdb):
     """A body exception marks the Operation `failed` with the error message + provenance (ADR 0009)."""
     db = graphdb
     seed.seed_scenario1(db)
-    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
-
     mw_b = _hello_resource(graphdb, B_PORT)
+    # Per-instance since ADR 0022: derived from the instance, not from the resource.
+    wf_instance = mint_workflow_iri(mw_b.service_iri, "hello_world")
     server, thread = _start_server(mw_b, B_PORT)
     try:
         op_iri = _dispatch_hello_op(graphdb)
@@ -324,9 +325,9 @@ def test_callback_runs_operation_on_enqueue(graphdb):
     """
     db = graphdb
     seed.seed_scenario1(db)
-    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
-
     mw_b = _hello_resource(graphdb, B_PORT)
+    # Per-instance since ADR 0022: derived from the instance, not from the resource.
+    wf_instance = mint_workflow_iri(mw_b.service_iri, "hello_world")
     mw_b.register_callback(lambda operation: hello_world())  # domain work function
     server, thread = _start_server(mw_b, B_PORT)
     try:
@@ -360,9 +361,6 @@ def test_two_instance_rest_event_trigger_full_lifecycle(graphdb):
     db = graphdb
     reset_door()
     seed.seed_scenario2(db)
-    door_service = seed.DOOR_RESOURCE + "_service"
-    open_wf = mint_workflow_iri(door_service, "door_open")
-
     # B: the door resource, exposing door_open + the built-in event trigger over REST.
     mw_b = SemanticMiddleware(
         mode="resource",
@@ -376,6 +374,8 @@ def test_two_instance_rest_event_trigger_full_lifecycle(graphdb):
         capability_class=seed.DOOR_OPEN_CAPABILITY_CLASS,
         workflow_class=seed.DOOR_OPEN_WORKFLOW_CLASS,
     )(door_open)
+    # Per-instance since ADR 0022: derived from the instance, not from the resource.
+    open_wf = mint_workflow_iri(mw_b.service_iri, "door_open")
 
     server, thread = _start_server(mw_b, B_PORT)
     try:

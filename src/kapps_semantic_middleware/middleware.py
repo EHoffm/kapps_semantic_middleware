@@ -177,7 +177,7 @@ class SemanticMiddleware(Middleware):
 
             self.resource_iri = IRI(resource_iri)
             self.service_class = IRI(service_class)
-            self.service_iri = mint_service_iri(self.resource_iri)
+            self.service_iri = mint_service_iri(self.resource_iri, self.address)
 
             # Connector wiring (ADR 0022/0023/0028). The class_scope is the consumer's view,
             # rooted at this resource and configured in embedding code rather than in the

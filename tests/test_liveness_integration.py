@@ -40,7 +40,6 @@ import seed  # noqa: E402
 def test_heartbeat_write_and_refresh(graphdb):
     db = graphdb
     seed.seed_scenario1(db)
-    service_iri = mint_service_iri(seed.HELLO_RESOURCE)
 
     mw = SemanticMiddleware(
         mode="resource",
@@ -50,6 +49,8 @@ def test_heartbeat_write_and_refresh(graphdb):
         host="127.0.0.1",
         port=8987,
     )
+    # Per-instance since ADR 0022, so it is read off the instance rather than reconstructed.
+    service_iri = mw.service_iri
     asyncio.run(mw._register_service())
 
     asyncio.run(mw.emit_heartbeat())
@@ -67,8 +68,8 @@ def test_watchdog_sweeps_only_stale_service(graphdb):
     seed.seed_scenario1(db)
 
     ogm = OGM(db=db)
-    fresh_service = mint_service_iri(seed.HELLO_RESOURCE)
-    stale_service = mint_service_iri(seed.PLANNER_RESOURCE)
+    fresh_service = mint_service_iri(seed.HELLO_RESOURCE, "http://127.0.0.1:8001")
+    stale_service = mint_service_iri(seed.PLANNER_RESOURCE, "http://127.0.0.1:8002")
 
     # A fresh, reachable service (heartbeat now).
     register_service(

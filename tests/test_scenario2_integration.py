@@ -123,11 +123,6 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
     reset_door()
     seed.seed_scenario2(db)
 
-    service_iri = seed.DOOR_RESOURCE + "_service"
-    open_wf = mint_workflow_iri(service_iri, "door_open")
-    close_wf = mint_workflow_iri(service_iri, "door_close")
-    status_sp = mint_state_property_iri(service_iri, "door_status")
-
     # The door middleware: two workflows + one live StateProperty. This scenario does not
     # use the operation queue at all — the workflow endpoints execute synchronously.
     door = SemanticMiddleware(
@@ -150,6 +145,13 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         capability_class=seed.DOOR_STATUS_CAPABILITY_CLASS,
         state_property_class=seed.DOOR_STATUS_STATE_CLASS,
     )(door_status)
+
+    # Per-instance since ADR 0022, so everything hanging off the Service is derived from the
+    # instance's own IRI rather than reconstructed from the resource's.
+    service_iri = door.service_iri
+    open_wf = mint_workflow_iri(service_iri, "door_open")
+    close_wf = mint_workflow_iri(service_iri, "door_close")
+    status_sp = mint_state_property_iri(service_iri, "door_status")
 
     server, thread = _start_server(door, DOOR_PORT)
     try:

@@ -23,8 +23,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 from graph_db_interface import IRI
+from graph_db_interface.exceptions import InvalidIRIError
 from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware.vocabulary import CFC, MES, OperationStatus, SVC
@@ -49,9 +51,48 @@ RDF_TYPE = IRI("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
 # --------------------------------------------------------------------------- #
 
 
-def mint_service_iri(resource_iri: IRI) -> IRI:
-    """Mint the deterministic Service IRI for a resource: ``{resource_iri}_service``."""
-    return IRI(f"{resource_iri}_service")
+def normalize_address(address: str) -> str:
+    """Normalize an instance address so trivially different spellings are one deployment.
+
+    Lowercases the scheme and the netloc (host names are case-insensitive; paths are not) and
+    strips a trailing ``/``. Without this, ``http://Host:8000/`` and ``http://host:8000`` would
+    mint two Service nodes for one process — exactly the orphaning this discriminator prevents.
+    """
+    parts = urlsplit(address)
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path.rstrip("/"),
+            parts.query,
+            parts.fragment,
+        )
+    )
+
+
+def mint_service_iri(resource_iri: IRI, address: str) -> IRI:
+    """Mint the Service IRI for one middleware *instance*: ``{resource_iri}_service_{address}``.
+
+    The discriminator is the instance's normalized address mangled with ``IRI.lined``, which
+    satisfies ADR 0022's two requirements at once: it is stable across restarts of the same
+    deployment (so a returning instance re-adopts its node) and distinct between concurrent
+    instances (so a controller and a monitor on one resource do not overwrite each other's
+    ``svc:address`` and heartbeat). ``lined`` rather than a hash, because ADR 0021 keeps
+    production IRIs back-resolvable — ``IRI.from_lined`` reads the address off the node IRI.
+
+    ``address`` is required: a default would silently reinstate the shared node.
+
+    Raises:
+        ValueError: If ``address`` is not an absolute http(s) URL.
+    """
+    try:
+        discriminator = IRI(normalize_address(address)).lined
+    except InvalidIRIError as exc:
+        raise ValueError(
+            "The Service discriminator is derived from the instance address, which must be an "
+            f"absolute http(s) URL; got {address!r}"
+        ) from exc
+    return IRI(f"{resource_iri}_service_{discriminator}")
 
 
 def mint_workflow_iri(service_iri: IRI, name: str) -> IRI:
@@ -352,6 +393,13 @@ def sweep_stale_services(
     Alongside removing a dead resource's reachability, the watchdog marks that resource's
     stranded Operations (``queued``/``running``) ``failed`` so work addressed to a resource
     that will never return does not hang forever. Returns the swept Service IRIs.
+
+    Since ADR 0022 a resource may carry several Services, this is no longer quite right: a
+    stale monitor drags its live sibling's stranded Operations down with it. Failing them only
+    when no sibling survives is *also* wrong — a surviving monitor realizes no Workflow, so it
+    would shield a dead controller's queue forever. The correct predicate is per-Operation
+    ("does any surviving Service realize this Operation's Capability", ADR 0002), and
+    ``_reconstruct_queue`` needs the same treatment. Tracked as #63; out of scope for #47.
     """
     stale = find_stale_services(ogm, max_age_seconds, now=now, named_graph=named_graph)
     for service_iri in stale:
@@ -624,6 +672,44 @@ def find_resource_operations(
         result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
     )
     return [IRI(str(b["op"])) for b in bindings]
+
+
+def services_of_resource(
+    ogm: "OGM",
+    resource_iri: IRI,
+    *,
+    reachable_only: bool = False,
+    named_graph: Optional[IRI] = None,
+) -> list[IRI]:
+    """Every Service bound to a resource, via the instance-owned ``svc:isServiceOf`` (ADR 0022).
+
+    A Service IRI carries an instance discriminator, so it can no longer be reconstructed from a
+    resource IRI alone — this read replaces that reconstruction. ``svc:isServiceOf`` has always
+    been many-to-one, and consumers must no longer assume the answer has exactly one element:
+    a controller and a read-only monitor on one resource are two Services.
+
+    Args:
+        ogm: The OGM instance.
+        resource_iri: The resource whose services to find.
+        reachable_only: Keep only Services that currently carry an ``svc:address``. A
+            deregistered instance keeps its individual but loses its address (ADR 0007), so
+            this is the reachable-now set rather than the ever-registered set.
+        named_graph: Optional named graph for the read.
+
+    Returns:
+        List of Service IRIs.
+    """
+    reachability = f"\n        ?svc <{SVC.address}> ?addr ." if reachable_only else ""
+    sparql = f"""
+    SELECT DISTINCT ?svc WHERE {{
+        ?svc <{SVC.isServiceOf}> <{resource_iri}> .{reachability}
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return [IRI(str(b["svc"])) for b in bindings]
 
 
 def _resource_of_service(

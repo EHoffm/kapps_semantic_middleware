@@ -24,6 +24,7 @@ from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
+    mint_service_iri,
     mint_workflow_iri,
 )
 from kapps_semantic_middleware.vocabulary import CFC, OperationStatus, SVC
@@ -66,10 +67,6 @@ def test_scenario1_hello_world_end_to_end(graphdb):
     db = graphdb
     seed.seed_scenario1(db)
 
-    service_iri = seed.HELLO_RESOURCE + "_service"
-    cap_instance = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
-    wf_instance = mint_workflow_iri(service_iri, "hello_world")
-
     mw1 = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.HELLO_RESOURCE,
@@ -78,6 +75,10 @@ def test_scenario1_hello_world_end_to_end(graphdb):
         host="127.0.0.1",
         port=HELLO_PORT,
     )
+    # Per-instance since ADR 0022: read off the instance, not rebuilt from the resource.
+    service_iri = mw1.service_iri
+    cap_instance = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
+    wf_instance = mint_workflow_iri(service_iri, "hello_world")
     mw1.workflow(
         capability_class=seed.HELLO_CAPABILITY_CLASS,
         workflow_class=seed.HELLO_WORKFLOW_CLASS,
@@ -152,12 +153,13 @@ def test_missing_ground_truth_class_fails_fast(graphdb):
 
     seed.seed_scenario1(graphdb)
     ogm = OGM(db=graphdb)
+    ghost_service = mint_service_iri(seed.HELLO_RESOURCE, "http://127.0.0.1:9")
     with pytest.raises(OntologyGroundTruthError):
         register_workflow(
             ogm,
             resource_iri=seed.HELLO_RESOURCE,
-            service_iri=seed.HELLO_RESOURCE + "_service",
-            workflow_iri=seed.HELLO_RESOURCE + "_service_workflow_ghost",
+            service_iri=ghost_service,
+            workflow_iri=mint_workflow_iri(ghost_service, "ghost"),
             workflow_class="https://example.org/kapps-demo#NonexistentWorkflow",
             capability_iri=mint_capability_iri(seed.HELLO_RESOURCE, "ghost"),
             capability_class=seed.HELLO_CAPABILITY_CLASS,
