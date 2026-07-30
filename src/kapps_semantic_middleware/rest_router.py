@@ -1,0 +1,320 @@
+"""Recursive REST route generation to the complex property (ADR 0017).
+
+The resource middleware's datamodel CRUD API is extended with recursive routes that descend the
+datamodel tree and terminate at each interface-accessible parameter — a ``PropertyValueKind.COMPLEX``
+property whose blanknode dict is the atomic addressable unit. The framework's own generator produces
+only top-level CRUD; this module adds the parameter routes beneath it.
+
+Recursion terminates at COMPLEX properties because RDF has no properties-about-properties: metadata
+about a conveyor speed (its unit, its MQTT topic) is modelled as a blanknode hanging off the
+parameter property. That blanknode materializes as an ``AnonymousClass`` with no ``id`` — not
+``Identifiable``, therefore never routable. Treating the blanknode dict as the atomic element makes
+the id-less problem disappear: the **property** is the last segment and the dict is the body. Value
+and unit move together, as they must — a speed without its unit is not a speed.
+
+Every value in this tree is a **list** because of RDF multiplicity (research doc 0029), including
+scalars. ADR 0017's illustrative example shows a bare dict and predates that finding; the payload
+is a list of parameter dicts, not a bare dict.
+
+Verb gating is per individual: one belt may be ``readwrite`` while a barrier on the same unit is
+``read``. Path segments are therefore **literal**, not FastAPI path parameters — a parameterised
+route could not express per-individual verb differences. A PUT to a read-only parameter returns 405
+because the route does not exist; FastAPI handles that automatically.
+
+The request/response type comes from the **owning node's** model field annotation, not from
+``binding.node_model_type``. The latter comes from the full spec and carries southbound connection
+metadata; the northbound instance's own annotation is the pruned shape (ADR 0028). Using the wrong
+one leaks broker addresses northbound.
+"""
+
+from __future__ import annotations
+
+import inspect
+import logging
+from typing import Any, Dict, List, Sequence, Set, Tuple
+
+from fastapi import APIRouter, HTTPException
+from graph_db_interface import IRI
+from pydantic import BaseModel
+
+from aas_middleware.model.data_model import DataModel
+from aas_middleware.middleware.registries import ConnectionInfo
+
+from kapps_semantic_middleware.connectors.semantic import AccessMode, ParameterBinding
+
+logger = logging.getLogger(__name__)
+
+
+def _lined(value: Any) -> str:
+    """Mangle an IRI or plain string into a URL-safe segment.
+
+    Tolerates a value that is already an ``IRI`` (has ``lined``) and one that is a plain ``str``.
+    This is total and invertible (ADR 0021); raw IRIs contain ``/`` and would break routing.
+    """
+    if hasattr(value, "lined"):
+        return value.lined
+    return IRI(value).lined
+
+
+def _owner_of(model: Any, owner_id: str, field_id: str) -> Any:
+    """The nested individual a parameter route addresses, or a 500 naming what is missing.
+
+    The `DataModel` is rebuilt per request rather than captured when the route was generated,
+    and deliberately so: the handler must navigate the model persistence is holding *now*, and
+    a map built at generation time would pin objects that later writes have replaced. It is the
+    same rebuild `update_persistence_with_value` does for the same reason.
+
+    `get_model` returns ``None`` when recognition found a binding whose owner is not in the
+    materialized tree -- ontology drift, or a scope that pruned the branch out from under it.
+    Letting that reach ``getattr`` produces ``AttributeError: 'NoneType'``, which surfaces as a
+    generic error naming neither the individual nor the cause. Fail with both.
+    """
+    owner = DataModel.from_models(model).get_model(owner_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"{owner_id} carries the recognised parameter {field_id} but is absent from the "
+                f"materialized tree, so the route cannot be served"
+            ),
+        )
+    return owner
+
+
+def _make_get_handler(
+    data_model_name: str,
+    root_id: str,
+    owner_id: str,
+    field_id: str,
+    response_annotation: Any,
+    middleware: Any,
+) -> Any:
+    """Build a GET handler for one parameter route.
+
+    Mirrors ``get_persistence_value``'s field-level branch from
+    ``aas_middleware/middleware/sync/synchronization.py`` — that is what makes the read surgical:
+    only the one field is returned, every sibling stays untouched.
+    """
+    async def get_parameter():
+        try:
+            connection_info = ConnectionInfo(
+                data_model_name=data_model_name, model_id=root_id
+            )
+            connector = middleware.persistence_registry.get_connection(connection_info)
+            model = await connector.provide()
+
+            if owner_id == root_id:
+                value = getattr(model, field_id)
+            else:
+                value = getattr(_owner_of(model, owner_id, field_id), field_id)
+
+            return value
+        except HTTPException:
+            # Already carries a considered status; re-raising keeps it rather than
+            # flattening every failure below into a 400.
+            raise
+        except Exception as e:
+            # 500, not 400: the caller asked for a route this middleware generated and
+            # advertised, so a failure to serve it is ours. A 400 here would send an operator
+            # looking at their own request for a fault that is on this side.
+            logger.warning("GET %s failed: %s", field_id, e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # FastAPI reads `inspect.signature()` before it looks at `__annotations__`, and this module
+    # has `from __future__ import annotations` — so a written-out annotation would reach it as an
+    # unresolvable string. Stamping the signature is what actually drives request parsing.
+    get_parameter.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        parameters=[],
+        return_annotation=response_annotation,
+    )
+    return get_parameter
+
+
+def _make_put_handler(
+    data_model_name: str,
+    root_id: str,
+    owner_id: str,
+    field_id: str,
+    body_annotation: Any,
+    middleware: Any,
+) -> Any:
+    """Build a PUT handler for one parameter route.
+
+    Mirrors ``update_persistence_with_value``'s final ``else:`` branch from
+    ``aas_middleware/middleware/sync/synchronization.py`` — that is what makes the write surgical:
+    only the one field is mutated, every sibling stays byte-identical, so a downstream diff-based
+    commit writes nothing for the siblings. See that file's lines around the field-level branch.
+    """
+    async def put_parameter(body):
+        try:
+            connection_info = ConnectionInfo(
+                data_model_name=data_model_name, model_id=root_id
+            )
+            connector = middleware.persistence_registry.get_connection(connection_info)
+            model = await connector.provide()
+
+            if owner_id == root_id:
+                setattr(model, field_id, body)
+            else:
+                setattr(_owner_of(model, owner_id, field_id), field_id, body)
+
+            await connector.consume(model)
+            return {"message": f"Updated {field_id}"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("PUT %s failed: %s", field_id, e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # As above: the body type has to arrive as a real object on the signature, not as a string
+    # annotation FastAPI would then fail to resolve.
+    put_parameter.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+        parameters=[
+            inspect.Parameter(
+                "body",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=body_annotation,
+            )
+        ],
+        return_annotation=Dict[str, str],
+    )
+    return put_parameter
+
+
+def _accumulate_routes(
+    inst: Any,
+    bindings_map: Dict[str, List[ParameterBinding]],
+    current_path: List[str],
+    visited: Set[str],
+) -> List[Tuple[str, ParameterBinding, str, Any]]:
+    """Walk instance, returning (path, binding, owner_id, field_annotation) tuples."""
+    results: List[Tuple[str, ParameterBinding, str, Any]] = []
+
+    node_id = getattr(inst, "id", None)
+    if node_id is None:
+        return results
+
+    node_id_str = str(node_id)
+    if node_id_str in visited:
+        return results
+    # A new set per branch rather than add-then-backtrack: `visited` is scoped to the path
+    # taken, not to the walk as a whole. An individual genuinely reachable by two routes should
+    # be addressable at both, and a walk-wide set would silently drop the second. The cost is a
+    # set per node over a handful of nodes, once, at startup.
+    visited = visited | {node_id_str}
+
+    owner_type = type(inst)
+
+    for binding in bindings_map.get(node_id_str, []):
+        param_path = "/".join(current_path + [binding.field_id])
+        field_info = owner_type.model_fields.get(binding.field_id)
+        field_annotation = field_info.annotation if field_info else Any
+        results.append((param_path, binding, node_id_str, field_annotation))
+
+    for field_name in type(inst).model_fields:
+        value = getattr(inst, field_name, None)
+        if not isinstance(value, list):
+            continue
+
+        for element in value:
+            # `isinstance` rather than a `model_fields` probe: pydantic 2.11 deprecates reading
+            # that attribute off an instance, and it is the wrong question anyway -- what matters
+            # is that the element is a model we can descend, not that it exposes a field map.
+            if not isinstance(element, BaseModel):
+                continue
+            child_id = getattr(element, "id", None)
+            if child_id is None:
+                continue
+
+            next_path = current_path + [field_name, _lined(str(child_id))]
+            results.extend(
+                _accumulate_routes(
+                    inst=element,
+                    bindings_map=bindings_map,
+                    current_path=next_path,
+                    visited=visited,
+                )
+            )
+
+    return results
+
+
+def generate_recursive_rest_api(
+    middleware: Any,
+    data_model_name: str,
+    *,
+    root_id: str,
+    instance: Any,
+    bindings: Sequence[ParameterBinding],
+) -> List[str]:
+    """Generate the resource middleware's REST surface: top-level CRUD plus recursive parameter routes.
+
+    Calls ``middleware.generate_rest_api_for_data_model`` first to produce the unchanged top-level
+    CRUD, then walks the instance tree and mounts parameter routes beneath it. Returns the list of
+    generated parameter route paths (path string per route, GET and PUT of the same path counted
+    once), for tests and diagnostics. Ordering is tree order, depth-first.
+
+    Args:
+        middleware: The semantic middleware instance, providing ``app``, ``persistence_registry``,
+            and ``generate_rest_api_for_data_model``.
+        data_model_name: The name of the data model for ConnectionInfo.
+        root_id: The IRI of the root resource instance.
+        instance: The materialized root instance, whose tree is walked.
+        bindings: The recognised ParameterBindings from WiringPlan.bindings.
+
+    Returns:
+        List of generated parameter route paths. Empty if instance has no id.
+    """
+    middleware.generate_rest_api_for_data_model(data_model_name)
+
+    root_node_id = getattr(instance, "id", None)
+    if root_node_id is None:
+        logger.warning(
+            "Root instance for %s has no id; generating top-level CRUD only, no parameter routes.",
+            data_model_name,
+        )
+        return []
+
+    bindings_by_owner: Dict[str, List[ParameterBinding]] = {}
+    for binding in bindings:
+        owner_key = str(binding.resource_iri)
+        bindings_by_owner.setdefault(owner_key, []).append(binding)
+
+    # The leading empty segment is what puts the "/" on the front once these are joined.
+    # Starlette asserts `path.startswith("/")`, so a missing one is a construction-time crash
+    # rather than a 404 — cheap to get right here, confusing to diagnose there.
+    initial_path = ["", type(instance).__name__, _lined(str(root_node_id))]
+    route_specs = _accumulate_routes(
+        inst=instance,
+        bindings_map=bindings_by_owner,
+        current_path=initial_path,
+        visited=set(),
+    )
+
+    router = APIRouter()
+
+    for path, binding, owner_id, field_annotation in route_specs:
+        get_handler = _make_get_handler(
+            data_model_name=data_model_name,
+            root_id=root_id,
+            owner_id=owner_id,
+            field_id=binding.field_id,
+            response_annotation=field_annotation,
+            middleware=middleware,
+        )
+        router.get(path, response_model=field_annotation)(get_handler)
+
+        if binding.access_mode == AccessMode.READWRITE:
+            put_handler = _make_put_handler(
+                data_model_name=data_model_name,
+                root_id=root_id,
+                owner_id=owner_id,
+                field_id=binding.field_id,
+                body_annotation=field_annotation,
+                middleware=middleware,
+            )
+            router.put(path)(put_handler)
+
+    middleware.app.include_router(router)
+
+    return [spec[0] for spec in route_specs]

@@ -34,6 +34,7 @@ from kapps_semantic_middleware.connectors.semantic import (
 from kapps_semantic_middleware.connectors.wiring import WiringPlan, plan_wiring
 from kapps_semantic_middleware import modes
 from kapps_semantic_middleware.modes import Mode
+from kapps_semantic_middleware.rest_router import generate_recursive_rest_api
 from kapps_semantic_middleware.registration import (
     HandoverPreconditionError,
     OperationQueueEmpty,
@@ -194,6 +195,12 @@ class SemanticMiddleware(Middleware):
             # to root recognition at, and the datamodel fetch stays unscoped as it is for
             # scenarios 1 and 2.
             self._wiring: Optional[WiringPlan] = None
+            # The parameter routes the recursive router generated, in tree order (ADR 0017).
+            # Populated at startup; kept because "what did I actually expose?" is otherwise
+            # answerable only by filtering `app.routes` and re-deriving which of them are
+            # parameters -- and because a silently empty list is the symptom of a tree walk
+            # that missed a branch.
+            self._parameter_routes: List[str] = []
             if class_scope is not None:
                 self._wire_semantic_connectors()
 
@@ -907,7 +914,19 @@ class SemanticMiddleware(Middleware):
             if instance is None:
                 return
             self.load_model_instances("resource", [instance])
-            self.generate_rest_api_for_data_model("resource")
+            # The local recursive router, not the framework generator (ADR 0017). It still
+            # produces the framework's top-level CRUD -- it calls it -- and then descends the
+            # datamodel tree to give every interface-accessible parameter its own address, so a
+            # setpoint is a PUT to one belt rather than a read-modify-write of the whole list.
+            # With no wiring there are no bindings, so nothing is added and scenarios 1 and 2
+            # keep exactly the surface they have today.
+            self._parameter_routes = generate_recursive_rest_api(
+                self,
+                "resource",
+                root_id=str(self.resource_iri),
+                instance=instance,
+                bindings=self._wiring.bindings if self._wiring is not None else (),
+            )
         except Exception as exc:  # noqa: BLE001 - additive convenience surface, never fatal
             logger.warning(
                 "Could not generate the resource datamodel REST API for %s: %s",
