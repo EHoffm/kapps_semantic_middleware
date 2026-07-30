@@ -1,4 +1,4 @@
-"""Phase 4 liveness integration tests against a live GraphDB (ADR 0009).
+"""Phase 4 liveness integration tests against a live GraphDB (ADR 0007).
 
 Deterministic (no waiting on real intervals): a heartbeat is written and refreshed
 idempotently, and a watchdog sweep deregisters a stale service while leaving a
@@ -66,28 +66,29 @@ def test_watchdog_sweeps_only_stale_service(graphdb):
     db = graphdb
     seed.seed_scenario1(db)
 
+    ogm = OGM(db=db)
     fresh_service = mint_service_iri(seed.HELLO_RESOURCE)
     stale_service = mint_service_iri(seed.PLANNER_RESOURCE)
 
     # A fresh, reachable service (heartbeat now).
     register_service(
-        db,
+        ogm,
         resource_iri=seed.HELLO_RESOURCE,
         service_iri=fresh_service,
         service_class=seed.HELLO_SERVICE_CLASS,
         address="http://127.0.0.1:8001",
     )
-    update_heartbeat(db, fresh_service)
+    update_heartbeat(ogm, fresh_service)
 
     # A reachable but silent service (heartbeat far in the past → stale).
     register_service(
-        db,
+        ogm,
         resource_iri=seed.PLANNER_RESOURCE,
         service_iri=stale_service,
         service_class=seed.PLANNER_SERVICE_CLASS,
         address="http://127.0.0.1:8002",
     )
-    update_heartbeat(db, stale_service, timestamp=datetime.now(timezone.utc) - timedelta(hours=1))
+    update_heartbeat(ogm, stale_service, timestamp=datetime.now(timezone.utc) - timedelta(hours=1))
 
     watchdog = SemanticMiddleware(
         mode="watchdog",

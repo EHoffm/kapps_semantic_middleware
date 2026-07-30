@@ -1,14 +1,15 @@
 """Scenario 1 end-to-end integration test against a live GraphDB.
 
-Drives the public SemanticMiddleware API (the one test seam): a hello-world
-middleware registers a workflow on startup, a second middleware resolves an
-Operation to that workflow and invokes it over real HTTP, and the graph is
-asserted at each step. Skipped when GRAPHDB_* env vars are absent (see conftest).
+Drives the public SemanticMiddleware API (the one test seam): a hello-world middleware
+registers a workflow on startup; a second middleware (a planner) dispatches an operation
+through the event-trigger coordination model — creating it `queued` in the graph and
+ringing the hello resource's event trigger over REST — and the hello resource pulls and
+runs it, recording the outcome. The graph is asserted at each step. Skipped when GRAPHDB_*
+env vars are absent (see conftest).
 """
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import threading
@@ -25,7 +26,7 @@ from kapps_semantic_middleware.registration import (
     mint_capability_iri,
     mint_workflow_iri,
 )
-from kapps_semantic_middleware.vocabulary import CFC, SVC
+from kapps_semantic_middleware.vocabulary import CFC, OperationStatus, SVC
 
 requires_graphdb = pytest.mark.skipif(
     not all(
@@ -84,19 +85,22 @@ def test_scenario1_hello_world_end_to_end(graphdb):
 
     server, thread = _start_server(mw1, HELLO_PORT)
     try:
-        # Registration wrote the full Service/Capability/Workflow structure + reachability.
-        assert db.triple_exists((seed.HELLO_RESOURCE, SVC.hasService, service_iri))
+        # Registration wrote the full Service/Capability/Workflow structure +
+        # reachability. Links are materialized on the instance-owned (inverse) side
+        # (ADR 0006): a Service knows its resource via isServiceOf, a Workflow knows
+        # its Service via isWorkflowOf, a Capability its Workflow via realizedByWorkflow.
         assert db.triple_exists((service_iri, RDF.type, seed.HELLO_SERVICE_CLASS))
-        assert db.triple_exists((seed.HELLO_RESOURCE, CFC.hasCapability, cap_instance))
+        assert db.triple_exists((service_iri, SVC.isServiceOf, seed.HELLO_RESOURCE))
+        assert db.triple_exists((cap_instance, RDF.type, seed.HELLO_CAPABILITY_CLASS))
         assert db.triple_exists((cap_instance, SVC.realizedByWorkflow, wf_instance))
-        assert db.triple_exists((service_iri, SVC.hasWorkflow, wf_instance))
+        assert db.triple_exists((wf_instance, SVC.isWorkflowOf, service_iri))
         assert db.triples_get(sub=service_iri, pred=SVC.address)
         assert db.triples_get(sub=wf_instance, pred=SVC.endpoint)
 
-        # An Operation implementing the (now-registered) capability instance.
-        seed.create_operation(db, seed.HELLO_OPERATION, cap_instance)
-
-        # A second middleware resolves + invokes the operation over HTTP.
+        # A second middleware (a planner) dispatches an operation for the hello capability:
+        # it creates the Operation `queued` in the graph and rings the hello resource's
+        # event trigger over REST — the peer is resolved purely through the graph, never
+        # hardcoded (ADR 0009/0010).
         mw2 = SemanticMiddleware(
             mode="resource",
             resource_iri=seed.PLANNER_RESOURCE,
@@ -105,15 +109,28 @@ def test_scenario1_hello_world_end_to_end(graphdb):
             host="127.0.0.1",
             port=8994,
         )
-        result = asyncio.run(mw2.execute(seed.HELLO_OPERATION))
-        assert result["success"] is True
-        assert result["result"] == "hello world"
-        assert result["workflow"] == str(wf_instance)
+        with mw2.request(
+            capability_class=seed.HELLO_CAPABILITY_CLASS,
+            operation_class=str(CFC.Operation),
+        ) as op:
+            pass  # helloworld takes no arguments to populate
+        op_iri = op.iri
 
-        # R12 provenance was written back onto the operation.
-        assert db.triple_exists((seed.HELLO_OPERATION, SVC.executedByWorkflow, wf_instance))
-        assert db.triples_get(sub=seed.HELLO_OPERATION, pred=SVC.executionSuccess)
-        assert db.triples_get(sub=seed.HELLO_OPERATION, pred=SVC.executionTimestamp)
+        # The dispatch created the Operation, addressed via its Capability, queued on the
+        # hello resource. The hello resource then pulls and runs it (pull-and-run).
+        assert db.triple_exists((op_iri, CFC.implementsCapability, cap_instance))
+        with mw1.claim_next() as claimed:
+            assert claimed.iri == op_iri
+            claimed.result = hello_world()
+
+        # The terminal transition recorded status `done` + execution provenance in one
+        # atomic write (ADR 0009: the status is itself the provenance record).
+        status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
+        assert status and str(status[0][2]) == OperationStatus.DONE
+        assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
+        assert db.triples_get(sub=op_iri, pred=SVC.executionTimestamp)
+        result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
+        assert result and str(result[0][2]) == "hello world"
     finally:
         server.should_exit = True
         thread.join(timeout=20)
@@ -134,9 +151,10 @@ def test_missing_ground_truth_class_fails_fast(graphdb):
     )
 
     seed.seed_scenario1(graphdb)
+    ogm = OGM(db=graphdb)
     with pytest.raises(OntologyGroundTruthError):
         register_workflow(
-            graphdb,
+            ogm,
             resource_iri=seed.HELLO_RESOURCE,
             service_iri=seed.HELLO_RESOURCE + "_service",
             workflow_iri=seed.HELLO_RESOURCE + "_service_workflow_ghost",

@@ -9,6 +9,11 @@ dependencies = [
     "graph-db-interface>=2.0.1",
     "aas-middleware>=0.2.6",
     "httpx>=0.27.0",
+    # aas_middleware keeps aiomqtt in an optional "industrial" extra, but the MQTT semantic
+    # connector is a first-class part of this middleware (#40), so it is a plain dependency
+    # here. Declaring it is also what stops the OGM repo's #15 failure -- importing a module
+    # the manifest never mentions -- from recurring.
+    "aiomqtt>=2.1.0",
 ]
 
 [dependency-groups]
@@ -22,7 +27,21 @@ dev = [
     "nbconvert>=7.16.0",
     "jupytext>=1.16.0",
     "httpx>=0.27.0",
+    # A pure-Python MQTT broker, run in-process as a pytest fixture. mosquitto would need
+    # root to install, which no CI runner and no fresh checkout can assume; this keeps the
+    # MockTransferUnit round-trip genuinely live and portable (#40).
+    "amqtt>=0.11.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = [
+    "live: needs a reachable GraphDB (the GRAPHDB_* env vars). Applied automatically to any test that requests the `graphdb` fixture, so `-m 'not live'` selects the tier that runs anywhere.",
+]
+# pytest-asyncio warns when this is unset and defaults it to "function". Stated explicitly so
+# the default is a decision rather than a warning; the async fixtures here are per-test.
+asyncio_default_fixture_loop_scope = "function"
 
 [build-system]
 requires = ["hatchling"]
@@ -35,3 +54,10 @@ packages = ["src/kapps_semantic_middleware"]
 aas-middleware = { path = "../aas_middleware_inf", editable = true }
 kapps-ogm = { path = "../kapps_ogm", editable = true }
 graph-db-interface = { path = "../graph_db_interface", editable = true }
+
+[tool.uv]
+# kapps_ogm's Poetry manifest pins graph_db_interface to a git branch (SAWeindel/kapps_ogm#22,
+# a temporary dev pin for the unreleased triples_update fix). uv sees that git URL and this
+# project's editable path source as conflicting URLs for one package and refuses to resolve.
+# The two are the same commit; the editable checkout is the one we develop against.
+override-dependencies = ["graph-db-interface"]

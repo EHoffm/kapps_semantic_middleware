@@ -10,6 +10,8 @@ module source and keeps the shared in-memory door state in one place.
 
 from __future__ import annotations
 
+import threading
+
 # --- Scenario 1 -------------------------------------------------------------- #
 
 
@@ -24,10 +26,22 @@ def hello_world() -> str:
 # Deliberately NOT stored in the knowledge graph.
 _door = {"status": "closed"}
 
+# The door closes itself 30 s after opening (a safety default). Timers are daemon threads
+# (they never block process exit) and are tracked so a script/test can cancel any still-
+# pending one on teardown.
+DOOR_AUTO_CLOSE_SECONDS = 30.0
+_auto_close_timers: list[threading.Timer] = []
+
 
 def door_open() -> str:
-    """Workflow: open the door (mutates in-memory state)."""
+    """Workflow: open the door (mutates in-memory state) and schedule its auto-close."""
     _door["status"] = "opened"
+    timer = threading.Timer(
+        DOOR_AUTO_CLOSE_SECONDS, lambda: _door.__setitem__("status", "closed")
+    )
+    timer.daemon = True
+    timer.start()
+    _auto_close_timers.append(timer)
     return "opened"
 
 
@@ -40,3 +54,11 @@ def door_close() -> str:
 def door_status() -> str:
     """State getter: the door's current status, served live from memory."""
     return _door["status"]
+
+
+def reset_door() -> None:
+    """Reset the door to closed and cancel any pending auto-close timers (setup/teardown)."""
+    for timer in _auto_close_timers:
+        timer.cancel()
+    _auto_close_timers.clear()
+    _door["status"] = "closed"

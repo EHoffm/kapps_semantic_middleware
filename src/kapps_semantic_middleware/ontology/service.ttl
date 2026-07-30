@@ -137,35 +137,42 @@ svc:lastHeartbeat rdf:type owl:DatatypeProperty ;
     rdfs:range xsd:dateTime .
 
 #################################################################
-# Execution provenance (R12)
+# Execution provenance (R12, ADR 0009)
 #
-# Written back onto a cfc:Operation by the middleware's built-in execute()
-# after it resolves the Operation to a Workflow and invokes it. Together these
-# record which Workflow handled the Operation (actor/context), whether it
-# succeeded (outcome), when, and an optional serialized result — so any past
-# Operation is reconstructible from the graph alone.
+# Written back onto a cfc:Operation by the pull-and-run terminal transition
+# (ADR 0010), folded into the done/failed status change. Together these record
+# which Workflow handled the Operation (actor/context), when, and an optional
+# serialized result — so any past Operation is reconstructible from the graph
+# alone. Whether the operation succeeded is carried by svc:operationStatus
+# (done/failed) per ADR 0009, not a separate boolean.
 #################################################################
+
+svc:operationStatus rdf:type owl:DatatypeProperty ;
+    rdfs:label "operationStatus" ;
+    rdfs:comment "The lifecycle state of an Operation: queued (created and addressed, awaiting pull) -> running (pulled, in progress) -> done | failed (terminal). Written onto a cfc:Operation to drive coordination and recovery (ADR 0009). The terminal value (done vs failed) also carries whether execution succeeded, replacing the former svc:executionSuccess boolean. Values are plain xsd:string literals; there is no status class or enumerated individuals in v1." ;
+    rdfs:domain cfc:Operation ;
+    rdfs:range xsd:string .
 
 svc:executedByWorkflow rdf:type owl:ObjectProperty ;
     rdfs:label "executedByWorkflow" ;
-    rdfs:comment "Relates a cfc:Operation to the svc:Workflow instance that actually handled it when execute() resolved and invoked it. Records the acting workflow (and, through it, the resource) for decision-level provenance." ;
+    rdfs:comment "Relates a cfc:Operation to the svc:Workflow instance that actually handled it when it was pulled and run. Records the acting workflow (and, through it, the resource) for decision-level provenance." ;
     rdfs:domain cfc:Operation ;
     rdfs:range svc:Workflow .
 
-svc:executionSuccess rdf:type owl:DatatypeProperty ;
-    rdfs:label "executionSuccess" ;
-    rdfs:comment "Whether the invocation of the Operation's resolved Workflow succeeded. Part of the outcome recorded on the Operation by execute()." ;
-    rdfs:domain cfc:Operation ;
-    rdfs:range xsd:boolean .
-
 svc:executionTimestamp rdf:type owl:DatatypeProperty ;
     rdfs:label "executionTimestamp" ;
-    rdfs:comment "The time at which execute() invoked the Operation's resolved Workflow. Part of the outcome recorded on the Operation." ;
+    rdfs:comment "The time at which the Operation reached its terminal state (the pull-and-run transition). Part of the outcome recorded on the Operation." ;
     rdfs:domain cfc:Operation ;
     rdfs:range xsd:dateTime .
 
 svc:executionResult rdf:type owl:DatatypeProperty ;
     rdfs:label "executionResult" ;
-    rdfs:comment "An optional serialized (string) representation of the value the resolved Workflow returned when execute() invoked it. Part of the outcome recorded on the Operation." ;
+    rdfs:comment "An optional serialized (string) representation of the value the Workflow returned when the Operation was pulled and run. Part of the outcome recorded on the Operation." ;
+    rdfs:domain cfc:Operation ;
+    rdfs:range xsd:string .
+
+svc:failureState rdf:type owl:DatatypeProperty ;
+    rdfs:label "failureState" ;
+    rdfs:comment "An optional JSON snapshot of the executing resource's aas_middleware datamodel captured at the moment an Operation failed, written atomically with svc:operationStatus=failed (ADR 0009). It records the observed resource state under which the failure occurred, so a failed Operation is diagnosable and replayable from the graph alone. Absent on successful (done) Operations." ;
     rdfs:domain cfc:Operation ;
     rdfs:range xsd:string .
