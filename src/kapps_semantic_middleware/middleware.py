@@ -34,6 +34,7 @@ from kapps_semantic_middleware.connectors.semantic import (
 from kapps_semantic_middleware.connectors.wiring import WiringPlan, plan_wiring
 from kapps_semantic_middleware import modes
 from kapps_semantic_middleware.modes import Mode
+from kapps_semantic_middleware.activity import ActivityFeed, enable_activity_feed
 from kapps_semantic_middleware.rest_router import generate_recursive_rest_api
 from kapps_semantic_middleware.registration import (
     HandoverPreconditionError,
@@ -145,6 +146,8 @@ class SemanticMiddleware(Middleware):
         autoregister_connectors: bool = True,
         connector_sync_direction: SyncDirection = SyncDirection.BIDIRECTIONAL,
         connector_registry: Optional[SemanticConnectorRegistry] = None,
+        activity_feed: bool = False,
+        activity_capacity: int = 200,
     ) -> None:
         super().__init__()
 
@@ -243,6 +246,17 @@ class SemanticMiddleware(Middleware):
             self.service_iri = None
             raise NotImplementedError("mode 'server' is not implemented yet")
 
+        # Opt-in, and deliberately *outside* the mode branches (#67). A controller and a
+        # monitor are this library configured differently (ADR 0022), so they inherit the feed
+        # from the same code -- no `if mode ==` here, and none in `activity.py` either. That
+        # the flavours compose out of one library is the claim the demo is built to make, and
+        # a mode-specific observability surface would quietly undercut it.
+        #
+        # Off means off: no ring buffer allocated, no handler attached, no route mounted.
+        self.activity_feed: Optional[ActivityFeed] = None
+        if activity_feed:
+            self.activity_feed = enable_activity_feed(self, capacity=activity_capacity)
+
     async def _register_service(self) -> None:
         """Register the Service instance in the knowledge graph on startup."""
         await anyio.to_thread.run_sync(
@@ -308,6 +322,10 @@ class SemanticMiddleware(Middleware):
                 update_heartbeat, self.ogm, self.service_iri, named_graph=self.named_graph
             )
         )
+        # One line per interval (30s by default), so this is a pulse rather than a flood --
+        # and it is the only outward sign that an idle instance is still alive, which is
+        # exactly what someone watching the activity feed wants to see (#67).
+        logger.info("Heartbeat written for %s", self.service_iri)
 
     # --- Liveness: centralized watchdog sweep (watchdog mode), ADR 0007 ---- #
 

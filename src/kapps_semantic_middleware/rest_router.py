@@ -159,6 +159,9 @@ def _make_put_handler(
                 setattr(_owner_of(model, owner_id, field_id), field_id, body)
 
             await connector.consume(model)
+            # A PUT is always news: something northbound chose to act. Logged after the
+            # consume, so the line means "applied" rather than "attempted" (#67).
+            logger.info("PUT applied: %s on %s = %r", field_id, owner_id, body)
             return {"message": f"Updated {field_id}"}
         except HTTPException:
             raise
