@@ -39,7 +39,7 @@ if threading.current_thread() is not threading.main_thread():
 
 No handler means SIGTERM never reaches the lifespan shutdown, so none of the three callbacks fire.
 Scenarios 1 and 2 leave their Service individuals in the graph on every exit. The bug is not in the
-shutdown code; it is in the process shape around it. Giving each middleware its own process, with
+shutdown code. It is in the process shape around it. Giving each middleware its own process, with
 uvicorn on the main thread, is what turns an existing feature on.
 
 The same shape dissolves the deadlock behind the unserved scenario-3 walkthrough: one loop per
@@ -56,7 +56,7 @@ Registering it as a `cfc:Resource` with a provisioning `cfc:Capability` was cons
 tempting: the controller would then reach it through ADR 0002 capability resolution with no
 configured endpoint anywhere, and ADR 0009 would make a spawn request durable for free. It was
 rejected because it asserts something false. Provisioning a machine is not a semantic-middleware
-concern; nobody dispatches an Operation to bolt a conveyor to the floor. Putting the launcher in the
+concern. Nobody dispatches an Operation to bolt a conveyor to the floor. Putting the launcher in the
 graph would teach a viewer that the middleware does something it does not do.
 
 The cost is accepted honestly: the launcher's own address is configuration rather than discovery. It
@@ -84,7 +84,7 @@ rather than by discipline.
 
 Everything else — unit number, resource IRI, broker address — is a command-line flag, because the
 launcher prints the line it runs and any one of them can be copy-pasted to run that process alone
-under a debugger. That affordance is why containerisation was ruled out of scope; the config
+under a debugger. That affordance is why containerisation was ruled out of scope. The config
 transport should not quietly give it back.
 
 Note the asymmetry in who needs what: the **only** process that must be told where the broker is, is
@@ -123,26 +123,26 @@ not an intention the next edit can quietly undo.
 ## Consequences
 
 - **Teardown is ordered.** The launcher SIGTERMs middleware children first, so each deregisters
-  while its PLC is still answering, then the PLC processes; it waits, SIGKILLs stragglers, and
+  while its PLC is still answering, then the PLC processes. It waits, SIGKILLs stragglers, and
   reports what did not exit. Killing PLCs first would leave every middleware erroring at a dead peer
   during its last seconds. The shutdown logic itself stays in the library — the launcher only sends
   signals.
 - **The port half of #20 becomes a prerequisite.** Self-allocation is exactly what that ticket
   describes. Its host-IP half is not needed: this demo is localhost.
-- **The controller does not spawn anything.** Adding a unit is done from the launcher's UI; what the
+- **The controller does not spawn anything.** Adding a unit is done from the launcher's UI. What the
   controller demonstrates is that a unit which appeared after it started shows up with no restart
   and no configuration. That is a graph-discovery property and the actual claim being made.
 - **Every middleware gains an activity feed.** Runtime coverage on the existing named loggers (value
   in, setpoint out, heartbeat written, PUT applied) plus an opt-in ring-buffer handler behind an SSE
   `/activity` route on the instance's own app. It is library-level, so the controller and monitor
   inherit it — the library composing into products it was not shaped around, demonstrated rather
-  than asserted. It shows the *machinery*; the monitor shows *resource state*. Those stay separate.
+  than asserted. It shows the *machinery*. The monitor shows *resource state*. Those stay separate.
 - **`demo/TransferUnits/` is a new home.** `examples/` keeps the simple linear walkthrough scripts
-  (scenarios 1 and 2); `demo/` holds runnable multi-process scenarios, each with its own README.
+  (scenarios 1 and 2). `demo/` holds runnable multi-process scenarios, each with its own README.
   `examples/scenario3_transferunit.py` and its notebook retire when the factory lands, replaced
   rather than repaired.
 - **ADR 0022 is relied upon, not changed.** Two flavours on one unit already have distinct Service
-  nodes; this ADR is what finally puts them in distinct processes.
+  nodes. This ADR is what finally puts them in distinct processes.
 - Ontology terms are unaffected — no new vocabulary enters, so ADR 0021 is untouched.
 
 Decided on wayfinder ticket #58, under map #57.

@@ -9,7 +9,7 @@ Operation through the queue. It is a transaction context manager (ADR 0010):
   `mes:hasHandoverAbility` for the mode. There is deliberately **no destination-free check** —
   possession is not universally `maxCount 1`.
 - the **body is domain-owned**: physical transport / preparation and all counterpart
-  coordination. The core never references `execute()`; the body may itself open a `request(...)`
+  coordination. The core never references `execute()`. The body may itself open a `request(...)`
   dispatch to drive the counterpart.
 - `__exit__` commits the **one atomic possession switch** on clean exit (a single OGM
   `DELETE/INSERT`, ADR 0008), and aborts with no switch on exception.
@@ -43,7 +43,7 @@ against Core 0.9.0: Core already models possession as a **reified, time-bound
 `cfc:PossessionState`** (`cfc:hasPossessor` Resource→PossessionState, `cfc:hasPossessedWorkpiece`
 Workpiece→PossessionState), with a Core restriction that a **Workpiece has exactly one**
 `hasPossessedWorkpiece` state. So this project no longer uses the (now-removed) binary
-`mes:hasPossession`; the handover primitive reads and writes **Core's** possession model:
+`mes:hasPossession`. The handover primitive reads and writes **Core's** possession model:
 
 - `__enter__` "caller possesses the workpiece" check: is there a PossessionState the workpiece
   points to whose possessor is the caller — `workpiece cfc:hasPossessedWorkpiece ?ps .
@@ -56,7 +56,7 @@ Workpiece→PossessionState), with a Core restriction that a **Workpiece has exa
   ordered before the re-point, so a failed re-point leaves the prior possession fully intact.
   The workpiece points to exactly one PossessionState throughout — the cardinality-bearing step
   (the re-point) is a single atomic commit, so the backstop is never transiently violated. The
-  old PossessionState is kept as **implicit history** (the workpiece no longer points to it); no
+  old PossessionState is kept as **implicit history** (the workpiece no longer points to it). No
   OWL-Time interval is written in v1 (deferred). The "possessed by exactly one" backstop is
   **Core's own** Workpiece cardinality-1 on `cfc:hasPossessedWorkpiece`, enforced at commit by
   SHACL — not asserted by this project.

@@ -9,7 +9,7 @@ how to turn one parameter's metadata into one or more `add_synced_connector` reg
 > + a protocol metadata ontology, resolved through a universal registry"), whose file is deleted. ADR
 > 0016's headline was directly contradicted here — a semantic connector is *not* itself an
 > `aas_middleware` Connector — so leaving both standing meant the first ADR a reader met on the subject
-> told them the wrong thing. What survives from it is below; **How we got here** preserves the route.
+> told them the wrong thing. What survives from it is below. **How we got here** preserves the route.
 
 ```python
 @semantic_connector
@@ -38,7 +38,7 @@ materialized instance data, and not during `on_start_up`.
 ### The framework's connectors are the examples, and they are not ours to change
 
 `aas_middleware` ships about ten connectors — MQTT, OPC-UA, HTTP request and polling, websocket and
-webhook client and server, AAS client, model. Every one of them is a candidate semantic connector; only
+webhook client and server, AAS client, model. Every one of them is a candidate semantic connector. Only
 the bare `Connector` protocol is not, being the interface specification itself. Root ADR 0001 forbids
 adding self-registration to any of them in the sibling repo, so the capability lives here.
 
@@ -72,7 +72,7 @@ atomic unit ADR 0017 arrived at from the routing side, reached independently fro
 `contained_model_id` resolves through `DataModel.get_model`, which — verified live — indexes belts and
 barriers **by IRI even though they are not `Identifiable`**. This is the opposite of the route generator,
 which admits only `Identifiable` attributes and therefore sees nothing (#29). The sync machinery works on
-the framework as shipped; only the router had to be replaced.
+the framework as shipped. Only the router had to be replaced.
 
 ### Static facets are cached, because nothing downstream can read them back
 
@@ -142,8 +142,8 @@ is never writable by accident of omission.
 ## What survives from ADR 0016
 
 **`provide`/`consume` map to read/write of the parameter.** `provide` yields the current value (MQTT:
-the latest message on the read topic, held from a subscription); `consume` writes one (MQTT: publish to
-the set topic). A `read` parameter uses `provide` only; a `readwrite` parameter uses both. This is how a
+the latest message on the read topic, held from a subscription). `consume` writes one (MQTT: publish to
+the set topic). A `read` parameter uses `provide` only. A `readwrite` parameter uses both. This is how a
 connector backs ADR 0015's Path-1 auto-wiring.
 
 **The registry is the extensibility seam.** Adding a protocol is registering a new descriptor — no core
@@ -156,7 +156,7 @@ connector-side analogue of ADR 0015's Path-2 escape hatch.
 - Metadata: `inf:hasMQTTBrokerIP`, `inf:hasMQTTTopic`, `inf:hasMQTTSetTopic` (present iff `accessMode`
   is `readwrite`), optional `inf:hasMQTTValuePath`.
 - Topic scheme `TransferUnit<n>/<component>/<position>/<param>`, setpoint appending `_set`.
-- `MockTransferUnit` **publishes 4** and **subscribes to 2**; the middleware is its mirror image.
+- `MockTransferUnit` **publishes 4** and **subscribes to 2**. The middleware is its mirror image.
 - Payload: **raw scalar by default**, parsed per the parameter's ontology datatype — which falls out of
   the node model generated from the effective shape, not from hand-written coercion. With
   `inf:hasMQTTValuePath`, a **JSON envelope** read and written at that path, symmetric across both

@@ -27,7 +27,7 @@ only what a property's *own* range restriction declared, so a topic, set topic o
 ADR 0008. `#7` made `PropertySpec.specify` walk `rdfs:subPropertyOf*` and merge the anonymous
 restriction ranges it finds, so the effective shape of `tu:hasConveyorSpeed` now resolves all six of
 `inf:hasValue`, `tu:hasUnit`, `inf:accessMode`, `inf:hasMQTTTopic`, `inf:hasMQTTSetTopic` and
-`inf:hasMQTTBrokerIP`. The helper and the exception were deleted on 2026-07-29; the metadata is now
+`inf:hasMQTTBrokerIP`. The helper and the exception were deleted on 2026-07-29. The metadata is now
 passed in `ogm.create`'s `data`, and `tests/test_scenario3_seed_integration.py` — unchanged, because it
 always asserted the resulting graph rather than the mechanism — verifies it live.
 
@@ -35,7 +35,7 @@ always asserted the resulting graph rather than the mechanism — verifies it li
 
 Self-contained ground-truth ontology for **scenario 3 (TransferUnit) only**: a mock PLC → middleware →
 controller loop over a TransferUnit with two conveyor belts and two light barriers (map #24). The
-conveyor speeds are settable control variables; the light barriers are read-only occupancy sensors.
+conveyor speeds are settable control variables. The light barriers are read-only occupancy sensors.
 All four are reached over MQTT.
 
 **Self-contained by design.** `seed.py` clears the repository before every seed and loads only the
@@ -74,9 +74,9 @@ that twenty domain engineers never have to restate.
 ## The projection is merge depth
 
 A consumer merging only up to `inf:isInterfaceAccessibleParameter` should get value, unit and access
-mode; one that also merges the protocol subproperty gets topic, set topic and broker.
+mode. One that also merges the protocol subproperty gets topic, set topic and broker.
 
-**The ordering is the design; the merge is not selectable.** `PropertySpec._resolve_effective_ranges`
+**The ordering is the design. The merge is not selectable.** `PropertySpec._resolve_effective_ranges`
 walks the *entire* `rdfs:subPropertyOf*` chain, and no merge-depth parameter exists on `specify`,
 `get_class_spec` or `fetch` — so every ClassSpec is the deep one, and a materialized parameter *does*
 carry the broker address. Measured live, 2026-07-29. The middleware therefore realizes the shallow view
@@ -113,7 +113,7 @@ metadata or from embedding code (ADR 0026).
 **Topic scheme** (an instance convention, not baked into the classes — ADR 0023):
 `TransferUnit<n>/<component>/<position>/<param>`, with a setpoint appending `_set`. The
 MockTransferUnit publishes 4 topics and subscribes to 2. Broker `127.0.0.1`, no auth — a local test
-broker; a real deployed broker with auth and TLS is out of scope for map #24.
+broker. A real deployed broker with auth and TLS is out of scope for map #24.
 
 **Lifecycle.** In production these parameter nodes are written by the **middleware** when the resource
 is first set up: that is the moment the interface connection metadata is joined to the domain
@@ -122,13 +122,13 @@ TransferUnit was instantiated by a previous run", which is what lets the scenari
 connector self-registration path from a cold start. #54 replaces the stand-in with the real flow.
 
 **No values — this scenario is a locator** (ADR 0024). The graph records *where* a value lives (unit,
-access mode, topic, broker) and never the value itself; the live value exists only in the datamodel and
+access mode, topic, broker) and never the value itself. The live value exists only in the datamodel and
 over REST. The `inf:hasValue` literals in the upstream example were test scaffolding from before the
 middleware existed. A parameter that has not been observed yet materialises as an empty list, which
 `NodeValidator` accepts under the OWA. A domain whose data changes slowly may instead *commit* its
-values; the middleware is agnostic between the two patterns.
+values. The middleware is agnostic between the two patterns.
 
-**No SHACL shapes.** Deferred with the rest of SHACL Interop; the setter payload shape (e.g. speed
+**No SHACL shapes.** Deferred with the rest of SHACL Interop. The setter payload shape (e.g. speed
 within `[0, maxSpeed]`) is explicitly out of map #24's scope.
 
 ## Namespace (provisional)
@@ -151,12 +151,12 @@ runtime state).
 
 ## Change history
 
-Root ADR 0001 requires a detailed changelog for ontology changes; it lives here now rather than in the
+Root ADR 0001 requires a detailed changelog for ontology changes. It lives here now rather than in the
 Turtle.
 
 ### 2026-07-29 — the seed's last raw-SPARQL write is gone
 
-No change to the Turtle; this records the seed catching up to it. The 2026-07-28 entry below noted that
+No change to the Turtle. This records the seed catching up to it. The 2026-07-28 entry below noted that
 the declared MQTT metadata "takes effect only once `SAWeindel/kapps_ogm#7` lands". It has landed, and
 the effect was measured against the live store before anything was deleted: with the metadata passed in
 `ogm.create`'s `data`, a settable belt parameter comes back carrying `hasUnit`, `accessMode`,
@@ -184,7 +184,7 @@ From ADR 0025/0026, grilled under #52.
   replaces it with merge depth, so the broker is still physically absent northbound while the metadata
   is now **declared** — which is what lets provisioning write it through the OGM at all. Without this,
   no OGM write path can put a topic on a parameter: it is dropped at materialisation, silently, with
-  one warning. Takes effect only once `SAWeindel/kapps_ogm#7` lands; the file is correct ahead of it,
+  one warning. Takes effect only once `SAWeindel/kapps_ogm#7` lands. The file is correct ahead of it,
   the merged shape is simply not computed yet.
 - **`inf:accessMode` moved out** of both parameter restrictions onto
   `inf:isInterfaceAccessibleParameter`. It is generic interface content — every interface-accessible
@@ -240,8 +240,8 @@ and dropped the parameter blank nodes entirely. Every one of those decisions was
   into `inf:InterfaceAccessibleParameter`: a state **is** a protocol-interface parameter, one node
   carrying value + unit + the metadata a connector needs to reach the device. Settability is a facet
   (`inf:accessMode`), not a subclass.
-- **Removed** `tu:ConveyorSpeedCapability` / `tu:LightBarrierCapability`. States have no capabilities;
-  the authoritative sfb1574 ontology has none either, and the draft carried two "this is wrong
+- **Removed** `tu:ConveyorSpeedCapability` / `tu:LightBarrierCapability`. States have no capabilities.
+  The authoritative sfb1574 ontology has none either, and the draft carried two "this is wrong
   modeling, delete" markers saying so. A light barrier does not have a "light-barrier capability".
 - **Restored** the parameter blank nodes the draft dropped, but without values (locator pattern).
 - **Added** the `inf:` interface-property hierarchy and the MQTT connection metadata (ADR 0023), which

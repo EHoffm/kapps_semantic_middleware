@@ -10,7 +10,7 @@ Two scoping rules ride with this:
 - **No domain IRIs in the middleware core.** Domain vocabulary belongs in the domain-expert portion
   of a scenario, never in `src/kapps_semantic_middleware/`.
 - **A connector may hardcode only its own ontology's terms.** The MQTT connector may name
-  `inf:hasMQTTTopic`; it may not name `tu:hasConveyorSpeed`.
+  `inf:hasMQTTTopic`. It may not name `tu:hasConveyorSpeed`.
 
 ## Why
 
@@ -42,12 +42,12 @@ become a hardcoded case. Verified at the time of writing: the only namespaces ap
 `cfc:` Core, `svc:` Service, MES and W3C standards.
 
 The same rule applied to connectors is what makes the registry work at all (ADR 0020). A connector
-that named domain properties would need one entry per resource type; a connector that names only its
+that named domain properties would need one entry per resource type. A connector that names only its
 own protocol vocabulary serves every resource that speaks that protocol.
 
 ## Consequences
 
-- The `IRI` class gains a display/pretty-print method. It is a rendering concern; nothing parses it,
+- The `IRI` class gains a display/pretty-print method. It is a rendering concern. Nothing parses it,
   and it carries no correctness weight.
 - The Flask UIs (#31, #33) render pretty names and hold mangled ones. Swagger gets the pretty form
   only where the framework allows a display override.

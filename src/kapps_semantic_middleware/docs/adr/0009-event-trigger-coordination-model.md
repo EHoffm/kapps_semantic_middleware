@@ -4,7 +4,7 @@ Services coordinate by **passing Operations through the graph and firing an even
 synchronous RPC. The caller **dispatches**: it creates the Operation individual in the graph
 (via the OGM write path, addressed to a target Resource through its Capability) and then
 **triggers the receiver's `execute()`** — a built-in Workflow every resource-mode middleware
-exposes on its REST API. The trigger carries only the Operation IRI; the payload lives in the
+exposes on its REST API. The trigger carries only the Operation IRI. The payload lives in the
 graph. `execute()` **enqueues** the Operation, `ogm.fetch`es it, hands it to an optional
 domain callback (else leaves it `queued`), and returns immediately — it does not block on the
 work or return a business result. The receiving domain later **pulls** the next Operation,
@@ -16,7 +16,7 @@ resolved an endpoint and blocked on an `httpx` POST to the workflow (see the ame
 so the graph is the source of truth and the per-resource queue is an in-memory cache. On
 startup a middleware reconstructs its queue by querying the graph for its own `queued`
 Operations **and reclaiming its own orphaned `running` ones**. A missed trigger (receiver briefly
-down) or a restart therefore loses no work; the event trigger is a latency optimization over a
+down) or a restart therefore loses no work. The event trigger is a latency optimization over a
 self-healing baseline, and a `watchdog`-mode instance centrally sweeps a *dead* resource's
 stranded Operations rather than every resource polling (ADR 0007). Chosen over a continuous
 per-resource poll because ~20 resources against one graph should not each poll, and over a

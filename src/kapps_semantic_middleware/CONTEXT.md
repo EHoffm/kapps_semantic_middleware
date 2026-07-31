@@ -8,7 +8,7 @@ Interface-Layer component that lets a piece of Python code running on or next to
 resource (or as a standalone service) expose functionality through the knowledge graph, and
 lets other middleware instances discover and invoke that functionality via the graph rather
 than via hardcoded network references. This context owns the Service/Workflow/Capability/
-Operation/Mode registration and execution machinery; it delegates the actual generation and
+Operation/Mode registration and execution machinery. It delegates the actual generation and
 parsing of workflow precondition/outcome SHACL shapes to the SHACL Interop context.
 
 Built on `aas_middleware` (forked by inheritance, being incrementally reimplemented locally),
@@ -24,7 +24,7 @@ domain-specific subclass of `svc:Service` that must pre-exist in the ontology.
 There is **one Service per middleware instance, not per Resource**: several instances may be bound to
 one Resource, each owning its own Service node, address and heartbeat, all linked by
 `svc:isServiceOf` (ADR 0022). Discovery may therefore return several Services for one Resource.
-_Avoid_: Middleware instance (that's the Python object; Service is its graph representation), Resource (Service *wraps* a Resource, it isn't one); "the service of a resource" (there may be several).
+_Avoid_: Middleware instance (that is the Python object; Service is its graph representation), Resource (Service *wraps* a Resource, it is not one); "the service of a resource" (there may be several).
 
 **Flavour** (of a resource-mode instance):
 A configuration of the one library, not a distinct class — resource mode is a **library woven into a
@@ -144,7 +144,7 @@ Parameters, not which parts of one).
 The property a **Semantic connector** binds to — `inf:isInterfaceAccessibleMQTTParameter` and its
 siblings, under `inf:isInterfaceAccessibleParameter`. A resource's parameter declares its protocol by
 being a **subproperty** of one, which is how the authoritative upstream ontology already models it.
-Recognition is `rdfs:subPropertyOf*` against the registry; the parameter blanknode itself carries no
+Recognition is `rdfs:subPropertyOf*` against the registry. The parameter blanknode itself carries no
 named class to match on (ADR 0020).
 _Avoid_: Interface class (retained for the ontology concept, but the *match* is on the property).
 
@@ -152,14 +152,14 @@ _Avoid_: Interface class (retained for the ontology concept, but the *match* is 
 The bounded form of the system's flexibility: novel *combinations* are handled, novel *vocabulary* is
 not. A task assembled from grip/move/place may never have been seen in that combination, and a product
 may combine a screw and a gear never before combined — but grip, move, place, screw and gear are all
-known. Views and discovery listings are configured over known classes for this reason; it is a
+known. Views and discovery listings are configured over known classes for this reason. It is a
 deliberate boundary, not a limitation to be engineered away.
 _Avoid_: Zero-configuration, Fully generic (both overclaim — the system does not discover concepts it
 has never been taught).
 
 **Semantic connector**:
 Any connector able to **register itself from the knowledge graph**. Every connector aas_middleware ships
-(MQTT, OPC-UA, HTTP, websocket, webhook, AAS client, model) is a candidate; only the bare `Connector`
+(MQTT, OPC-UA, HTTP, websocket, webhook, AAS client, model) is a candidate. Only the bare `Connector`
 protocol is not, being the interface specification itself. Realized as a **Binding descriptor**, not as a
 connector subclass (ADR 0023).
 _Avoid_: Connector (the bare aas_middleware protocol, without the metadata ontology); Adapter, Driver;
@@ -195,7 +195,7 @@ deployment).
 The universal map from **Interface property** to **Binding descriptor**. Built at middleware
 initialization from the known, tested descriptors shipped in the middleware, and extensible after init by
 injecting a domain-built one. Resolution is
-`parameter property rdfs:subPropertyOf* → interface property → binding descriptor`; supporting a new
+`parameter property rdfs:subPropertyOf* → interface property → binding descriptor`. Supporting a new
 protocol is registering a new entry, never a core change. Recognition runs over the **ClassSpec and the
 graph**, not over materialized instance data, which is what allows registration to happen early enough
 for the framework to connect them (ADR 0020, ADR 0023).
@@ -205,10 +205,10 @@ keying on `rdf:type` (superseded — the parameter blanknode has no named type).
 **Committed value** / **Locator**:
 The two legitimate ways a domain may treat a Parameter's value, chosen per subproject — the middleware is
 agnostic and enforces neither. **Committed value**: the data point changes slowly, so the domain code
-commits it and the graph holds the value; `@state` is not involved. **Locator**: the data point changes
+commits it and the graph holds the value. `@state` is not involved. **Locator**: the data point changes
 fast, so the graph holds only *where the value lives* — unit, access mode, topic, broker — and never the
 value itself, which exists only in the datamodel and over REST. Scenario 3 is a locator, which is why its
-instance data carries no `inf:hasValue` literals; the restriction still declares the field, so an
+instance data carries no `inf:hasValue` literals. The restriction still declares the field, so an
 unobserved Parameter reads as `[]` (ADR 0024).
 _Avoid_: Cached value, Stale value (a committed value is authoritative for its update rate, not a stale
 copy); "the live value is never persisted" as a middleware rule (it is the locator pattern's property).
@@ -224,7 +224,7 @@ _Avoid_: Skill (AAS term for a related but not identical concept).
 **Operation**:
 Defined in Core (`cfc:Operation`, subclass of `Task`). The executable, resource-assigned
 form of a task; links to a Capability via `cfc:implementsCapability`. A caller creates an
-Operation in the graph and dispatches it to the resource that will carry it out; that
+Operation in the graph and dispatches it to the resource that will carry it out. That
 resource queues it, pulls it, runs it, and the outcome is recorded back onto it. The
 graph-level unit of work exchanged between middleware instances.
 _Avoid_: Workflow invocation, Job (Operation is the graph-level unit of work; a single
@@ -233,7 +233,7 @@ Operation resolves to exactly one Workflow via its Capability).
 **Event trigger** (`execute()`):
 The receiver-side built-in Workflow that every resource-mode middleware exposes on its REST
 API. A caller "triggers" it to signal that an Operation addressed to that resource now exists in
-the graph; the receiver enqueues the Operation, `ogm.fetch`es it, and hands it to an optional
+the graph. The receiver enqueues the Operation, `ogm.fetch`es it, and hands it to an optional
 domain callback (else leaves it `queued`). The trigger carries only the Operation IRI — the
 payload lives in the graph — and does not block on the work or return a business result.
 _Avoid_: RPC call, Invoke (the event trigger notifies; it does not run the work synchronously).
@@ -278,7 +278,7 @@ A `SemanticMiddleware` construction-time choice governing what the instance is *
   the resource's own datamodel (`generate_rest_api_for_data_model`; ADR 0005 #13 amendment). The
   transactional context-manager surface (dispatch/`request`, pull-and-run, handover) and the
   graph-write helpers stay Python-only, not REST-exposed.
-- `"server"` — wraps no Resource; CRUD/`execute` themselves are the REST surface (e.g. a
+- `"server"` — wraps no Resource. CRUD/`execute` themselves are the REST surface (e.g. a
   future data-serving "product server"). Not yet implemented, and deliberately still reserved: a
   graph-*consuming* participant (a planner, a mobile robot, a controller) is a resource-mode
   planner with its own Resource, not a server (ADR 0005, #32 amendment).

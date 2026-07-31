@@ -11,14 +11,14 @@ precondition/outcome representation, which needed SHACL and found `kapps_ogm` ha
 `kapps_ogm` has zero SHACL awareness today. Confirmed by direct inspection: no reference to
 `shacl`, `ValidationReport`, or the `sh:` namespace anywhere in `kapps_ogm` or
 `graph_db_interface`. Two independent needs in `kapps_semantic_middleware` want SHACL support
-and currently can't get it from `kapps_ogm`:
+and currently cannot get it from `kapps_ogm`:
 
 1. **Reading workflow signatures.** Workflow/StateProperty classes carry a `sh:NodeShape`
    (`sh:targetClass`) describing their precondition/outcome properties (see the SHACL Interop
    ADR referenced above).
    `kapps_semantic_middleware` needs to turn that shape into the same kind of typed,
    validated Pydantic model that `ClassSpec.to_pydantic_model()` already produces for
-   OWL-Restriction-based `COMPLEX` properties — but SHACL shapes aren't parsed at all today,
+   OWL-Restriction-based `COMPLEX` properties — but SHACL shapes are not parsed at all today,
    so this logic is currently hand-written inside `kapps_semantic_middleware` as a temporary
    duplicate of what `PropertySpec.specify()` already does for the OWL-Restriction case.
 
@@ -47,11 +47,11 @@ and currently can't get it from `kapps_ogm`:
   `graph_db_interface`, surfaced through `kapps_ogm`) carrying parsed `sh:focusNode`,
   `sh:resultPath`, `sh:sourceConstraintComponent`, `sh:resultMessage`,
   `sh:sourceShape` — not a string to be re-parsed by every caller. GraphDB's SHACL
-  validation reports are themselves RDF (see the paper's own Listing 2); this is a parsing
+  validation reports are themselves RDF (see the paper's own Listing 2). This is a parsing
   problem GraphDB has already solved on its side, just not decoded back into Python objects
   on ours.
 - **R3 — No change to the OWL-Restriction path.** `COMPLEX` properties derived from
-  `owl:Restriction` blank nodes must keep working exactly as they do today; SHACL support is
+  `owl:Restriction` blank nodes must keep working exactly as they do today. SHACL support is
   additive, not a replacement.
 - **R4 — Read-only is sufficient for the initiating use case.** `kapps_semantic_middleware`
   does not need `kapps_ogm` to *generate*/write SHACL shapes — per
@@ -76,5 +76,5 @@ Something like a `hydration_level`-agnostic extension to `ClassSpec.specify()` t
 resolving `rdfs:domain`-based properties as today, additionally queries for
 `sh:NodeShape`/`sh:targetClass` pointing at the class and folds `sh:property` entries into
 the same `properties: dict[IRI, PropertySpec]` structure — so from `to_pydantic_model()`
-onward, callers cannot tell (and don't need to) whether a given field came from an OWL
+onward, callers cannot tell (and do not need to) whether a given field came from an OWL
 Restriction or a SHACL shape.

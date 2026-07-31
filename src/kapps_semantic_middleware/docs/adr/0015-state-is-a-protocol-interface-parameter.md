@@ -3,7 +3,7 @@
 A resource's readable/settable state is modelled as an **interface-accessible parameter** — one graph
 node carrying its value and unit **and** the metadata a protocol connector needs to reach the device.
 The middleware's former `svc:StateProperty` (a readable thing with a REST endpoint) and the shop-floor
-**parameter** (an MQTT/OPC-UA-accessible value) are **the same thing seen from two directions**; they
+**parameter** (an MQTT/OPC-UA-accessible value) are **the same thing seen from two directions**. They
 collapse into one concept.
 
 ```turtle
@@ -16,7 +16,7 @@ tui:ConveyorBelt1_left  tu:hasConveyorSpeed  [ tu:hasUnit "m/s" ;
 
 > **Consolidated 2026-07-29.** This ADR absorbs **ADR 0013** ("settable state is
 > `svc:SettableStateProperty`") and **ADR 0014** ("StateProperties are marks over the datamodel"), both
-> of which it superseded in part. Their files are deleted; everything below that is still load-bearing
+> of which it superseded in part. Their files are deleted. Everything below that is still load-bearing
 > came from them, and the *chain of thought* that led here is preserved in **How we got here** at the
 > end. Read this ADR alone to know what is true.
 
@@ -29,7 +29,7 @@ tui:ConveyorBelt1_left  tu:hasConveyorSpeed  [ tu:hasUnit "m/s" ;
 Setting a setpoint was considered as an ordinary `svc:Workflow`: a `tu:SetConveyorSpeed` workflow
 realizing a "set" Capability, dispatched as an Operation through the event-trigger queue (ADR 0009).
 Rejected. A conveyor-speed setpoint is an idempotent, high-frequency control variable, not a discrete
-task with a `queued → running → done` lifecycle and per-invocation provenance. Modelling it as a
+task with a `queued → running → done` lifecycle and per-invocation provenance. Modeling it as a
 Workflow fragments one quantity into a read-side and a write-side that a discoverer must find
 separately and *know* are the same value, and wraps every speed nudge in an Operation individual.
 
@@ -89,7 +89,7 @@ under the *committed value* pattern a slowly-changing parameter is legitimately 
 
 *(from ADR 0014, re-based onto the facet)*
 
-A `readwrite` parameter exposes `GET`+`PUT` and gets an outbound connector; a `read` parameter exposes
+A `readwrite` parameter exposes `GET`+`PUT` and gets an outbound connector. A `read` parameter exposes
 `GET` only, with no `PUT` route and no outbound connector. A sensor is therefore **structurally**
 unwritable through the advertised surface. ADR 0023 carries this into the connector layer: direction is
 the most restrictive of `accessMode` × the instance's flavour, and an absent or unrecognised access mode
@@ -109,7 +109,7 @@ case is zero-Python, which is what matters at twenty domain engineers to one ont
 *(from ADR 0014)*
 
 Where `@mw.state` *is* used, only marked fields become discoverable in the graph. The datamodel carries
-plumbing (ids, counters, heartbeats) that is not semantic state; auto-promoting every field would
+plumbing (ids, counters, heartbeats) that is not semantic state. Auto-promoting every field would
 re-introduce the auto-derivation ADR 0003 rejected and flood the graph.
 
 ## Decision: startup wiring is Open-World-aware
@@ -134,7 +134,7 @@ per-instance interface resolution and ADR 0028's registry-driven wiring implemen
 ## Consequences
 
 - **`svc:StateProperty` / `svc:SettableStateProperty` retire** into the interface-accessible parameter
-  model; the `providesCapability` link goes with them.
+  model. The `providesCapability` link goes with them.
 - **The getter-backed `/state/{name}` route is retired** — decided here, **not yet done**. The route and
   `build_state_endpoint` still exist in `middleware.py`/`registration.py`, and scenario 2 still serves
   `door_status` through them. Tracked as

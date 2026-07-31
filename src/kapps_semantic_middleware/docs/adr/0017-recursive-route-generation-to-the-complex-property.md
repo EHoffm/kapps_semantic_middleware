@@ -49,7 +49,7 @@ So "set ConveyorBelt1_left's speed to 3.0" was expressible only as a **read-modi
 entire belt list**: every setpoint re-asserting the sibling belt's speed and the light barriers'
 sensor readings, with two controllers clobbering each other. That is a bulk state replacement
 masquerading as a control action. **ADR 0015 decided "reads and writes reuse the framework CRUD"
-before this limit was known**; this ADR is what that decision looks like once it is.
+before this limit was known**. This ADR is what that decision looks like once it is.
 
 ### The blanknode dict is the right atom, because that pattern is locked
 
@@ -83,7 +83,7 @@ from a GET response rather than constructing them, and because `IRI.lined` is to
 
 Recursion is **new functionality**, and root ADR 0001 is unambiguous: new functionality never goes
 into a sibling repo, bugfixes only. It also lands exactly where core ADR 0001 planned to start
-paying down the fork — *"replace pieces with local implementations one at a time as they're
+paying down the fork — *"replace pieces with local implementations one at a time as they are
 understood well enough to own"*. The REST-router layer is now understood well enough to own, so it
 becomes the first piece migrated. `aas_middleware_inf` is untouched.
 
@@ -93,7 +93,7 @@ it. The piece that had to be owned locally is **recursion** — that is what the
 cannot do. Re-implementing the top-level CRUD as well would have put "scenarios 1 and 2 still start
 and pass" at risk for no gain: those scenarios have no bindings, so they receive exactly the
 framework surface they have today. This is the incremental-replacement plan applied literally —
-recursion is understood well enough to own; the top-level CRUD is not yet.
+recursion is understood well enough to own. The top-level CRUD is not yet.
 
 ## Considered and rejected
 
@@ -112,7 +112,7 @@ recursion is understood well enough to own; the top-level CRUD is not yet.
   This is why the controller needs no per-parameter endpoint triples (ADR 0018).
 - The local router must track `aas_middleware`'s generator as it changes, until that layer is fully
   reimplemented locally. That is now specifically the **top-level CRUD**, which the router calls
-  rather than owns; everything below the root is ours.
+  rather than owns. Everything below the root is ours.
 - **Open item:** ADR 0015's write-back rule persists exposure metadata per parameter. With structural
   paths, no consumer needs a per-parameter endpoint triple. Whether registration still writes one is
   left to the consolidation capstone #39's write-back scope — deferred, not dropped.

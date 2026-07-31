@@ -10,7 +10,7 @@ Capability instance, one Workflow/StateProperty instance, one Service instance p
 process.
 
 **Why**: the alternative — deriving these classes automatically from the decorated Python
-function's signature the first time it's seen — was seriously considered and is
+function's signature the first time it is seen — was seriously considered and is
 architecturally simpler (no upfront ontology-authoring step). It was rejected for a
 scale reason specific to this project: a circular factory has hundreds of duplicate
 resource instances (many doors, many identical controllers), all of which must share one

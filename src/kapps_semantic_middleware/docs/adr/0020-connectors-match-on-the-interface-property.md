@@ -94,7 +94,7 @@ regular data of the complex property.
 
 This is what makes the projection safe to state simply: **hide what a connector claims, show
 everything else.** A view that asked for a parameter never asked for its transport details, because
-a ClassScope cannot reach them (ADR 0028); a view that asked for a manufacturer asked for exactly
+a ClassScope cannot reach them (ADR 0028). A view that asked for a manufacturer asked for exactly
 what it got.
 
 ### A resolved connector missing its metadata is loud
@@ -123,7 +123,7 @@ becomes ordinary data and is **shown** — and the read-only monitor would serve
 least-privileged instance would leak the most.
 
 So the registry is **always** built and recognition **always** runs. The flag skips `connect()` and
-the sync registration only. The projection's behaviour is identical in all three flavours, and the
+the sync registration only. The projection's behavior is identical in all three flavours, and the
 security property is independent of how the instance is configured.
 
 ### Direction is the framework's concept, not ours

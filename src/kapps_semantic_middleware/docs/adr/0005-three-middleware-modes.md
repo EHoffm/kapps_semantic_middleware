@@ -21,11 +21,11 @@ sets of ad hoc constructor flags, `mode` makes the distinction explicit and exha
 construction time. `execute`/CRUD existing as Python-only methods in resource mode but as the
 REST surface in server mode follows directly from what each mode's purpose actually is: in
 resource mode, workflows are the point and `execute` is plumbing a resource-mode instance
-uses internally (e.g. to trigger *other* resources' capabilities); in server mode, there are
+uses internally (e.g. to trigger *other* resources' capabilities). In server mode, there are
 no workflows, so `execute`/CRUD have nothing to hide behind.
 
 **Consequence**: `server` and `watchdog`-as-a-concept both existed as scope only at design
-time; `watchdog`'s sweep logic was pulled into this session's build scope alongside resource
+time. `watchdog`'s sweep logic was pulled into this session's build scope alongside resource
 mode (see `src/kapps_semantic_middleware/docs/adr/0007-heartbeat-and-watchdog-mode.md`) once
 its two-part decomposition (heartbeat + sweeper) became clear.
 `server` mode remains a documented, reserved mode value with no implementation yet.

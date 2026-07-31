@@ -43,7 +43,7 @@ ADR 0015 called ClassScope the projection that separates southbound (how the mid
 PLC) from northbound (how peers reach the middleware). Working it through the controller shows the
 pair is a special case of something more general: **every consumer projects what it needs, from
 where it needs it**. The user view is rooted at the TransferUnit and stops at value/unit/access
-mode; a connector's view is rooted at one belt and consists almost entirely of connection metadata.
+mode. A connector's view is rooted at one belt and consists almost entirely of connection metadata.
 Neither is "the" datamodel, and a connector re-scoping itself does not disturb what peers see.
 
 This is also what keeps the IT-OT boundary real: a peer that could read the broker address could
@@ -73,7 +73,7 @@ which the ontology cannot know. The domain code that weaves the library in is wh
 
 This does not weaken the discovery story. KAPPS's flexibility claim is over **novel combinations of
 known primitives** — a task made of grip/move/place may never have been seen in that combination,
-but grip, move and place are known; a product may combine a screw and a gear that were each known.
+but grip, move and place are known. A product may combine a screw and a gear that were each known.
 Views are defined over known classes for exactly the same reason, and the system stays able to
 handle combinations it has not seen.
 
@@ -90,7 +90,7 @@ live-value response costs nothing, because `OGM.commit` filters unchanged triple
 > compares whole blank-node groups — so the groups never compare equal and **every commit deletes and
 > recreates the entire parameter node**, even with no changes. Worse, the new node is built from the
 > materialized instance, so any triple the ClassSpec does not declare — the connection metadata — is
-> orphaned. Filed as SAWeindel/kapps_ogm#4. The conclusion above still holds once that lands; until
+> orphaned. Filed as SAWeindel/kapps_ogm#4. The conclusion above still holds once that lands. Until
 > then, do not commit a parameter node.
 
 ### A standard path with an escape hatch, again
@@ -100,7 +100,7 @@ Discovery follows the same shape as ADR 0015's Path 1/Path 2 and ADR 0023's conn
 no SPARQL required, because the middleware and the OGM wrote that metadata and know what it means.
 **Escape hatch:** supply SPARQL binding `?resource`, and every other bound variable becomes a
 column. Setting up the common case must stay zero-SPARQL at twenty domain engineers to one ontology
-engineer (ADR 0003); anything we have no standard for must still be expressible.
+engineer (ADR 0003). Anything we have no standard for must still be expressible.
 
 ## Consequences
 
@@ -116,13 +116,13 @@ engineer (ADR 0003); anything we have no standard for must still be expressible.
   property raises from `ClassSpec.specify` under scope hydration.
 - A consumer that opens a resource **GETs its REST datamodel** and renders the returned tree, rather
   than fetching structure from the graph under a view of its own. The view is stated once, by the
-  resource's own middleware; consumers cannot drift from it because it is what they are served. The
+  resource's own middleware. Consumers cannot drift from it because it is what they are served. The
   controller therefore carries no ClassScope — it touches the graph only for discovery.
 - Liveness is read from `svc:address` plus `svc:lastHeartbeat` freshness against a configurable
   threshold (default 90s, matching `staleness_threshold`), computed consumer-side. A process killed
   without deregistering goes stale on its own, with no watchdog instance required.
 - Views defined in Python are invisible to the graph, so nothing validates that a view matches what
-  an instance actually carries; a chain naming a property the instance lacks simply projects nothing.
+  an instance actually carries. A chain naming a property the instance lacks simply projects nothing.
 - Amends ADR 0015: the southbound/northbound pair is generalized to per-consumer views, and the
   Open-World startup-wiring table is unchanged.
 

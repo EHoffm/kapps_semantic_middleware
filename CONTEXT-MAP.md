@@ -25,8 +25,8 @@
   Middleware end-to-end, against ontology/instance data they seed themselves. Core Middleware
   has no dependency on Example Scenarios.
 - **Module Requirements** records obligations that Core Middleware and SHACL Interop place on
-  `kapps_ogm` and the visual-toolbox repo. It doesn't depend on, or get depended on by, the
-  code contexts — it's a paper trail for work that belongs elsewhere.
+  `kapps_ogm` and the visual-toolbox repo. It does not depend on, or get depended on by, the
+  code contexts — it is a paper trail for work that belongs elsewhere.
 
 ## Ontology-module layering
 
@@ -41,10 +41,10 @@ The project's vocabulary is layered across three modules (Core Middleware ADR 00
   **reachability + coordination only**, not domain-touched — Service/Workflow/StateProperty,
   address/endpoint/heartbeat, the resolution chain, and Operation status + provenance.
 
-`mes:` and `svc:` are siblings that both import Core; `mes:` is domain-facing, `svc:` is
+`mes:` and `svc:` are siblings that both import Core. `mes:` is domain-facing, `svc:` is
 middleware-facing.
 
 ## System-wide decisions
 
-Decisions that don't belong to any single context (e.g. how this whole repo relates to its
+Decisions that do not belong to any single context (e.g. how this whole repo relates to its
 sibling dependency repos) live in `docs/adr/` at the repo root, not inside any context.

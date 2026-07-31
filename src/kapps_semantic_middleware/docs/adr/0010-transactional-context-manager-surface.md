@@ -7,7 +7,7 @@ commit happens in `__exit__` on clean exit, and **reverts + re-raises on excepti
 **write-bearing** entrypoint takes this shape — `handover` (possession switch), `claim_next`
 (pull-and-run of a queued Operation), and `request` (caller-side dispatch: create the Operation
 and fire the receiver's event trigger). Pure **reads** (`fetch`, `resolve`, state GET) stay immediate
-method calls; there is no transaction to guard.
+method calls. There is no transaction to guard.
 
 **Why**: this directly operationalizes the project's standing constraint — *every graph write
 is a transaction; precondition checks happen before it; a failed transaction reverts* — as the
@@ -24,7 +24,7 @@ physical body can raise; (b) every call a CM including reads — ceremony with n
 protect.
 
 **Consequence**: `execute()` (the receiver-side event trigger) and the REST endpoints are *not* part
-of this surface — they are the wire/REST face (ADR 0009, ADR 0005); the context managers are the
+of this surface — they are the wire/REST face (ADR 0009, ADR 0005). The context managers are the
 in-process face for the domain code co-located with a resource. The handover core still never
 references `execute()` (#7): its body is domain-owned and may itself open a `request(...)` to
 drive a counterpart. New write-bearing middleware capabilities are expected to arrive as

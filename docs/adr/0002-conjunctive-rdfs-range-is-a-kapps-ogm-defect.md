@@ -41,7 +41,7 @@
 `PropertySpec.specify` raises `ValueError: Property ... has multiple rdfs:range defined` whenever a
 property resolves to more than one range. RDFS semantics are **conjunctive** — several `rdfs:range`
 assertions mean a value must satisfy *all* of them, i.e. their intersection — so the correct
-behaviour is to intersect the restrictions into one nested `ClassSpec`, not to refuse. This is a
+behavior is to intersect the restrictions into one nested `ClassSpec`, not to refuse. This is a
 correctness bug, and under root ADR 0001 it is therefore fixed in the `kapps_ogm` checkout, with a
 detailed changelog entry, rather than worked around here.
 
@@ -57,7 +57,7 @@ consequences follow, and the raise blocks both:
 
 - **Upstream properties cannot be extended.** `tu:hasConveyorSpeed`'s restriction declares
   `inf:hasValue` and `tu:hasUnit` — no topic, no broker. The `tu:` TransferUnit ontology is fixed and
-  authoritative; we reuse it rather than paraphrase it. Asserting an additional range from our own
+  authoritative. We reuse it rather than paraphrase it. Asserting an additional range from our own
   file is the natural additive move, and it is precisely what the raise forbids.
 - **The interface hierarchy cannot carry ranges.** `tu:hasConveyorSpeed` is already
   `rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter`. Giving that superproperty a range —
@@ -71,7 +71,7 @@ paraphrase the upstream vocabulary — the thing we decided not to do.
 ### It is a bug, not a feature request
 
 The distinction matters because root ADR 0001 permits only bugfixes in siblings. The raise is not a
-deliberate restriction with a rationale to be weighed; it is an incorrect reading of RDFS treating
+deliberate restriction with a rationale to be weighed. It is an incorrect reading of RDFS treating
 a legal, meaningful ontology as malformed. Fixing it makes `kapps_ogm` agree with the specification
 it implements. The rejected alternatives — mint parallel subproperties in our own namespace, or keep
 connection metadata out of the graph entirely and configure connectors in Python — both work around

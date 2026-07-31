@@ -7,7 +7,7 @@ use cases / examples are **out of scope** here (they are the downstream build tr
 [Map #2](https://github.com/EHoffm/kapps_semantic_middleware/issues/2)).
 **Purpose:** establish ground truth — *what the code does today* versus *what the resolved
 wayfinder tickets say it should be* — to seed a brownfield `grill → PRD → issues` pass. This
-is an **audit, not a set of decisions**; the keep/refactor/add/replace verdicts below are
+is an **audit, not a set of decisions**. The keep/refactor/add/replace verdicts below are
 *proposals* for the grilling to confirm, not settled calls.
 **Sources:** direct read of `middleware.py`, `registration.py`, `ontology/service.ttl`,
 `connectors/`, `shacl_interop/`, the Core Middleware ADRs (0001–0008), and the resolved
@@ -84,8 +84,8 @@ shape-from-typehints tests are orthogonal and should survive.
 Dependency order the grilling should pressure-test, not adopt uncritically:
 
 1. **Ontology layering** ([#10](https://github.com/EHoffm/kapps_semantic_middleware/issues/10)) → mint the `mes:` module + possession/ability vocabulary. Everything domain-facing depends on the namespace.
-2. **Coordination machinery** — the `execute()` refactor + operation queue + status lifecycle + domain callback + `pop_next(class_scope)` + failed-op state dump. This is the load-bearing cluster; the rest hangs off it.
-3. **Handover primitive** ([#7](https://github.com/EHoffm/kapps_semantic_middleware/issues/7)) — depends on the `mes:` vocabulary (1) and the transactional-write discipline; its body relies on the doorbell from (2).
+2. **Coordination machinery** — the `execute()` refactor + operation queue + status lifecycle + domain callback + `pop_next(class_scope)` + failed-op state dump. This is the load-bearing cluster. The rest hangs off it.
+3. **Handover primitive** ([#7](https://github.com/EHoffm/kapps_semantic_middleware/issues/7)) — depends on the `mes:` vocabulary (1) and the transactional-write discipline. Its body relies on the doorbell from (2).
 4. **Then** the UCs become buildable on a facade that matches its own spec (back to Map #2).
 
 ## 6. Open brownfield questions to resolve in the grilling
@@ -102,5 +102,5 @@ These are the decisions greenfield never had to make — the ones the grill pass
 ---
 
 *This document is ground truth for a brownfield `grill → PRD → issues` pass. Open the grilling
-in a fresh session and reference this file; do not re-derive the decisions already recorded in
+in a fresh session and reference this file. Do not re-derive the decisions already recorded in
 the tickets above — resolve only the open questions in §6.*
