@@ -37,7 +37,7 @@ If this structure changes later (new context added, one removed), this file and 
 
 When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in the relevant context's `CONTEXT.md`. Do not drift to synonyms the glossary explicitly avoids.
 
-If the concept you need is not in the glossary yet, that is a signal — either you are inventing language the project does not use (reconsider) or there is a real gap (note it for `/domain-modeling`).
+If the concept you need is not in the glossary yet, that is a signal — either you invent language the project does not use (reconsider) or there is a real gap (note it for `/domain-modeling`).
 
 ## Flag ADR conflicts
 

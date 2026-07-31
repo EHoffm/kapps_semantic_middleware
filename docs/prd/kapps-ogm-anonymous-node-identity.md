@@ -18,8 +18,8 @@ Circular Factory, and together they make the scenario-3 TransferUnit unusable af
 
 The domain ontology declares what a parameter **is** (`inf:hasValue`, `tu:hasUnit`). The ABox
 additionally carries what a connector needs to **reach** it (`inf:hasMQTTTopic`,
-`inf:hasMQTTSetTopic`, `inf:hasMQTTBrokerIP`). Three of five triples on every parameter node are
-undeclared by the domain restriction, deliberately — the domain and connector TBoxes are not
+`inf:hasMQTTSetTopic`, `inf:hasMQTTBrokerIP`). The domain restriction deliberately leaves three of five triples
+on every parameter node undeclared — the domain and connector TBoxes are not
 connected (`#25`). Under the Open World Assumption that is not merely legal, it is the normal case.
 
 ### Stage 1 — provisioning silently produces a dead parameter
@@ -175,7 +175,7 @@ Justification is standard entailment, not convention: `belt tu:hasConveyorSpeed 
 `tu:hasConveyorSpeed rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter` entails
 `belt inf:isInterfaceAccessibleMQTTParameter _:b` (rdfs7), and with a range on that superproperty,
 `_:b rdf:type C_mqtt` (rdfs3) — alongside `_:b rdf:type C_speed` from the domain range. The node **is**
-an instance of the intersection. The OGM computing it is implementing the entailment.
+an instance of the intersection. The OGM computing it implements the entailment.
 
 Mechanically this subsumes `#1`: `specify` must merge anonymous restriction ranges instead of raising
 on arity, and `_specify_complex_property`'s query must collect ranges across `rdfs:subPropertyOf*`.
@@ -336,7 +336,7 @@ against the live GraphDB, so the store is reachable and usable.
 Two things are **not** verified end-to-end, because the scenario-3 seed file will not load (defect 6):
 that materialising the seeded belt raises `ValidationError: inf-hasValue Field required`, and that a
 fetch-then-commit round trip relocates the parameter node and orphans its metadata. Both are traced
-through code and follow from the verified mechanisms, but neither has been observed in a repository.
+through code and follow from the verified mechanisms, but neither was observed in a repository.
 
 ## Non-goals
 
@@ -366,5 +366,5 @@ resolution in `_value_to_triples`; the top-level fetch guard — plus the merged
 **`graph_db_interface`.** R11.
 
 **`kapps_semantic_middleware` (Etienne).** Supply R8 source 2 from embedding code; retire ADR 0023's
-static-facet caching (its purpose was surviving whole-node replacement, which no longer happens);
+static-facet caching (its purpose was to survive whole-node replacement, which no longer happens);
 correct `examples/transferunit.ttl` per R10 and R9.

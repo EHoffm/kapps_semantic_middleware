@@ -74,7 +74,7 @@ data, not the graph node); Capability (states have none — there is no "light-b
 **Interface class** — _retired term, do not use_:
 A protocol-specific parameter *class* (`inf:MQTTParameter`, `inf:OPCUAParameter`) that a connector was
 paired with one-to-one, resolved by the parameter's `rdf:type`. **The parameter node has no named
-type**, so nothing could ever match on it (ADR 0020, measured). The concept it was reaching for — the
+type**, so nothing could ever match on it (ADR 0020, measured). The concept it reached for — the
 protocol-extensibility seam — survives intact as the **Interface property**, and the ontology terms it
 named are gone from the scenario-3 TBox. Use **Interface property**.
 _Avoid_: the term itself. Also Adapter, Driver.

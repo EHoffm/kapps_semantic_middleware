@@ -24,7 +24,7 @@ simply leaves it empty.
 ADR 0015 states that "the live value is still never *persisted to the graph*", and the Parameter glossary
 entry repeated it. Read as a middleware guarantee, that would require the write path to know which fields
 are live and strip them — and it would forbid a legitimate use we should support. It is really a property
-of the **locator** pattern, which ADR 0015 was describing because the scenario in front of it was a
+of the **locator** pattern, which ADR 0015 described because the scenario in front of it was a
 fast-changing one.
 
 Enforcing it would also break the middleware's ontology-agnosticism. A parameter with a daily update

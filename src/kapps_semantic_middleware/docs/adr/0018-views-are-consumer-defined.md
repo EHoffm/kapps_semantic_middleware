@@ -1,7 +1,7 @@
 # A view belongs to its consumer, and is configured where the middleware is embedded
 
 There is no single "the datamodel" for a resource. Each consumer defines its **own** ClassScope,
-**rooted at the node that consumer cares about**, and states it in the code that embeds the
+**rooted at the node that the consumer cares about**, and states it in the code that embeds the
 middleware library — not in the ontology. `SemanticMiddleware` gains a `class_scope` constructor
 parameter carrying the **user view**: the northbound datamodel it materializes and REST-exposes.
 
@@ -67,7 +67,7 @@ exists to remove.
 
 ### Configured in code, not authored in the ontology
 
-ADR 0003 makes the ontology ground truth for *types*, and ADR 0015 made parameter wiring
+ADR 0003 makes the ontology the ground truth for *types*, and ADR 0015 made parameter wiring
 ontology-first. A view is neither: it is a statement about **what this particular consumer is for**,
 which the ontology cannot know. The domain code that weaves the library in is what knows.
 

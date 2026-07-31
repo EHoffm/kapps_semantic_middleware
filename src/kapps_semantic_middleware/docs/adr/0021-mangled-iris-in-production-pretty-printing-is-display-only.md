@@ -31,7 +31,7 @@ such failure mode: it is a total, invertible function of the IRI.
 
 The cost is genuinely low. Consumers never hand-write these URLs — they read `svc:endpoint` from the
 graph and GET the datamodel they are served (ADR 0018). The only readers who suffer are humans, and
-they are looking at a UI or at Swagger, both of which can render a pretty form without anyone parsing
+they look at a UI or at Swagger, both of which can render a pretty form without anyone parsing
 it back.
 
 ### The core cannot know the domain, or it stops being a middleware

@@ -56,7 +56,7 @@ hasOPCUAEndpoint = ['opc.tcp://10.0.0.5:4840/belt']     <- served
 ```
 
 The MQTT metadata was removed and the OPC-UA endpoint was not, because a set derived from registered
-code only knows the protocols someone has written a connector for. Two protocols on one parameter is
+code only knows the protocols someone wrote a connector for. Two protocols on one parameter is
 not a contrived case: **ADR 0026 names it explicitly** as own-built hardware whose protocol is not
 known when the ontology is authored, and as two machines of one class on different protocols.
 
@@ -65,7 +65,7 @@ was written to prevent. A registry-derived deny-list is still a deny-list. Deriv
 rather than typing it by hand does not change what happens to the entries nobody thought of.
 
 **The ontology does not have this blind spot.** It is authoritative about what a protocol parameter
-*is*, whether or not anyone has written a connector for it, so asking it finds the OPC-UA endpoint.
+*is*, whether or not anyone wrote a connector for it, so asking it finds the OPC-UA endpoint.
 Since everything reaching the productive graph goes through the OGM write path (root ADR 0008), what
 the ontology declares can be governed at admission — which is the other half of why trusting it is
 sound.
@@ -81,7 +81,7 @@ first remedy proposed. Rejected on two grounds, both structural:
 
 - **It is a closed-world assertion in the serving path.** The architecture has exactly one
   closed-world moment by design — SHACL at admission (ADR 0025). A keep-list would add a second, in
-  the place where open-world data is being read back out.
+  the place where open-world data is read back out.
 - **It fights the domain ontologies' evolution.** Domain experts add terms. A keep-list hides every
   new legitimate one by default until somebody declares it safe. That taxes twenty domain engineers
   to guard something the OGM write path already governs.

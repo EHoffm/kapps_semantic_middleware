@@ -3,7 +3,7 @@
 Everywhere else, the absence of a triple means **unknown**, never **false**. Nothing the OGM derives
 from OWL may produce a required field, reject an unknown property, or treat its own view of a node as
 that node's full extent. Requiredness, closedness and cardinality *enforcement* are closed-world
-statements and belong to SHACL shapes evaluated by the triple store when a write is admitted.
+statements and belong to SHACL shapes the triple store evaluates when a write is admitted.
 
 ## Why
 
@@ -23,7 +23,7 @@ defect:
   the read path deliberately tolerates them. Under OWA a graph may legitimately carry more than any
   schema describes. A write path must not assume otherwise.
 - **`extra="forbid"`** in `ClassSpec.to_pydantic_model` (`class_spec.py:104-106`) is assigned after
-  `create_model` and is inert — which is why nothing has broken yet. Making it live without a policy
+  `create_model` and is inert — which is why nothing broke yet. Making it live without a policy
   for undeclared properties would break every fetch of real data, since upstream instance data carries
   undeclared `rdfs:comment`.
 

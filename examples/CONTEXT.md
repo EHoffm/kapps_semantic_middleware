@@ -29,7 +29,7 @@ deliberately show *three different* interaction patterns:
   and builds the connectors from the metadata it finds there (ADR 0023). Also the first
   scenario with a **device** end — `mock_transferunit.py` speaks MQTT and knows nothing about
   the graph, the ontology or the middleware, which is the asymmetry it exists to show. Needs an
-  MQTT broker as well as GraphDB. It starts a pure-Python one if none is listening.
+  MQTT broker as well as GraphDB. It starts a pure-Python one if none listens.
 
 _Avoid_: Example, demo (used loosely elsewhere in this repo's docs; Scenario is the precise
 unit — one notebook, one dummy repository, one seed script).

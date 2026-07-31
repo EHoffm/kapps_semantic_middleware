@@ -6,7 +6,7 @@
   functions are the REST-facing surface. Built-in functionality (`execute`, CRUD via the
   OGM) is exposed only as plain Python methods, not REST routes.
 - `"server"` (not yet implemented): wraps no resource. `execute`/CRUD *are* the REST
-  surface — e.g. a future "product server" whose entire purpose is answering
+  surface — e.g. a future "product server" whose entire purpose is to answer
   `fetch`/`ClassScope` requests against the graph for other services.
 - `"watchdog"` (built alongside resource mode): wraps no resource, exposes little to no REST
   surface, and instead runs a sweep loop that deregisters (removes `address`/`endpoint` from)
@@ -65,7 +65,7 @@ the controller is a **resource-mode planner** — its own `cfc:Resource` and `sv
 exactly like scenario1's planner and scenario2's mobile robot — and `server` mode remains reserved
 and unimplemented, recorded as Out of scope on map #24.
 
-The scenario is a learning vehicle, and it surfaced a real defect in how that pattern has been used:
+The scenario is a learning vehicle, and it surfaced a real defect in how that pattern was used:
 scenario1's planner and scenario2's robot are *constructed* in resource mode but **never served**, so
 `on_start_up` never fires, they never register, and they exist only to hold an `ogm`. "Resource mode"
 was a label with no runtime consequence. The controller is served for real — it registers,

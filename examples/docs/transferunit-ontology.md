@@ -157,8 +157,8 @@ Turtle.
 ### 2026-07-29 — the seed's last raw-SPARQL write is gone
 
 No change to the Turtle. This records the seed catching up to it. The 2026-07-28 entry below noted that
-the declared MQTT metadata "takes effect only once `SAWeindel/kapps_ogm#7` lands". It has landed, and
-the effect was measured against the live store before anything was deleted: with the metadata passed in
+the declared MQTT metadata "takes effect only once `SAWeindel/kapps_ogm#7` lands". It landed, and the
+effect was measured against the live store before anything was deleted: with the metadata passed in
 `ogm.create`'s `data`, a settable belt parameter comes back carrying `hasUnit`, `accessMode`,
 `hasMQTTTopic`, `hasMQTTSetTopic` and `hasMQTTBrokerIP`, and a read-only barrier parameter carries
 `accessMode`, `hasMQTTTopic` and `hasMQTTBrokerIP` and no set topic — exactly what the old SPARQL
@@ -178,7 +178,7 @@ that the write path #54 needs now exists and is proven.
 From ADR 0025/0026, grilled under #52.
 
 - **`inf:isInterfaceAccessibleParameter` and `inf:isInterfaceAccessibleMQTTParameter` gained
-  `rdfs:range` restrictions.** The 2026-07-27 correction below had declared the MQTT terms "vocabulary
+  `rdfs:range` restrictions.** The 2026-07-27 correction below declared the MQTT terms "vocabulary
   only … they must never enter a range restriction", reasoning that a restriction would materialise a
   broker address into the served datamodel. That reasoning assumed one shape per property. ADR 0026
   replaces it with merge depth, so the broker is still physically absent northbound while the metadata
@@ -224,7 +224,7 @@ Upstream declares only `inf:hasValue` + `tu:hasUnit`, comments the property "MQT
 attribute of a conveyor belt (value and unit)", and puts `inf:hasMQTTTopic` in no restriction anywhere.
 
 *Partially superseded on 2026-07-28:* the conclusion that connection metadata must live outside every
-restriction is replaced by merge depth. What survives is the requirement it was protecting — a broker
+restriction is replaced by merge depth. What survives is the requirement it protected — a broker
 address must never reach a northbound consumer — and the rule that a domain ontology never restates the
 protocol contract.
 

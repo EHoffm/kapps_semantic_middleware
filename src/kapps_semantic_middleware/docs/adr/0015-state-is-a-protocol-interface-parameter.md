@@ -55,7 +55,7 @@ authoritative sfb1574 ontology has none either.
 
 *(from ADR 0013, generalized)*
 
-Settability is carried by the data, not by a Python argument: `@mw.state` takes no `settable=` flag, the
+The data carries settability, not a Python argument: `@mw.state` takes no `settable=` flag, the
 same way `@mw.workflow` takes no `is_workflow=`. Discovery of "what can I set" is a plain graph query.
 This is ADR 0003's rule applied to parameters.
 

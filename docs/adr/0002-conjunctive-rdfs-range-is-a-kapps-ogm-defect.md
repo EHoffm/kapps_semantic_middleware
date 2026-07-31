@@ -11,7 +11,7 @@
 > *does* work as a mechanism — not by inheritance, but by explicit resolution.
 >
 > So the second bullet's conclusion ("range-on-superproperty does not work as a mechanism here") is
-> superseded: it is true of the reasoner and false of the OGM we are asking for. The first bullet is
+> superseded: it is true of the reasoner and false of the OGM we ask for. The first bullet is
 > also superseded — we do extend upstream properties again, though from the interface side rather than
 > by adding ranges to `tu:` properties, and per instance rather than in the TBox.
 >
@@ -26,7 +26,7 @@
 >
 > - *"Upstream properties cannot be extended."* We no longer want to extend them. Connection metadata
 >   does not belong in a range restriction at all — the domain TBox and the connector's `inf:` TBox are
->   deliberately unconnected, and the two are joined at runtime by the middleware. `tu:hasConveyorSpeed`
+>   deliberately unconnected, and the middleware joins the two at runtime. `tu:hasConveyorSpeed`
 >   keeps exactly the restriction upstream gives it.
 > - *"The interface hierarchy cannot carry ranges, because subproperties would inherit two."* **Wrong.**
 >   RDFS does not entail a `rdfs:range` triple for a subproperty, and neither GraphDB repository
@@ -82,7 +82,7 @@ domain expert can register a resource by authoring instance data.
 
 - `kapps_ogm` gains intersection semantics for multiple ranges: restriction members are merged, and
   a genuine conflict (the same property constrained to incompatible types) becomes the error case
-  that the arity check is standing in for today.
+  that the arity check stands in for today.
 - Our extended `transferunit.ttl` (#25) may **add** a range restriction to an upstream property,
   which is what lets scenario3 carry MQTT metadata on authoritative `tu:` properties.
 - The consolidation (#39) may put connection-metadata declarations on the `inf:` interface

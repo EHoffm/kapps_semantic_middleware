@@ -28,7 +28,7 @@ wrong model).
 ## Headline
 
 The facade's **registration / execution-resolution / liveness** half exists and largely
-matches intent. The entire **coordination + handover** half that Map #2 designed **does not
+matches the intent. The entire **coordination + handover** half that Map #2 designed **does not
 exist yet**, and the one piece that *looks* built — `execute()` — implements the **old
 synchronous-RPC model**, not the decided doorbell/queue/pull model. So this is not "add the
 missing methods to a sound base": it is **one load-bearing refactor (`execute()`) plus a

@@ -24,7 +24,7 @@ ontology engineer. At twenty-to-one, that person becomes the bottleneck for ever
 integration, and the failure mode when a domain engineer tries to author Turtle/SHACL
 themselves without deep semantic-web background is exactly the kind of subtly-wrong ontology
 (wrong domain/range, missing inverse property, cardinality that does not match reality) that is
-expensive to catch later, once instance data has accumulated against it.
+expensive to catch later, once instance data accumulates against it.
 
 ## Goal
 
