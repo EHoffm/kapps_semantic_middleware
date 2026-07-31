@@ -37,7 +37,7 @@ from kapps_semantic_middleware.projection import carries_southbound
 from kapps_semantic_middleware.vocabulary import INF
 
 import seed
-from mock_transferunit import MockTransferUnit
+from demo.transferunits.plc.transfer_unit import TransferUnit
 
 BROKER_HOST = "127.0.0.1"
 BROKER_PORT = 1883
@@ -200,7 +200,7 @@ def step_4_show_the_northbound_projection(unit: SemanticMiddleware) -> None:
     assert seed.MQTT_BROKER_IP not in str(served)
 
 
-async def step_5_read_a_live_value(unit: SemanticMiddleware, plc: MockTransferUnit) -> None:
+async def step_5_read_a_live_value(unit: SemanticMiddleware, plc: TransferUnit) -> None:
     """The mock PLC publishes a speed; the connector the graph built receives it."""
     print("\nStep 5 — A Live Value Flows Device -> Middleware")
     read = _registration(unit, "ConveyorBelt/left/speed", SyncDirection.TO_PERSISTENCE)
@@ -221,7 +221,7 @@ async def step_5_read_a_live_value(unit: SemanticMiddleware, plc: MockTransferUn
         await read.connector.disconnect()
 
 
-async def step_6_drive_the_device(unit: SemanticMiddleware, plc: MockTransferUnit) -> None:
+async def step_6_drive_the_device(unit: SemanticMiddleware, plc: TransferUnit) -> None:
     """A setpoint written through the middleware moves the mock PLC, which reports back."""
     print("\nStep 6 — A Setpoint Flows Middleware -> Device")
     write = _registration(unit, "ConveyorBelt/left/speed_set", SyncDirection.FROM_PERSISTENCE)
@@ -254,7 +254,7 @@ async def step_6_drive_the_device(unit: SemanticMiddleware, plc: MockTransferUni
     assert plc.speeds["left"] == SETPOINT
 
 
-async def step_7_a_read_only_sensor(unit: SemanticMiddleware, plc: MockTransferUnit) -> None:
+async def step_7_a_read_only_sensor(unit: SemanticMiddleware, plc: TransferUnit) -> None:
     """A light barrier is read-only, and the middleware has no way to drive it."""
     print("\nStep 7 — A Read-Only Parameter")
     read = _registration(unit, "LightBarrier/front/occupied", SyncDirection.TO_PERSISTENCE)
@@ -316,7 +316,7 @@ async def main() -> None:
         step_3_inspect_what_recognition_found(unit)
         step_4_show_the_northbound_projection(unit)
 
-        async with MockTransferUnit(
+        async with TransferUnit(
             broker=BROKER_HOST, port=BROKER_PORT, publish_interval=0.2
         ) as plc:
             print(
