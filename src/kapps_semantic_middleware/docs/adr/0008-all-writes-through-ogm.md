@@ -4,7 +4,7 @@ Every knowledge-graph **write** in this project goes through `kapps_ogm.OGM`
 (`OGM.create` for new typed individuals, `OGM.commit` for adding/removing/replacing
 properties). No write issues raw SPARQL UPDATE or calls the `graph_db_interface`
 mutation methods directly. **Reads** may use the access module (`ogm.db`) directly —
-the architecture permits reads there; only writes are constrained.
+the architecture permits reads there. Only writes are constrained.
 
 **Why**: the paper's central architectural commitment is that "every write
 originates as an OGM commit... making the OGM the architecture's single validated
@@ -32,12 +32,12 @@ owned by the newly-created instance: a Service's `svc:isServiceOf`, a Workflow's
 StateProperty's `svc:isStatePropertyOf`. The container-side inverses (`svc:hasWorkflow`,
 `svc:hasService`, `cfc:hasCapability`, …) are OWL-inferable and are not written.
 Queries in this project therefore use the materialized (instance-owned) direction —
-`resolve` follows `svc:realizedByWorkflow`; `deregister` finds a service's workflows
+`resolve` follows `svc:realizedByWorkflow`. `deregister` finds a service's workflows
 via `svc:isWorkflowOf`. A deployment with OWL reasoning enabled recovers the inverses
-automatically; a reasoning-free store simply has one direction, which is sufficient
+automatically. A reasoning-free store simply has one direction, which is sufficient
 for this project's own read paths. `cfc:hasCapability` (Resource→Capability, no
 inverse in Core, multi-valued) is likewise not materialized in v1 — it is not on any
-read path here; adding it would be the one place needing an append and is deferred.
+read path here. Adding it would be the one place needing an append and is deferred.
 
 ---
 
@@ -58,7 +58,7 @@ reads traverse* — never identifying entities by IRI name.
 are not declared in the Core *subset* the scenarios load, so `OGM.create`/`commit` cannot
 hydrate it and it is written through the low-level `graph_db_interface` triple API. This is a
 bounded, documented exception to the OGM-only write rule, forced by the loaded-subset
-limitation; routing these Core writes through the OGM requires the loaded ontology to declare
+limitation. Routing these Core writes through the OGM requires the loaded ontology to declare
 the Core Operation/Capability property domains (a `kapps_ogm`/ontology follow-up — see the
 `create_operation` docstring).
 
@@ -81,7 +81,7 @@ gap for **Operation creation**: the loaded scenario/demo ontologies now declare
   resource provides many capabilities. `OGM.commit` has whole-property-set *replace* semantics,
   so routing an append through it would clobber the resource's other capabilities. The correct
   fix is a **validated single-triple append in `kapps_ogm`** (the paper, §4.4.2, explicitly
-  envisions the OGM adding/removing individual property assertions); per ADR 0001 that is a
+  envisions the OGM adding/removing individual property assertions). Per ADR 0001 that is a
   `kapps_ogm` enhancement, not an ad-hoc addition here. This is the **same** gap as
   `cfc:hasPossessor` in `switch_possession`/`create_possession` (ADR 0011) — both are
   multi-valued appends parked on `ogm.db.triple_add` awaiting that one capability.

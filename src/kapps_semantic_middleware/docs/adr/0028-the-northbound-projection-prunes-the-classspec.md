@@ -16,7 +16,7 @@ Walking upward from one parameter property:
 
 > **Consolidated 2026-07-29.** This ADR absorbs **ADR 0019** ("the northbound projection is
 > middleware-side; a ClassScope cannot select within a parameter"), whose file is deleted. The
-> projection question has now been decided four times; **How we got here** preserves the route, so
+> projection question has now been decided four times. **How we got here** preserves the route, so
 > that no future reader has to reconstruct it from four documents the way this one had to from three.
 
 ## The mechanic that constrains every answer
@@ -56,16 +56,16 @@ hasOPCUAEndpoint = ['opc.tcp://10.0.0.5:4840/belt']     <- served
 ```
 
 The MQTT metadata was removed and the OPC-UA endpoint was not, because a set derived from registered
-code only knows the protocols someone has written a connector for. Two protocols on one parameter is
+code only knows the protocols someone wrote a connector for. Two protocols on one parameter is
 not a contrived case: **ADR 0026 names it explicitly** as own-built hardware whose protocol is not
 known when the ontology is authored, and as two machines of one class on different protocols.
 
 This is exactly the failure mode issue #42's *"do not add a deny-list of southbound field names"*
-was written to prevent. A registry-derived deny-list is still a deny-list; deriving it from code
+was written to prevent. A registry-derived deny-list is still a deny-list. Deriving it from code
 rather than typing it by hand does not change what happens to the entries nobody thought of.
 
 **The ontology does not have this blind spot.** It is authoritative about what a protocol parameter
-*is*, whether or not anyone has written a connector for it, so asking it finds the OPC-UA endpoint.
+*is*, whether or not anyone wrote a connector for it, so asking it finds the OPC-UA endpoint.
 Since everything reaching the productive graph goes through the OGM write path (root ADR 0008), what
 the ontology declares can be governed at admission — which is the other half of why trusting it is
 sound.
@@ -81,8 +81,8 @@ first remedy proposed. Rejected on two grounds, both structural:
 
 - **It is a closed-world assertion in the serving path.** The architecture has exactly one
   closed-world moment by design — SHACL at admission (ADR 0025). A keep-list would add a second, in
-  the place where open-world data is being read back out.
-- **It fights the domain ontologies' evolution.** Domain experts add terms; a keep-list hides every
+  the place where open-world data is read back out.
+- **It fights the domain ontologies' evolution.** Domain experts add terms. A keep-list hides every
   new legitimate one by default until somebody declares it safe. That taxes twenty domain engineers
   to guard something the OGM write path already governs.
 
@@ -101,7 +101,7 @@ hasValue: []   hasUnit: ['m/s']   accessMode: ['readwrite']
 The projection therefore happens **before** any connection metadata is read out of the store, rather
 than filtering it out of a materialized model afterwards. That ordering is the point. A data-side
 filter is a step that can be forgotten, reordered, or bypassed by a second code path that materializes
-its own model; a spec-side prune means the northbound model has no field to carry a broker address in,
+its own model. A spec-side prune means the northbound model has no field to carry a broker address in,
 and the generated pydantic model has `extra="forbid"`.
 
 ## Two traps in the query, both found by testing
@@ -122,7 +122,7 @@ Both exclusions are load-bearing and are commented as such at the query.
 
 If a property is declared interface-accessible but nothing can be read from its protocol markers'
 ranges — a missing TBox, or a range shape not understood — the projection **raises** rather than
-serving. A projection that cannot classify a payload's fields has one safe behaviour, and continuing
+serving. A projection that cannot classify a payload's fields has one safe behavior, and continuing
 is not it: the failure would surface as a broker address on a public REST route.
 
 Both range shapes the OGM itself accepts are handled: an `owl:intersectionOf` list of restrictions and
@@ -131,7 +131,7 @@ contract, and a missed term is a leak.
 
 ## The binding descriptor's `connection_metadata` becomes a cross-check
 
-It still declares what a binding *reads* in order to construct a connector — genuinely that binding's
+It still declares what a binding *reads* to construct a connector — genuinely that binding's
 business. It is no longer the projection's source of truth, and the two are compared at construction:
 
 - **Declared only in the ontology** — the contract grew a term this binding ignores. Northbound-safe
@@ -151,7 +151,7 @@ data, and it is *shown*. The projection inherits the rule. If pruning were gated
 `autoregister_connectors`, the **inspector** — the least privileged flavour, wiring nothing — would be
 the one serving broker addresses. The least-privileged instance would leak the most.
 
-Registry construction, recognition and pruning all run for every flavour; only `connect()` and the
+Registry construction, recognition and pruning all run for every flavour. Only `connect()` and the
 sync registration are gated. The regression test that matters is that all three flavours serve
 byte-identical northbound payloads.
 
@@ -174,7 +174,7 @@ environment — is deliberate future work, not something this projection claims 
 - **Amends ADR 0023's fourth consequence.** "ADR 0019's projection step is not needed" was true when
   written and is now false. The rest stands: the binding reads its metadata from the ABox at
   registration, because recognition runs at construction, before any datamodel exists. The *spec*
-  supplies the effective shape; the ABox supplies the values.
+  supplies the effective shape. The ABox supplies the values.
 - A merge-depth parameter in `kapps_ogm` (`SAWeindel/kapps_ogm#8`) would let the OGM produce the
   shallow shape directly and retire the prune entirely. Not pursued here: root ADR 0001 admits only
   bugfixes to the siblings, and it would block #40 behind a cross-repo release.
@@ -188,8 +188,8 @@ The projection was decided four times. Three of the four were correct on the evi
 
 1. **ADR 0019 (2026-07-27, #29)** — *middleware-side, over the materialized data.* Reached after
    discovering live that a ClassScope cannot select within a parameter, so ADR 0018's mechanism did not
-   exist. Correct about the mechanic; its remedy stripped fields from a materialized model.
-2. **ADR 0026 (2026-07-28, #52)** — *there is no projection step; the restriction is the projection.*
+   exist. Correct about the mechanic. Its remedy stripped fields from a materialized model.
+2. **ADR 0026 (2026-07-28, #52)** — *there is no projection step. The restriction is the projection.*
    ADR 0019 retired, implementation ticket **#51 closed unbuilt**. Sound at the time: the domain TBox
    declared only `inf:hasValue` and `tu:hasUnit`, `inf:hasMQTTTopic` appeared in no restriction
    anywhere, and the two TBoxes were deliberately unconnected — so a broker address was dropped before

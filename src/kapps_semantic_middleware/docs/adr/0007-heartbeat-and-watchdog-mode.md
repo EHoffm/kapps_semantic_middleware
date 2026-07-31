@@ -15,7 +15,7 @@ watchdog that removes stale discovery triples when a resource-bound middleware i
 falls silent"). The paper's own phrasing already splits this into two responsibilities —
 per-instance heartbeat and centralized sweeping — which is why it became a third `mode`
 rather than a flag on resource mode: a sweeper has no resource to wrap and, unlike resource
-or server mode, isn't answering requests at all, it's the one process type whose entire job
+or server mode, is not answering requests at all, it is the one process type whose entire job
 is background maintenance of the registry.
 
 **Consequence**: a real deployment needs at least one running `watchdog`-mode instance for

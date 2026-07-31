@@ -23,9 +23,10 @@ from rdflib.namespace import RDF
 
 from handlers import hello_world
 from kapps_ogm import OGM
-from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
+    mint_service_iri,
     mint_workflow_iri,
     services_of_resource,
 )
@@ -80,7 +81,7 @@ def step_2_start_hello_world_middleware(db: GraphDB) -> tuple[SemanticMiddleware
     """Register the hello-world workflow and start its HTTP server."""
     print("\nStep 2 — Start the Hello-World Middleware")
     middleware = SemanticMiddleware(
-        mode="resource",
+        mode=Mode.RESOURCE,
         resource_iri=seed.HELLO_RESOURCE,
         service_class=seed.HELLO_SERVICE_CLASS,
         ogm=OGM(db=db),
@@ -133,7 +134,7 @@ def step_3_inspect_registration(db: GraphDB, ogm: OGM) -> Registration:
 
 def step_4_dispatch_and_run(
     db: GraphDB, hello_mw: SemanticMiddleware, registration: Registration
-) -> IRI:
+) -> tuple[IRI, uvicorn.Server, threading.Thread]:
     """Dispatch an operation through the event trigger, then pull-and-run it.
 
     A second middleware (a planner) dispatches an operation for the hello capability: it
@@ -143,13 +144,26 @@ def step_4_dispatch_and_run(
     """
     print("\nStep 4 — Dispatch through the Event Trigger, then Pull-and-Run")
     planner = SemanticMiddleware(
-        mode="resource",
+        mode=Mode.RESOURCE,
         resource_iri=seed.PLANNER_RESOURCE,
         service_class=seed.PLANNER_SERVICE_CLASS,
         ogm=OGM(db=db),
         host="127.0.0.1",
         port=PLANNER_PORT,
     )
+    # The planner is *served*, not merely constructed (#44). Constructing a resource-mode
+    # instance and never running it means `on_start_up` never fires: no Service individual,
+    # no `svc:address`, no heartbeat, no event-trigger route — so `mode="resource"` would be
+    # a label with no runtime consequence, and a reader would reasonably copy that. A client
+    # that dispatches work is a peer like any other, and peers are discoverable.
+    planner_server, planner_thread = _start_server(planner, PLANNER_PORT)
+    planner_service = mint_service_iri(IRI(seed.PLANNER_RESOURCE))
+    planner_address = list(db.triples_get(sub=planner_service, pred=SVC.address))
+    print(f"Planner served on port {PLANNER_PORT}")
+    print(f"  Service registered:   {bool(planner_address)}")
+    print(f"  svc:address in graph: {planner_address[0][2] if planner_address else 'NONE'}")
+    assert planner_address, "the planner is served, so it must be discoverable in the graph"
+
     with planner.request(
         capability_class=seed.HELLO_CAPABILITY_CLASS,
         operation_class=str(CFC.Operation),
@@ -162,7 +176,7 @@ def step_4_dispatch_and_run(
     with hello_mw.claim_next() as claimed:
         claimed.result = hello_world()
     print(f"Hello resource pulled and ran the operation -> result: {claimed.result!r}")
-    return op_iri
+    return op_iri, planner_server, planner_thread
 
 
 def step_5_inspect_decision_provenance(db: GraphDB, operation_iri: IRI) -> None:
@@ -181,23 +195,42 @@ def step_5_inspect_decision_provenance(db: GraphDB, operation_iri: IRI) -> None:
     assert status and str(status[0][2]) == OperationStatus.DONE
 
 
-def step_6_shutdown_and_verify(
-    db: GraphDB, registration: Registration, server: uvicorn.Server, thread: threading.Thread
-) -> None:
-    """Stop the server and verify reachability is removed while individuals remain."""
-    print("\nStep 6 — Shutdown and Deregistration")
+def _stop(server: uvicorn.Server, thread: threading.Thread) -> None:
     server.should_exit = True
     thread.join(timeout=SERVER_STOP_TIMEOUT_SECONDS)
+
+
+def step_6_shutdown_and_verify(
+    db: GraphDB,
+    registration: Registration,
+    servers: list[tuple[uvicorn.Server, threading.Thread]],
+) -> None:
+    """Stop both servers and verify reachability is removed while individuals remain.
+
+    Both, because both are served (#44). A client that registers on startup must deregister
+    on shutdown like any other peer, or the graph accumulates addresses nobody answers on.
+    """
+    print("\nStep 6 — Shutdown and Deregistration")
+    for server, thread in servers:
+        _stop(server, thread)
     time.sleep(0.5)
 
     address_after = list(db.triples_get(sub=registration.service_iri, pred=SVC.address))
     endpoint_after = list(db.triples_get(sub=registration.workflow_iri, pred=SVC.endpoint))
+    planner_service = mint_service_iri(IRI(seed.PLANNER_RESOURCE))
+    planner_address_after = list(db.triples_get(sub=planner_service, pred=SVC.address))
+
     print("After shutdown:")
     print(f"  Service address removed:   {len(address_after) == 0}")
     print(f"  Workflow endpoint removed: {len(endpoint_after) == 0}")
+    print(f"  Planner address removed:   {len(planner_address_after) == 0}")
     print(
         "  Workflow individual preserved (rdf:type): "
         f"{db.triple_exists((registration.workflow_iri, RDF.type, seed.HELLO_WORKFLOW_CLASS))}"
+    )
+    print(
+        "  Planner Service individual preserved: "
+        f"{db.triple_exists((planner_service, SVC.isServiceOf, seed.PLANNER_RESOURCE))}"
     )
 
 
@@ -208,17 +241,21 @@ def main() -> None:
 
     step_1_seed_clean_repository(db)
     hello_mw, server, thread = step_2_start_hello_world_middleware(db)
+    running: list[tuple[uvicorn.Server, threading.Thread]] = [(server, thread)]
     registration: Registration | None = None
     try:
-        registration = step_3_inspect_registration(db, hello_mw.ogm)
-        operation_iri = step_4_dispatch_and_run(db, hello_mw, registration)
+        registration = step_3_inspect_registration(db)
+        operation_iri, planner_server, planner_thread = step_4_dispatch_and_run(
+            db, hello_mw, registration
+        )
+        running.append((planner_server, planner_thread))
         step_5_inspect_decision_provenance(db, operation_iri)
     finally:
         if registration is not None:
-            step_6_shutdown_and_verify(db, registration, server, thread)
+            step_6_shutdown_and_verify(db, registration, running)
         else:
-            server.should_exit = True
-            thread.join(timeout=SERVER_STOP_TIMEOUT_SECONDS)
+            for srv, thr in running:
+                _stop(srv, thr)
 
 
 if __name__ == "__main__":

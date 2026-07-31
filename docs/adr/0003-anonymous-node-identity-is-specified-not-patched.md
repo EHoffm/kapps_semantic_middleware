@@ -13,7 +13,7 @@ written up as a PRD and handed to the owner rather than patched in our checkout.
 Three things had to be true at once for a local patch to be the right call, and only the first is:
 
 - **It is a defect, not a feature request.** A fetch-then-commit round trip with no modification
-  should leave the graph byte-identical; today it relocates every blank node and destroys triples the
+  should leave the graph byte-identical. Today it relocates every blank node and destroys triples the
   schema did not anticipate — while the read path deliberately tolerates exactly those triples under
   the Open World Assumption.
 - **It is not local.** The fix touches `_fetch_complex_property`, `Node`, the pydantic model

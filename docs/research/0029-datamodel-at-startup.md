@@ -52,7 +52,7 @@ produces no error and no effect. **→ ADR 0028.**
 ### 3. The blanknode's shape is the TBox restriction; the rest is silently dropped
 
 `tu:isOccupied`'s `rdfs:range` restriction declares exactly one member, `inf:hasValue` (bool). The
-fetch returned `rdfs:comment` as well; materialization discarded it, logging only
+fetch returned `rdfs:comment` as well. Materialization discarded it, logging only
 `WARNING Unknown properties in data for ClassSpec None: {rdfs:comment}` (`NodeValidator`, non-strict).
 
 **Consequence for #40**: an MQTT topic asserted on the instance is dropped before any connector sees

@@ -14,7 +14,7 @@ The middleware neither strips values on the way to the graph nor refuses to comm
 
 **Scenario 3 is a locator.** Conveyor speeds and light-barrier states change continuously, so the
 extended `transferunit.ttl` (#25) authors **no `inf:hasValue` literals** on parameter blanknodes. The
-`rdfs:range` restriction still declares `inf:hasValue`, so the datamodel field exists; the instance
+`rdfs:range` restriction still declares `inf:hasValue`, so the datamodel field exists. The instance
 simply leaves it empty.
 
 ## Why
@@ -24,7 +24,7 @@ simply leaves it empty.
 ADR 0015 states that "the live value is still never *persisted to the graph*", and the Parameter glossary
 entry repeated it. Read as a middleware guarantee, that would require the write path to know which fields
 are live and strip them — and it would forbid a legitimate use we should support. It is really a property
-of the **locator** pattern, which ADR 0015 was describing because the scenario in front of it was a
+of the **locator** pattern, which ADR 0015 described because the scenario in front of it was a
 fast-changing one.
 
 Enforcing it would also break the middleware's ontology-agnosticism. A parameter with a daily update
@@ -46,7 +46,7 @@ from a sensor reading. Under the locator pattern there is nothing to mistake.
 
 ### The distinction is behavioural, so it needs no mechanism
 
-Both patterns may register connectors; they differ only in whether the domain code commits. Nothing in
+Both patterns may register connectors. They differ only in whether the domain code commits. Nothing in
 the ontology or the middleware has to mark which is in use, and no new term is needed to express the
 choice. That is the cheapest possible way to support both, and it keeps the recognition model (ADR 0020)
 untouched.
@@ -65,10 +65,10 @@ untouched.
   rather than stated as a middleware invariant. ADR 0015 make no such claim and are
   unaffected.
 - **#25** authors `transferunit.ttl` with parameter metadata but **no value literals**. Ordinary complex
-  properties that are not interface parameters — a manufacturer, a serial number — keep their literals;
-  they are data, not parameters (ADR 0020).
+  properties that are not interface parameters — a manufacturer, a serial number — keep their literals.
+  They are data, not parameters (ADR 0020).
 - A parameter reads as `hasValue: []` between startup and the device's first publish. Consumers must
-  handle an empty value; it means "not yet observed", not "zero".
+  handle an empty value. It means "not yet observed", not "zero".
 - `_dump_resource_datamodel` still writes the whole datamodel, live values included, into
   `svc:failureState` as an opaque JSON literal on failure. That is a deliberate diagnostic exception
   (ADR 0009) and not affected by either pattern — it records triples about an Operation, not about the

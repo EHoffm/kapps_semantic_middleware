@@ -34,9 +34,19 @@ import seed  # noqa: E402
 
 @pytest.fixture
 def scenario3(graphdb):
-    """A seeded scenario 3 and an OGM over it."""
-    ogm = OGM(db=graphdb)
-    seed.seed_scenario3(graphdb, ogm)
+    """A seeded scenario 3 and an OGM over it.
+
+    Function-scoped, and that is load-bearing however tempting the ~80 round trips a seed
+    costs are: several tests here add interface metadata with a raw SPARQL INSERT
+    (`hasMQTTValuePath`, an OPC-UA endpoint) to prove a declared term survives the read.
+    Sharing one seed across the module lets those writes leak forward — an envelope path
+    inserted by one test puts a later test's formatter into envelope mode, and it then
+    reads a raw scalar as an unobserved payload.
+    """
+    seed.seed_scenario3(graphdb, OGM(db=graphdb))
+    # A *fresh* OGM, deliberately not the one that seeded: the seeding client carries state
+    # from its own writes, and a test that plans a wiring must read the graph the way a
+    # cold middleware would.
     return graphdb, OGM(db=graphdb)
 
 

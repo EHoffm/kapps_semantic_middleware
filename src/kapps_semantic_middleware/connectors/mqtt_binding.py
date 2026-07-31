@@ -20,6 +20,7 @@ stack — the registry has to exist for every flavour, including one that wires 
 from __future__ import annotations
 
 import json
+import math
 import logging
 from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
 
@@ -34,6 +35,24 @@ from kapps_semantic_middleware.connectors.semantic import (
 from kapps_semantic_middleware.vocabulary import INF
 
 logger = logging.getLogger(__name__)
+
+# Sentinel for tracking whether we have seen a value yet; distinct from None so a
+# genuine first None payload still counts as a change worth logging at INFO.
+_UNSET = object()
+
+
+def _is_a_change(value: Any, previous: Any) -> bool:
+    """Whether an inbound value is news, treating NaN as equal to itself.
+
+    ``float("nan") != float("nan")`` is true by IEEE-754, so a sensor stuck emitting NaN --
+    a failed probe, a divide-by-zero in the PLC -- would register every republish as a change
+    and flood the very feed this comparison exists to keep readable. That is precisely the
+    case where the operator least needs a scrolling wall of identical lines.
+    """
+    if isinstance(value, float) and isinstance(previous, float):
+        if math.isnan(value) and math.isnan(previous):
+            return False
+    return value != previous
 
 
 try:
@@ -86,7 +105,8 @@ class MQTTParameterFormatter:
     diffs per triple and an unchanged facet cannot be wiped. The in-memory half remains, and
     it is what this reassembly is for — the northbound payload keeps its unit after the first
     device message. The facets come from the same metadata the binding already read, so this
-    is a pure function per message with no read of current state.
+    is a pure function per message with no read of current state — apart from ``_last_value``,
+    which exists solely for change-detection in logging and never affects the returned value.
     """
 
     def __init__(
@@ -95,31 +115,57 @@ class MQTTParameterFormatter:
         northbound_facets: Dict[str, Any],
         value_field: str,
         value_path: Optional[str] = None,
+        *,
+        parameter_label: str = "",
+        topic: str = "",
+        set_topic: str = "",
     ) -> None:
         self.model_type = model_type
         self.northbound_facets = northbound_facets
         self.value_field = value_field
         self.value_path = value_path
+        self.parameter_label = parameter_label
+        self.topic = topic
+        self.set_topic = set_topic
+        self._last_value: Any = _UNSET
 
     def deserialize(self, data: Any) -> List[Any]:
         """Device payload -> the persistence value (a one-element list holding the node)."""
         value = self._extract(data)
         fields = dict(self.northbound_facets)
         fields[self.value_field] = [] if value is None else [value]
+        # Log inbound values, but only at INFO when they change. The mock PLC republishes
+        # every value on a fixed interval (0.2–0.5s per topic), so logging every message at
+        # INFO makes the feed unreadable within seconds. A periodic republish of an unchanged
+        # value is noise; a change is news.
+        label = self.parameter_label or "parameter"
+        topic = self.topic or "topic"
+        if _is_a_change(value, self._last_value):
+            logger.info("%s <- %s = %r", label, topic, value)
+            self._last_value = value
+        else:
+            logger.debug("%s <- %s = %r (unchanged)", label, topic, value)
         return [self.model_type(**fields)]
 
     def serialize(self, data: Any) -> bytes:
         """Persistence value -> the device payload, encoded for ``consume``."""
         value = self._value_of(data)
         if self.value_path is None:
-            return json.dumps(value).encode()
-        envelope: Dict[str, Any] = {}
-        cursor = envelope
-        *branches, leaf = self.value_path.split(".")
-        for part in branches:
-            cursor = cursor.setdefault(part, {})
-        cursor[leaf] = value
-        return json.dumps(envelope).encode()
+            result = json.dumps(value).encode()
+        else:
+            envelope: Dict[str, Any] = {}
+            cursor = envelope
+            *branches, leaf = self.value_path.split(".")
+            for part in branches:
+                cursor = cursor.setdefault(part, {})
+            cursor[leaf] = value
+            result = json.dumps(envelope).encode()
+        # Log outbound setpoints unconditionally at INFO. A setpoint is always news — it is
+        # an operator or a controller acting — so no change-detection here.
+        label = self.parameter_label or "parameter"
+        topic = self.set_topic or "set_topic"
+        logger.info("%s -> %s = %r", label, topic, value)
+        return result
 
     def _extract(self, data: Any) -> Any:
         """Pull the scalar out of an inbound payload, honouring the envelope path."""
@@ -205,7 +251,7 @@ class MQTTBinding:
             )
             return
 
-        formatter = _formatter_for(binding, value_path)
+        formatter = _formatter_for(binding, value_path, topic=topic, set_topic=set_topic or "")
 
         yield Registration(
             connector=connector_cls(broker, topic),
@@ -237,7 +283,10 @@ class MQTTBinding:
 
 
 def _formatter_for(
-    binding: ParameterBinding, value_path: Optional[str]
+    binding: ParameterBinding,
+    value_path: Optional[str],
+    topic: str = "",
+    set_topic: str = "",
 ) -> MQTTParameterFormatter:
     """Build the formatter for one parameter from its already-resolved northbound facets.
 
@@ -252,9 +301,27 @@ def _formatter_for(
         for prop, value in binding.metadata.items()
         if prop not in southbound and IRI(prop).lined != value_field
     }
+    # Build a short human-readable label for log lines. Full mangled IRIs are correct in
+    # route paths (ADR 0021) but unreadable in a log line a human is watching scroll past;
+    # this string is display-only — never parsed, never used to address anything.
+    resource_fragment = (
+        binding.resource_iri.fragment
+        if hasattr(binding.resource_iri, "fragment") and binding.resource_iri.fragment
+        else str(binding.resource_iri)
+    )
+    param_fragment = (
+        binding.parameter_property.fragment
+        if hasattr(binding.parameter_property, "fragment")
+        and binding.parameter_property.fragment
+        else str(binding.parameter_property)
+    )
+    parameter_label = f"{resource_fragment} {param_fragment}"
     return MQTTParameterFormatter(
         model_type=binding.node_model_type,
         northbound_facets=facets,
         value_field=value_field,
         value_path=value_path,
+        parameter_label=parameter_label,
+        topic=topic,
+        set_topic=set_topic,
     )

@@ -52,10 +52,10 @@ whole-group-replacement option are in the PRD.
   mode northbound — nothing about skolemisation touches that path, because it never reaches the store.
   So `MQTTParameterFormatter` reassembles the node from the facets the binding already read. It is a
   pure function per message and reads no current state, which is what the original objection was
-  about. Retire it for real when a formatter can see the value it is replacing.
+  about. Retire it for real when a formatter can see the value it replaces.
 - **ADR 0024's committed-value pattern is unblocked.** Its warning that committing a parameter orphans
-  its connection metadata was the same defect; it can be lifted when the OGM change lands.
-- Domain experts keep authoring `[ … ]`; authored Turtle is never rewritten, and a `genid` IRI must
+  its connection metadata was the same defect. It can be lifted when the OGM change lands.
+- Domain experts keep authoring `[ … ]`. Authored Turtle is never rewritten, and a `genid` IRI must
   never be hand-authored. Store and file then differ in form, never in meaning.
 - The minting authority for Skolem IRIs is an ontology-governance decision (Ratan), because the IRIs
   become globally visible and bind the CI/CD pipeline and the federation outlook in the paper's §7.

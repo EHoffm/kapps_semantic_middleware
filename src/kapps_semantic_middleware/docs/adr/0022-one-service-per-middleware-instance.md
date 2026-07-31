@@ -17,7 +17,7 @@ tui:TransferUnit1_service_<discriminator2>  a svc:Service ;     # the monitor
 
 The discriminator must be **stable across restarts of the same deployment** (so a restart re-uses its
 node instead of orphaning one) and **distinct between concurrent instances**. Deriving it from the
-instance's address satisfies both; the exact scheme is an implementation choice.
+instance's address satisfies both. The exact scheme is an implementation choice.
 
 ## Why
 
@@ -55,14 +55,14 @@ mechanism. Discoverable and un-dispatchable falls out of machinery that already 
 
 ## Consequences
 
-- `mint_service_iri` gains an instance discriminator; it is no longer a pure function of the
+- `mint_service_iri` gains an instance discriminator. It is no longer a pure function of the
   resource. Anything reconstructing a service IRI from a resource IRI alone must instead query
   `svc:isServiceOf`.
 - Discovery may return **several** services for one resource. Consumers choose by address, liveness,
   or the capabilities each advertises — and must no longer assume exactly one.
-- Deregistration and heartbeat become per-instance and therefore correct; a crashed instance goes
+- Deregistration and heartbeat become per-instance and therefore correct. A crashed instance goes
   stale on its own without affecting its siblings (ADR 0007 unchanged).
-- Scenarios 1 and 2 are unaffected in behaviour: one instance per resource still yields one service,
+- Scenarios 1 and 2 are unaffected in behavior: one instance per resource still yields one service,
   only its IRI changes. Any test asserting the literal `{resource_iri}_service` string must be
   updated.
 - Amends the registration model behind ADR 0004; ADR 0002's Capability-based resolution and ADR

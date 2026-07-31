@@ -13,8 +13,8 @@ code — writing it again from scratch before proving out the knowledge-graph-re
 layer on top of it would be pure cost with no corresponding benefit. `__init__.py`'s
 migration comment ("as each layer is migrated locally, swap the import") already commits to
 an incremental strategy: depend on `aas_middleware` now, replace pieces with local
-implementations one at a time as they're understood well enough to own.
+implementations one at a time as they are understood well enough to own.
 
 **Consequence**: `kapps_semantic_middleware` inherits `aas_middleware`'s naming/vocabulary
-(`workflow`, `Connector`, `capability=` kwarg) even where it doesn't perfectly match the
+(`workflow`, `Connector`, `capability=` kwarg) even where it does not perfectly match the
 paper's own terms, rather than introducing a second vocabulary on day one.

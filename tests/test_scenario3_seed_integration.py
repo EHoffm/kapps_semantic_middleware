@@ -56,9 +56,9 @@ def _parameter_properties(db, resource_iri, parameter_property) -> set[str]:
 def seeded(graphdb):
     """Seed scenario 3 and hand back the client.
 
-    Function-scoped to match the `graphdb` fixture: a seed is a handful of writes, and
-    sharing one across the module would let an earlier test's re-seed change what a later
-    one sees.
+    Deliberately function-scoped, unlike the read-only scenario-3 fixtures elsewhere:
+    `test_seeding_twice_is_idempotent` re-seeds inside the test body, so sharing one seed
+    across the module would let that re-seed change what a later test sees.
     """
     seed.seed_scenario3(graphdb, OGM(db=graphdb))
     return graphdb

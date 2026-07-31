@@ -27,8 +27,11 @@ import seed  # noqa: E402
 SERVICE_CLASS = f"{seed.TU_NS}TransferUnitService"
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def seeded_unit(graphdb):
+    """Module-scoped: these tests construct middlewares and assert on the connectors they
+    wire, which is a read of the seeded graph. Registration only writes from the startup
+    callbacks, and no test here starts a middleware."""
     seed.seed_scenario3(graphdb, OGM(db=graphdb))
     return graphdb
 

@@ -16,10 +16,10 @@ nodes), `#46` (dirty `OGM` repository). Root ADR 0002 in this repo is amended by
 write path treats the TBox as exhaustive. Both assumptions are false for every parameter node in the
 Circular Factory, and together they make the scenario-3 TransferUnit unusable after one write.
 
-The domain ontology declares what a parameter **is** (`inf:hasValue`, `tu:hasUnit`); the ABox
+The domain ontology declares what a parameter **is** (`inf:hasValue`, `tu:hasUnit`). The ABox
 additionally carries what a connector needs to **reach** it (`inf:hasMQTTTopic`,
-`inf:hasMQTTSetTopic`, `inf:hasMQTTBrokerIP`). Three of five triples on every parameter node are
-undeclared by the domain restriction, deliberately — the domain and connector TBoxes are not
+`inf:hasMQTTSetTopic`, `inf:hasMQTTBrokerIP`). The domain restriction deliberately leaves three of five triples
+on every parameter node undeclared — the domain and connector TBoxes are not
 connected (`#25`). Under the Open World Assumption that is not merely legal, it is the normal case.
 
 ### Stage 1 — provisioning silently produces a dead parameter
@@ -60,7 +60,7 @@ WHERE  { <…ConveyorBelt1_left> tu:hasConveyorSpeed ?oldbn1 .
          BIND(BNODE() AS ?newbn1) }
 ```
 
-The link is deleted; the old node keeps topic, set topic and broker with **no inbound edge** —
+The link is deleted. The old node keeps topic, set topic and broker with **no inbound edge** —
 unreachable — and the new node cannot reach the device. This is `#4`, with the additional finding
 that `graph_db_interface.triples_update` builds **two separate** blank-node→variable maps
 (`triple_multi.py:394-400`, `414-416`), so a Python-stable `BNode` on both sides still becomes a
@@ -83,8 +83,8 @@ existential variable, not a record.
 
 Three consequences decided this design:
 
-1. A blank node has **no extent**. "Everything hanging off this node" is not a set the graph defines;
-   it is whatever your last query saw.
+1. A blank node has **no extent**. "Everything hanging off this node" is not a set the graph defines.
+   It is whatever your last query saw.
 2. A blank node **cannot be addressed**. `_:b1` in a SPARQL query is a fresh existential, not a
    reference. Nothing outside its own group can point at it — no PROV qualification, no
    `sh:targetNode`, no join across a history snapshot.
@@ -104,7 +104,7 @@ sanctioned remedy, and both of its sentences are load-bearing here:
 > well-known IRI with the registered name `genid` … whose path component starts with
 > `/.well-known/genid/`."
 
-The first sentence is the semantic guarantee: the domain ontology's modelling is unchanged. The second
+The first sentence is the semantic guarantee: the domain ontology's modeling is unchanged. The second
 is precisely our requirement — PROV qualification, SHACL focus nodes and history joins are all "other
 graphs subsequently using the node", which RDF says is impossible for a blank node.
 
@@ -131,7 +131,7 @@ Hernández is a co-author of the KAPPS paper.
   between fetch and commit is destroyed (a lost update the OGM creates, not the store), the atomic
   unit has no ontological basis, and identity churn breaks paper requirements R3, R5, R12 and R14.
 - *Name the parameter node in the domain ontology.* Works today with no OGM change, but pushes naming
-  onto twenty domain engineers and abandons a modelling pattern that is locked across the circular
+  onto twenty domain engineers and abandons a modeling pattern that is locked across the circular
   factory.
 - *Declare connection metadata in the domain property's range.* No code change at all, but reverses
   `#25`, makes every domain engineer restate the protocol contract per parameter, and moves the IT/OT
@@ -175,7 +175,7 @@ Justification is standard entailment, not convention: `belt tu:hasConveyorSpeed 
 `tu:hasConveyorSpeed rdfs:subPropertyOf inf:isInterfaceAccessibleMQTTParameter` entails
 `belt inf:isInterfaceAccessibleMQTTParameter _:b` (rdfs7), and with a range on that superproperty,
 `_:b rdf:type C_mqtt` (rdfs3) — alongside `_:b rdf:type C_speed` from the domain range. The node **is**
-an instance of the intersection; the OGM computing it is implementing the entailment.
+an instance of the intersection. The OGM computing it implements the entailment.
 
 Mechanically this subsumes `#1`: `specify` must merge anonymous restriction ranges instead of raising
 on arity, and `_specify_complex_property`'s query must collect ranges across `rdfs:subPropertyOf*`.
@@ -194,7 +194,7 @@ time, and two machines of one class may speak different protocols. Sources:
 3. **TBox marker** — `rdfs:subPropertyOf inf:isInterfaceAccessible…`, optional, for hardware whose
    protocol is fixed by its supplier.
 
-All resolved interfaces are merged; a dual-homed parameter legitimately carries several. Embedding
+All resolved interfaces are merged. A dual-homed parameter legitimately carries several. Embedding
 code may mark its declaration **authoritative**, which selects the shape and drives write-back removal
 of stale metadata, so protocol migration is possible. Whether a connector is actually wired remains
 the connector registry's decision, not the spec's. **Consequence:** the effective spec is
@@ -304,7 +304,7 @@ then finds its metadata and takes ADR 0015 row 1.**
 
 1. **`extra="forbid"` is inert** (`class_spec.py:104-106`) — assigned after `create_model`, so the
    core schema is already built. Verified on pydantic 2.13.4. The comment claims unknown properties
-   are enforced at model level; they are silently ignored. A landmine: adding `model_rebuild()`
+   are enforced at model level. They are silently ignored. A landmine: adding `model_rebuild()`
    without an undeclared-property policy would break every fetch of real data, since upstream instance
    data legitimately carries undeclared `rdfs:comment`.
 2. **OWL-derived requiredness** (R10). Predicts a live failure: materialising `tui:ConveyorBelt1_left`
@@ -319,7 +319,7 @@ then finds its metadata and takes ADR 0015 row 1.**
 5. **`_specify_complex_property` ignores `nested_scope`** (`property_spec.py:320`) — a scope below a
    COMPLEX property is silently discarded. Known from `#29`; recorded here because R9 makes merge
    depth, not scope, the projection mechanism, so this stops being a blocker.
-6. **`examples/transferunit.ttl` cannot be imported into GraphDB.** Its TBox loads; its instance data
+6. **`examples/transferunit.ttl` cannot be imported into GraphDB.** Its TBox loads. Its instance data
    returns `500 - Unexpected exception`, before and after the 2026-07-28 ontology corrections alike.
    Not caused by the comment blocks or the non-ASCII characters, and the file parses cleanly in
    rdflib. Tracked as `EHoffm/kapps_semantic_middleware#55`. It is why the two predictions below are
@@ -336,14 +336,14 @@ against the live GraphDB, so the store is reachable and usable.
 Two things are **not** verified end-to-end, because the scenario-3 seed file will not load (defect 6):
 that materialising the seeded belt raises `ValidationError: inf-hasValue Field required`, and that a
 fetch-then-commit round trip relocates the parameter node and orphans its metadata. Both are traced
-through code and follow from the verified mechanisms, but neither has been observed in a repository.
+through code and follow from the verified mechanisms, but neither was observed in a repository.
 
 ## Non-goals
 
 - Entity deletion, still intentionally unsupported.
 - Skolemising anything other than the anonymous node behind a `COMPLEX` property.
 - Canonical (isomorphism-preserving) Skolemisation. Ours is identity-preserving per node, not
-  content-derived; two structurally identical parameter nodes stay distinct, which is what a locator
+  content-derived. Two structurally identical parameter nodes stay distinct, which is what a locator
   needs.
 - SHACL shape authoring for parameter payloads — deferred with `#3`.
 
@@ -366,5 +366,5 @@ resolution in `_value_to_triples`; the top-level fetch guard — plus the merged
 **`graph_db_interface`.** R11.
 
 **`kapps_semantic_middleware` (Etienne).** Supply R8 source 2 from embedding code; retire ADR 0023's
-static-facet caching (its purpose was surviving whole-node replacement, which no longer happens);
+static-facet caching (its purpose was to survive whole-node replacement, which no longer happens);
 correct `examples/transferunit.ttl` per R10 and R9.

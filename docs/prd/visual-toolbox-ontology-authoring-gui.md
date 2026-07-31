@@ -6,7 +6,7 @@
 to "ontology as ground truth" — every Capability, Workflow, Service, and StateProperty type a
 `@workflow`/`@state` registration references must be pre-authored in the ontology before the
 middleware using it can start.
-**Status**: requirement capture only. No repository exists yet; this document is the seed for
+**Status**: requirement capture only. No repository exists yet. This document is the seed for
 one, not a spec for existing code.
 **Audience**: whoever scopes and builds this tool.
 
@@ -23,8 +23,8 @@ datatypes matching their function's actual signature) by, or with the involvemen
 ontology engineer. At twenty-to-one, that person becomes the bottleneck for every new
 integration, and the failure mode when a domain engineer tries to author Turtle/SHACL
 themselves without deep semantic-web background is exactly the kind of subtly-wrong ontology
-(wrong domain/range, missing inverse property, cardinality that doesn't match reality) that is
-expensive to catch later, once instance data has accumulated against it.
+(wrong domain/range, missing inverse property, cardinality that does not match reality) that is
+expensive to catch later, once instance data accumulates against it.
 
 ## Goal
 
@@ -35,7 +35,7 @@ engineer can review and merge with confidence, rather than reverse-engineer.
 
 ## Requirements (draft, to be sharpened by whoever scopes this properly)
 
-- **R1 — Guided class creation for the four registration-relevant types.** Given "I'm building
+- **R1 — Guided class creation for the four registration-relevant types.** Given "I am building
   a new Workflow for my resource, called X, that takes these arguments and returns this," the
   tool produces a correctly-shaped `owl:Class` (subclassing the right `svc:` base class) plus
   its `sh:NodeShape` (per the pattern in
@@ -44,17 +44,17 @@ engineer can review and merge with confidence, rather than reverse-engineer.
 - **R2 — Reuse existing Capability/Resource types where they already fit.** Before letting
   someone create a new Capability type, the tool should surface existing ones that might
   already cover the same real-world ability (avoiding e.g. `DoorOpenCapability` and
-  `HatchOpenCapability` proliferating as near-duplicates because two engineers didn't know
+  `HatchOpenCapability` proliferating as near-duplicates because two engineers did not know
   about each other's work).
 - **R3 — Validation before submission, not after merge.** Whatever the tool produces should be
   checked for basic well-formedness (valid IRIs, consistent prefixes, SHACL shapes that
   actually parse) before it ever reaches the ontology engineer, so their review time goes to
   *domain* correctness, not syntax errors.
 - **R4 — A review/merge step the ontology engineer stays in control of.** This tool lowers the
-  effort of *producing* a correct proposal; it does not remove the ontology engineer from the
+  effort of *producing* a correct proposal. It does not remove the ontology engineer from the
   loop entirely — final authority over what enters the shared ontology (naming consistency,
-  avoiding redundant concepts, deciding what's genuinely core vs. domain-specific) stays
-  human, at least until there's enough track record to reconsider that.
+  avoiding redundant concepts, deciding what is genuinely core vs. domain-specific) stays
+  human, at least until there is enough track record to reconsider that.
 - **R5 — Output compatible with the Git-based ontology engineering pipeline.** The paper's
   Ontology Layer already describes Git-based version control with CI/CD validation for
   ontology modules (§4.1). Whatever this tool produces should slot into that pipeline (e.g. as

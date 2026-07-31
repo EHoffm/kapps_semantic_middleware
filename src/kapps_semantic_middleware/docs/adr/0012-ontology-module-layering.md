@@ -16,7 +16,7 @@ Vocabulary lives in three layers, each a separate ontology module:
   **Operation status + execution provenance** (ADR 0009) — coordination state, so it belongs
   here and joins the provenance block already present.
 
-The governing principle: **Core is superior; `mes:` extends Core by importing and specializing
+The governing principle: **Core is superior. `mes:` extends Core by importing and specializing
 it. Whatever is in Core is imported and extended, not duplicated or re-homed.** `mes:` and
 `svc:` are sibling modules that both import Core — `mes:` domain-facing, `svc:` middleware-facing.
 
@@ -26,7 +26,7 @@ domain experts into the middleware's communication vocabulary. Separating them k
 domain-free and gives MES functionality a home the project owns and can evolve. Possession was
 placed in `mes:` rather than `cfc:` deliberately: treating "which resource holds a workpiece" as
 Core material-flow state would mean **extending the published Core** — the single ontology
-engineer's domain, shared across ~20 domain engineers — for what is really execution state; the
+engineer's domain, shared across ~20 domain engineers — for what is really execution state. The
 project keeps Core minimal and stable and mints its own module instead.
 
 **Consequence**: the handover primitive (ADR 0011) reads/writes the `mes:` predicates while its
@@ -45,9 +45,9 @@ resolution of [#10](https://github.com/EHoffm/kapps_semantic_middleware/issues/1
 placed in `mes:` rather than `cfc:` … would mean extending the published Core") rested on a false
 premise: **Core 0.9.0 already defines possession** — `cfc:PossessionState` with `cfc:hasPossessor`
 / `cfc:hasPossessedWorkpiece` (and an optional `cfc:hasPossessionInterval`), including a Workpiece
-cardinality-1 on `hasPossessedWorkpiece`. So possession is **not** re-minted in `mes:`; the project
+cardinality-1 on `hasPossessedWorkpiece`. So possession is **not** re-minted in `mes:`. The project
 uses Core's possession model directly (ADR 0011 amended), and `mes:hasPossession` /
 `mes:isPossessedBy` are removed. The `mes:` module now carries **only handover ability**
 (`mes:hasHandoverAbility` + the six enumerated individuals + `mes:complements`) — which Core
-genuinely lacks — so the "mint our own module for what Core doesn't have" principle still holds,
+genuinely lacks — so the "mint our own module for what Core does not have" principle still holds,
 with a smaller `mes:` surface. Lesson: check the published Core before minting a domain term.

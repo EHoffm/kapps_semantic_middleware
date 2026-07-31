@@ -20,7 +20,7 @@ ordinary cases break that:
 
 Under the Open World Assumption neither case needs a type-level statement. A class description is
 deliberately incomplete, and instance facts complete it differently per instance. Adding a triple the
-ontology never anticipated is monotonic and legal; that is the same tolerance the read path already
+ontology never anticipated is monotonic and legal. That is the same tolerance the read path already
 extends to undeclared properties.
 
 Bought hardware is the opposite case — the supplier fixes the protocol — so the `rdfs:subPropertyOf`
@@ -38,7 +38,7 @@ review.
 
 ### Union, not precedence
 
-A node carrying both `inf:hasMQTTTopic` and an OPC UA node id is not contradictory; it describes a
+A node carrying both `inf:hasMQTTTopic` and an OPC UA node id is not contradictory. It describes a
 dual-homed device. So every resolved interface is merged and the connector registry decides what is
 actually wired, which it already does (ADR 0020, ADR 0023) under `autoregister_connectors` and the
 instance's flavour (ADR 0022). Embedding code may mark its declaration **authoritative**, which

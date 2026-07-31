@@ -8,7 +8,7 @@ repository on 2026-07-27. Companion to `0029-datamodel-at-startup.md`.
 ## Answer
 
 **4 parameters → 4 bindings → 6 framework connectors → 6 topics.** Each binding is one
-`ConnectionInfo`; a settable parameter registers two connectors against it, differing only in
+`ConnectionInfo`. A settable parameter registers two connectors against it, differing only in
 `sync_direction`.
 
 ```python
@@ -49,12 +49,12 @@ Every RDF value is a list, including scalars.
 
 This is the **opposite** of #29's route-generation finding: `get_contained_models_attribute_info`
 admits only attributes passing `is_identifiable_type` and therefore returns `[]`, while `DataModel`
-indexing does not require it. **The sync machinery works on the framework as shipped; only the router
+indexing does not require it. **The sync machinery works on the framework as shipped. Only the router
 had to be replaced (#41).**
 
 ### 4. `MqttClientConnector` is one topic, and publishes where it subscribes
 
-`MqttClientConnector(broker_ip, topic, port)`: `connect()` subscribes and spawns a listener;
+`MqttClientConnector(broker_ip, topic, port)`: `connect()` subscribes and spawns a listener.
 `consume(body)` publishes to `self.topic` — the same topic. It physically cannot serve a read topic
 plus a distinct `inf:hasMQTTSetTopic`, so a settable parameter needs **two** instances.
 

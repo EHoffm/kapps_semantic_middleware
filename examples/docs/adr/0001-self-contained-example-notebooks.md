@@ -9,7 +9,7 @@ runs.
 
 **Why**: without this, a notebook either has to run against the real production knowledge
 graph (making every re-run of the notebook a live write against production state, and making
-the notebook's behavior depend on whatever state production happens to be in when it's run —
+the notebook's behavior depend on whatever state production happens to be in when it is run —
 neither reproducible nor safe to hand to someone exploring the middleware for the first time)
 or silently assume a bespoke local setup the reader has to reconstruct by hand before the
 notebook does anything meaningful. Neither is acceptable for a document whose whole purpose is

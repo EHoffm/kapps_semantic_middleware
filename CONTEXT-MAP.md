@@ -2,49 +2,56 @@
 
 ## Contexts
 
-- [Core Middleware](./src/kapps_semantic_middleware/CONTEXT.md) — the Service/Workflow/
-  Capability/Operation/Mode registration and execution machinery; the middleware library
-  itself.
-- [SHACL Interop](./src/kapps_semantic_middleware/shacl_interop/CONTEXT.md) — the temporary
-  SHACL generation/parsing seam for workflow precondition/outcome shapes, explicitly
-  scaffolding destined to move into `kapps_ogm` (see its ADR 0001).
-- [Example Scenarios](./examples/CONTEXT.md) — self-contained demonstration notebooks and the
-  seed-data/ontology-provisioning logic that makes them reproducible against a dummy
-  repository rather than production state.
-- [Module Requirements](./docs/prd/) — requirements this project places on sibling KAPPS-
-  family modules (`kapps_ogm`, the not-yet-created visual-toolbox GUI). Not a code context:
-  a collection of PRD documents, not a glossary + ADRs.
+- [Core Middleware](./src/kapps_semantic_middleware/CONTEXT.md) — the middleware library itself.
+  It holds the Service/Workflow/Capability/Operation/Mode registration machinery and the
+  execution machinery.
+- [SHACL Interop](./src/kapps_semantic_middleware/shacl_interop/CONTEXT.md) — the temporary SHACL
+  seam for workflow precondition shapes and outcome shapes. It generates and parses them. It is
+  explicit scaffolding, will move to `kapps_ogm` (see its ADR 0001).
+- [Example Scenarios](./examples/CONTEXT.md) — self-contained demonstration notebooks, plus the
+  seed-data logic and the ontology-provisioning logic under them. That logic makes each notebook
+  reproducible against a dummy repository, and never against the production state.
+- [TransferUnit Factory](./demo/transferunits/CONTEXT.md) — the runnable multi-process demo. A
+  launcher seeds N units and starts one process per participant (ADR 0029). Its decisions live
+  with the Core Middleware ADRs, next to ADR 0029.
+- [Module Requirements](./docs/prd/) — requirements this project places on sibling KAPPS-family
+  modules (`kapps_ogm`, the not-yet-created visual-toolbox GUI). Not a code context: a collection
+  of PRD documents, not a glossary + ADRs.
 
 ## Relationships
 
-- **Core Middleware → SHACL Interop**: Core Middleware calls into SHACL Interop to read/write
-  a Workflow or StateProperty class's precondition/outcome shape when `@mw.workflow`/
-  `@mw.state` register or resolve one. SHACL Interop has no dependency back on Core
-  Middleware — it operates on class IRIs and shapes, not on Core Middleware's own types.
+- **Core Middleware → SHACL Interop**: Core Middleware calls into SHACL Interop to read or write
+  a shape. The shape belongs to a Workflow class or a StateProperty class. The call happens when
+  `@mw.workflow` or `@mw.state` registers or resolves one. SHACL Interop has no dependency back
+  on Core Middleware. It operates on class IRIs and shapes, and not on Core Middleware's types.
 - **Example Scenarios → Core Middleware**: Example Scenarios instantiate and exercise Core
-  Middleware end-to-end, against ontology/instance data they seed themselves. Core Middleware
+  Middleware end-to-end, against the ontology and instance data they seed themselves. Core Middleware
   has no dependency on Example Scenarios.
+- **TransferUnit Factory → Core Middleware**: the factory runs several instances of the library
+  in separate processes. That is one instance per unit, plus a controller and a monitor. Core
+  Middleware has no dependency on the factory.
 - **Module Requirements** records obligations that Core Middleware and SHACL Interop place on
-  `kapps_ogm` and the visual-toolbox repo. It doesn't depend on, or get depended on by, the
-  code contexts — it's a paper trail for work that belongs elsewhere.
+  `kapps_ogm` and the visual-toolbox repo. It does not depend on the code contexts, and no code
+  context depends on it. It is a record for work that belongs elsewhere.
 
 ## Ontology-module layering
 
 The project's vocabulary is layered across three modules (Core Middleware ADR 0012):
 
 - **`cfc:` — Core** (`.../Core#`): published, external, superior — `Operation`/`Capability`/
-  `Resource`/`Task`. Imported and specialized, never modified.
+  `Resource`/`Task`. The system imports and specializes it. The system does not modify it.
 - **`mes:` — MES** (`.../MES#`, `src/kapps_semantic_middleware/ontology/mes.ttl`): a
   **domain** ontology that imports Core and details it out — possession + handover ability.
   What domain experts touch.
 - **`svc:` — Service** (`.../Service#`, `ontology/service.ttl`): middleware-to-middleware
-  **reachability + coordination only**, not domain-touched — Service/Workflow/StateProperty,
-  address/endpoint/heartbeat, the resolution chain, and Operation status + provenance.
+  **reachability and coordination only**, domain code does not touch it. It holds Service, Workflow and
+  StateProperty, the address, the endpoint and the heartbeat. It also holds the resolution chain,
+  and an Operation's status and provenance.
 
-`mes:` and `svc:` are siblings that both import Core; `mes:` is domain-facing, `svc:` is
+`mes:` and `svc:` are siblings that both import Core. `mes:` is domain-facing, `svc:` is
 middleware-facing.
 
 ## System-wide decisions
 
-Decisions that don't belong to any single context (e.g. how this whole repo relates to its
+Decisions that do not belong to any single context (e.g. how this whole repo relates to its
 sibling dependency repos) live in `docs/adr/` at the repo root, not inside any context.

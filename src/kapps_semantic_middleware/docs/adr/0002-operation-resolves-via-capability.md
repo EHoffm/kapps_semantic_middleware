@@ -18,7 +18,7 @@ concrete workflow that satisfies it) rather than a literal second RDF property k
 design consistent with Core as it actually exists, at the cost of one extra hop on every
 resolution.
 
-**Consequence**: every Workflow needs a matching Capability instance before it's reachable
+**Consequence**: every Workflow needs a matching Capability instance before it is reachable
 from an Operation — see
 `src/kapps_semantic_middleware/docs/adr/0003-ontology-as-ground-truth-for-types.md` for how
 that instance comes to exist. This also means a
@@ -31,6 +31,6 @@ providing X capability"), matching the paper's framing of planning as capability
 unchanged — an Operation still resolves `implementsCapability → realizedByWorkflow`. What
 changed is what happens *after* resolution: `execute()` no longer performs a synchronous HTTP
 POST to the resolved Workflow endpoint and blocks on the result. Under the event trigger model (ADR
-0009), resolution locates the **receiving Service** to notify; the caller then triggers that
+0009), resolution locates the **receiving Service** to notify. The caller then triggers that
 Service's `execute()`, and the work is pulled from a queue. The two-hop capability
-resolution is the discovery step; invocation is the event trigger.
+resolution is the discovery step. Invocation is the event trigger.

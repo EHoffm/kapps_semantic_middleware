@@ -12,7 +12,7 @@ for the concrete case: SHACL support belongs in `kapps_ogm`, but is built here f
 **Why**: `kapps_ogm`'s published PyPI release (0.1.2) has a `NameError` at
 `property_spec.py:241` that breaks `fetch`/`create`/`commit` for any class with properties
 in scope — i.e. almost every real call this project needs to make. Pointing at PyPI would
-mean building on a known-broken dependency; pointing at a local editable checkout lets the
+mean building on a known-broken dependency. Pointing at a local editable checkout lets the
 bug be fixed where it lives instead of worked around. The bugfix-only line exists because
 this project's implementation scope was explicitly bounded to `kapps_semantic_middleware`
 itself — sibling repos are dependencies, not this project's surface, and only their defects

@@ -31,14 +31,51 @@ requires_graphdb = pytest.mark.skipif(
 )
 
 
-@pytest.fixture
+def pytest_collection_modifyitems(items):
+    """Mark every test that reaches the triple store as ``live``.
+
+    Derived from the fixture graph rather than written on each test, so the marker cannot
+    drift out of step with what a test actually needs. ``-m 'not live'`` then selects the
+    tests that need no network at all.
+    """
+    for item in items:
+        if "graphdb" in item.fixturenames:
+            item.add_marker("live")
+
+
+def methods_at(app, path: str) -> set:
+    """Every HTTP method served at `path`, unioned across routes.
+
+    A parameter route's GET and PUT are two separate `APIRoute` objects that happen to share a
+    path, so picking the first match and reading its `.methods` sees only whichever verb was
+    mounted first. That makes a "no PUT here" assertion pass whether or not a PUT exists --
+    exactly what the read-only tests are meant to prove. It has already caught one false pass;
+    it lives here so the offline and live router tests cannot drift apart on it.
+    """
+    return {
+        method
+        for route in app.routes
+        if getattr(route, "path", None) == path
+        for method in route.methods
+    }
+
+
+@pytest.fixture(scope="session")
 def graphdb():
-    """A live GraphDB client from the environment, or skip the test."""
+    """A live GraphDB client from the environment, or skip the test.
+
+    Session-scoped: constructing a client costs a login round trip plus a repository
+    listing, and the client carries no per-test state — only a growing set of minted
+    blank-node ids, which is a collision guard that is happier the longer it lives.
+    Tests that need a clean *graph* re-seed it; that is separate from the client.
+    """
     if not _graphdb_env_present():
         pytest.skip("GRAPHDB_* environment variables not set")
     from graph_db_interface import GraphDB
 
-    return GraphDB.from_env()
+    db = GraphDB.from_env()
+    yield db
+    db.close()
 
 
 @pytest.fixture

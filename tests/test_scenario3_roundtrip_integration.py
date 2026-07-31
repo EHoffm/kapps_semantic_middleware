@@ -26,9 +26,9 @@ from kapps_semantic_middleware.vocabulary import INF
 
 from conftest import requires_graphdb  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
-import seed  # noqa: E402
-from mock_transferunit import MockTransferUnit  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import examples.seed as seed  # noqa: E402
+from demo.transferunits.plc.transfer_unit import TransferUnit  # noqa: E402
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ class TestDeviceToMiddleware:
         assert connector.mqtt_broker_ip == host
         connector.mqtt_broker_port = port
 
-        async with MockTransferUnit(
+        async with TransferUnit(
             broker=host, port=port, publish_interval=0.1, initial_speeds={"left": 1.25, "right": 0.0}
         ):
             await connector.connect()
@@ -120,7 +120,7 @@ class TestDeviceToMiddleware:
         connector = registration.connector
         connector.mqtt_broker_port = port
 
-        async with MockTransferUnit(broker=host, port=port, publish_interval=0.2) as unit:
+        async with TransferUnit(broker=host, port=port, publish_interval=0.2) as unit:
             await connector.connect()
             try:
                 await asyncio.sleep(0.2)
@@ -154,7 +154,7 @@ class TestMiddlewareToDevice:
         connector = registration.connector
         connector.mqtt_broker_port = port
 
-        async with MockTransferUnit(broker=host, port=port, publish_interval=0.1) as unit:
+        async with TransferUnit(broker=host, port=port, publish_interval=0.1) as unit:
             await connector.connect()
             try:
                 # Exactly the path the sync machinery takes: persistence value -> formatter
@@ -186,7 +186,7 @@ class TestFullLoop:
         write.connector.mqtt_broker_port = port
         read.connector.mqtt_broker_port = port
 
-        async with MockTransferUnit(broker=host, port=port, publish_interval=0.1):
+        async with TransferUnit(broker=host, port=port, publish_interval=0.1):
             await read.connector.connect()
             await write.connector.connect()
             try:

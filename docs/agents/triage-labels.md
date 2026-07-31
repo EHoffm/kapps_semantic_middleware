@@ -12,4 +12,4 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
-All five are used as-is (defaults). `wontfix` already existed as a GitHub default label; the other four were created fresh when this repo was set up for these skills (2026-07-14).
+All five are used as-is (defaults). `wontfix` already existed as a GitHub default label. The other four were created fresh when this repo was set up for these skills (2026-07-14).

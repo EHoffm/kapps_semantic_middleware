@@ -33,6 +33,16 @@ dev = [
     "amqtt>=0.11.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = [
+    "live: needs a reachable GraphDB (the GRAPHDB_* env vars). Applied automatically to any test that requests the `graphdb` fixture, so `-m 'not live'` selects the tier that runs anywhere.",
+]
+# pytest-asyncio warns when this is unset and defaults it to "function". Stated explicitly so
+# the default is a decision rather than a warning; the async fixtures here are per-test.
+asyncio_default_fixture_loop_scope = "function"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
