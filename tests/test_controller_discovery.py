@@ -18,7 +18,7 @@ import pytest
 from graph_db_interface import IRI
 from kapps_ogm import OGM
 
-from kapps_semantic_middleware.controller import Controller, ResourceInfo
+from demo.transferunits.controller import Controller, ResourceInfo
 from kapps_semantic_middleware.registration import mint_service_iri, register_service
 from kapps_semantic_middleware.vocabulary import CFC, SVC
 
@@ -49,7 +49,7 @@ def ogm(graphdb):
 def seeded_graph(ogm):
     """Seed the graph with scenario 3 data, plus a live Service for the unit.
 
-    seed_scenario3 (map #24) creates one TransferUnit's ABox only. It writes
+    seed_scenario3 (map #24) creates the ABox of one TransferUnit only. It writes
     no Service, since no real middleware instance runs against it here. A
     real N-unit factory needs the launcher, ticket #66, not yet built. To
     test liveness now, this fixture registers a Service by hand for
@@ -109,7 +109,7 @@ class TestControllerDiscovery:
         controller = Controller(
             resource_iri="http://example.org/ControlStation1",
             ogm=seeded_graph,
-            port=18080,  # Use different port to avoid conflicts
+            port=18080,  # Use a different port to avoid conflicts
         )
         asyncio.run(controller._register_service())
 
@@ -131,7 +131,7 @@ class TestControllerDiscovery:
             port=18081,
         )
 
-        # Import the TransferUnit class IRI from seed module
+        # Import the TransferUnit class IRI from the seed module
         tu_class = seed.TRANSFER_UNIT_CLASS
 
         units = controller.discover_resources(tu_class)
@@ -180,7 +180,7 @@ class TestControllerDiscovery:
         seed.create_resource(seeded_graph.db, IRI(controller.resource_iri), CFC.Resource)
         asyncio.run(controller._register_service())
 
-        # Discover resources of type cfc:Resource (the controller's own type)
+        # Discover resources of type cfc:Resource (the type of the controller)
         resources = controller.discover_resources(CFC.Resource)
 
         # The controller should find itself
@@ -260,7 +260,7 @@ class TestGetServiceInfo:
 class TestParameterPathDerivation:
     """Offline tests for _build_parameter_path and _derive_parameter_path.
 
-    No GraphDB and no network. These mirror the fixture style of
+    There is no GraphDB and no network. These mirror the fixture style of
     test_recursive_rest_router.py, but walk a plain JSON tree of dicts and
     lists instead of pydantic models — the shape open_resource() returns.
     """

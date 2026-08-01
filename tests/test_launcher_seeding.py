@@ -1,0 +1,143 @@
+"""Offline tests for the launcher seeding logic.
+
+This module tests the IRI minting scheme, the MQTT topic construction, and the
+environment handling without a live GraphDB. This module mirrors the style of
+test_recursive_rest_router.py.
+"""
+
+from __future__ import annotations
+
+from graph_db_interface import IRI
+
+from demo.transferunits import seed
+from demo.transferunits.launcher import _strip_graphdb_env
+
+from conftest import requires_graphdb  # noqa: E402
+
+
+class TestIRIMinting:
+    """This class tests the index-derived IRI scheme (ADR 0030)."""
+
+    def test_unit_1_matches_existing_constants(self):
+        """The Unit 1 IRIs must match the frozen constants in examples/seed.py."""
+        assert seed._mint_transfer_unit_iri(1) == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#TransferUnit1"
+        )
+        assert seed._mint_conveyor_belt_iri(1, "left") == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#ConveyorBelt1_left"
+        )
+        assert seed._mint_conveyor_belt_iri(1, "right") == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#ConveyorBelt1_right"
+        )
+        assert seed._mint_light_barrier_iri(1, "front") == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#LightBarrier1_front"
+        )
+        assert seed._mint_light_barrier_iri(1, "back") == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#LightBarrier1_back"
+        )
+
+    def test_unit_2_follows_pattern(self):
+        """The Unit 2 IRIs follow the same pattern with index 2."""
+        assert seed._mint_transfer_unit_iri(2) == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#TransferUnit2"
+        )
+        assert seed._mint_conveyor_belt_iri(2, "left") == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#ConveyorBelt2_left"
+        )
+        assert seed._mint_light_barrier_iri(2, "front") == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#LightBarrier2_front"
+        )
+
+    def test_control_station_is_fixed(self):
+        """The control station IRI stays the same, regardless of N."""
+        assert seed.CONTROL_STATION == IRI(
+            "https://www.sfb1574.kit.edu/ontologies/FactoryInstances#ControlStation1"
+        )
+
+
+class TestMQTTTopics:
+    """This class tests the MQTT topic construction (ADR 0023)."""
+
+    def test_speed_topic(self):
+        """The speed topics follow TransferUnit<n>/ConveyorBelt/<position>/speed."""
+        assert seed._mqtt_topic(1, "ConveyorBelt", "left", "speed") == "TransferUnit1/ConveyorBelt/left/speed"
+        assert seed._mqtt_topic(3, "ConveyorBelt", "right", "speed") == "TransferUnit3/ConveyorBelt/right/speed"
+
+    def test_setpoint_topic(self):
+        """The setpoint topics append _set to the param segment."""
+        assert seed._mqtt_topic(1, "ConveyorBelt", "left", "speed_set") == "TransferUnit1/ConveyorBelt/left/speed_set"
+        assert seed._mqtt_topic(2, "ConveyorBelt", "right", "speed_set") == "TransferUnit2/ConveyorBelt/right/speed_set"
+
+    def test_occupied_topic(self):
+        """The light-barrier occupancy topics follow the same scheme."""
+        assert seed._mqtt_topic(1, "LightBarrier", "front", "occupied") == "TransferUnit1/LightBarrier/front/occupied"
+        assert seed._mqtt_topic(4, "LightBarrier", "back", "occupied") == "TransferUnit4/LightBarrier/back/occupied"
+
+
+class TestEnvironmentHandling:
+    """This class tests that _strip_graphdb_env strips GRAPHDB_* credentials for PLC children (ADR 0029)."""
+
+    def test_strip_graphdb_env_removes_all_graphdb_vars(self):
+        """_strip_graphdb_env removes every GRAPHDB_* key and keeps the rest."""
+        env = {
+            "GRAPHDB_URL": "http://localhost:7200",
+            "GRAPHDB_USERNAME": "admin",
+            "GRAPHDB_PASSWORD": "secret",
+            "GRAPHDB_REPOSITORY": "test",
+            "OTHER_VAR": "kept",
+        }
+        stripped = _strip_graphdb_env(env)
+
+        assert "GRAPHDB_URL" not in stripped
+        assert "GRAPHDB_USERNAME" not in stripped
+        assert "GRAPHDB_PASSWORD" not in stripped
+        assert "GRAPHDB_REPOSITORY" not in stripped
+        assert stripped["OTHER_VAR"] == "kept"
+
+    def test_strip_graphdb_env_handles_empty(self):
+        """_strip_graphdb_env works on an empty dict."""
+        assert _strip_graphdb_env({}) == {}
+
+
+@requires_graphdb
+class TestLiveSeeding:
+    """This class tests seed_factory and factory_is_live with a live GraphDB."""
+
+    def test_seed_factory_creates_units(self, graphdb):
+        """seed_factory creates every requested TransferUnit."""
+        from kapps_ogm import OGM
+
+        ogm = OGM(db=graphdb)
+        seed.seed_factory(graphdb, ogm, units=2)
+
+        for n in (1, 2):
+            result = graphdb.query(
+                f'ASK {{ <{seed._mint_transfer_unit_iri(n)}> a <{seed.TRANSFER_UNIT_CLASS}> }}'
+            )
+            assert result.get("boolean", False), f"TransferUnit{n} should exist"
+
+    def test_factory_is_live_detects_fresh_heartbeat(self, graphdb):
+        """factory_is_live returns a Service that carries a fresh heartbeat."""
+        from datetime import datetime, timezone
+
+        from kapps_ogm import OGM
+        from rdflib import XSD, Literal
+
+        from kapps_semantic_middleware.vocabulary import SVC
+
+        ogm = OGM(db=graphdb)
+        seed.seed_factory(graphdb, ogm, units=1)
+
+        service_iri = IRI("http://example.org/test_service")
+        graphdb.triple_add((service_iri, SVC.isServiceOf, seed._mint_transfer_unit_iri(1)))
+        graphdb.triple_add((service_iri, SVC.address, "http://localhost:8000"))
+        graphdb.triple_add(
+            (
+                service_iri,
+                SVC.lastHeartbeat,
+                Literal(datetime.now(timezone.utc).isoformat(), datatype=XSD.dateTime),
+            )
+        )
+
+        live = seed.factory_is_live(graphdb)
+        assert len(live) >= 1
