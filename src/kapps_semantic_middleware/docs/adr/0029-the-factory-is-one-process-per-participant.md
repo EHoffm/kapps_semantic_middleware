@@ -10,8 +10,8 @@ launcher            fixed port, the only bookmarkable one; seeds the graph, spaw
 ├── middleware-1    SemanticMiddleware               (uvicorn owns the process's only loop)
 ├── plc-2           …
 ├── middleware-2    …
-├── controller      SemanticMiddleware, resource-mode planner
-└── monitor         SemanticMiddleware, multi-resource observer
+├── controller      SemanticMiddleware, northbound consumer, drives units (ADR 0032)
+└── monitor         SemanticMiddleware, northbound consumer, read-only (ADR 0032)
 ```
 
 Nothing is a thread of something else. A PLC really is its own box, and a middleware instance
@@ -142,8 +142,9 @@ It is not an intention that the next edit can quietly undo.
   (scenarios 1 and 2). `demo/` holds runnable multi-process scenarios, each with its own README.
   `examples/scenario3_transferunit.py` and its notebook retire when the factory lands, replaced
   rather than repaired.
-- **ADR 0022 is relied upon, not changed.** Two flavours on one unit already have distinct Service
-  nodes. This ADR is what finally puts them in distinct processes.
+- **ADR 0022 is relied upon, not changed.** Two instances on one unit already have distinct Service
+  nodes. This ADR is what finally puts them in distinct processes. Read the 2026-08-01 amendment
+  below. Scenario 3 no longer places two instances on one unit.
 - Ontology terms are unaffected — no new vocabulary enters, so ADR 0021 is untouched.
 
 Decided on wayfinder ticket #58, under map #57.
@@ -166,6 +167,23 @@ The correction has no effect on milestone 1, which runs one middleware instance 
 hard prerequisite for the monitor. A monitor rooted at a unit's own IRI would mint the unit's
 Service node. It would overwrite `svc:address` with its own address. It would then deregister the
 unit on its own shutdown. Wire #47 as a blocker before ticket #59 is taken up.
+
+---
+
+**Amendment (2026-08-01, wayfinder ticket #59).** The monitor is a **northbound consumer** (ADR
+0032). It wires no connector. It roots at its own `fac:MonitoringStation` individual, and the
+controller does the same at its own control station.
+
+**This supersedes the #47 paragraph above.** No monitor roots at a unit's own IRI in this demo. No
+instance therefore overwrites a unit's `svc:address`. Ticket #47 is not a prerequisite of ticket #59.
+ADR 0022 stays valid for a redundant pair, or for a restart before deregistration.
+
+Two further corrections. `mint_service_iri` **is** implemented now, on branch
+`feat/47-service-iri-per-instance` in commit `0c49041`, so the correction above describes `main` and
+not that branch. And the demo runs **2N+3** processes with no two instances on one resource, so the
+per-instance discriminator changes nothing for scenario 3.
+
+The target topology stays **2N+3**, and the monitor stays in milestone 2.
 
 ---
 

@@ -1,12 +1,12 @@
 """MockTransferUnit — the edge-device PLC stand-in for scenario 3 (#40, ADR 0023).
 
-Stands in for the decentralized PLC controlling one TransferUnit. It speaks only MQTT and
+Stands in for the decentralized PLC that controls one TransferUnit. It speaks only MQTT and
 knows nothing about the middleware, the ontology or the graph: that asymmetry is the point of
 the scenario. Everything semantic happens on the middleware side, and the device is exactly
 as dumb as a real one.
 
-**Publishes 4** — two conveyor speeds and two light-barrier occupancies.
-**Subscribes to 2** — the two conveyor speed setpoints. A setpoint moves the speed the unit
+Publishes 4 — two conveyor speeds and two light-barrier occupancies.
+Subscribes to 2 — the two conveyor speed setpoints. A setpoint moves the speed the unit
 publishes, which is what closes the loop end to end.
 
 Topic scheme (an instance convention, never baked into the classes — ADR 0023)::
@@ -18,7 +18,7 @@ Payloads are raw JSON scalars, matching the default the MQTT binding expects whe
 declares no ``inf:hasMQTTValuePath``.
 
 It publishes **no** ``inf:hasValue`` into the graph, and indeed never touches the graph:
-scenario 3 is a locator (ADR 0024). The graph records where a value lives; the live value
+scenario 3 is a locator (ADR 0024). The graph records where a value lives. The live value
 exists only in the datamodel and over REST.
 """
 
@@ -41,11 +41,11 @@ DEFAULT_PORT = 1883
 class MockTransferUnit:
     """A mock PLC for one TransferUnit, publishing four values and taking two setpoints.
 
-    Publishing is periodic rather than on-change alone, because a middleware that starts
-    after the device must still converge: ``MqttClientConnector`` holds the latest message
-    from its subscription and has nothing to hold until one arrives, so a device that only
-    published on change would leave a freshly started middleware blank until an operator
-    happened to move something.
+    Publishing is periodic rather than on-change alone. A middleware that starts
+    after the device must still converge. ``MqttClientConnector`` holds the latest message
+    from its subscription and has nothing to hold until one arrives. A device that only
+    published on change would leave a freshly started middleware blank. It would stay blank
+    until an operator happened to move something.
     """
 
     def __init__(
@@ -131,7 +131,7 @@ class MockTransferUnit:
     async def __aexit__(self, *exc_info) -> None:
         await self.stop()
 
-    # --- Behaviour ---------------------------------------------------------------- #
+    # --- Behavior ---------------------------------------------------------------- #
 
     async def publish_once(self) -> None:
         """Publish the current value of all four read topics."""
@@ -143,14 +143,14 @@ class MockTransferUnit:
     async def set_occupied(self, position: str, occupied: bool) -> None:
         """Move a light barrier and publish it immediately.
 
-        The barriers are read-only northbound, so this is the test's way in — it is what a
+        The barriers are read-only northbound, so this is the test entry — it is what a
         workpiece passing the sensor would do.
         """
         self.occupied[position] = occupied
         await self._publish(self.occupied_topic(position), occupied)
 
     async def wait_for_setpoint(self, timeout: float = 5.0) -> None:
-        """Block until at least one setpoint has been received. For tests."""
+        """Block until at least one setpoint arrives. For tests."""
         await asyncio.wait_for(self._setpoints_seen.wait(), timeout=timeout)
 
     async def _listen(self) -> None:

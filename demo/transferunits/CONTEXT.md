@@ -6,8 +6,13 @@ This is a runnable multi-process demonstration. It stands up a small factory of 
 controller, and a person drives it from a browser. Each participant is a separate process
 (ADR 0029).
 
-Its decisions live with the Core Middleware ADRs, next to ADR 0029, which established this
-context: `../../src/kapps_semantic_middleware/docs/adr/`.
+Its decisions are **ADR 0029, ADR 0030 and ADR 0032**. They live in the ADR directory of the Core
+Middleware context, in one shared sequence: `../../src/kapps_semantic_middleware/docs/adr/`. The root
+`CONTEXT-MAP.md` records which context each ADR governs.
+
+**Root ADR 0004 governs what belongs here.** Every part of a scenario lives in this directory. The
+library holds generic functions only. The monitor, the controller and the TransferUnit resource logic
+are parts of scenario 3.
 
 ## Language
 
@@ -41,6 +46,6 @@ reaches units through the middleware.
 _Avoid_: device UI, unit page
 
 **Live factory**:
-A state of the graph, not of the host: some Service carries an address and a heartbeat inside the
+A state of the graph, not of the host: a Service carries an address and a heartbeat inside the
 staleness window. The Launcher refuses to clear a live factory (ADR 0030).
 _Avoid_: running factory, active factory

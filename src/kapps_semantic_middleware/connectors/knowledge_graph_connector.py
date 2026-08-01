@@ -1,10 +1,10 @@
 """
 Knowledge Graph Connector for KAPPS Semantic Middleware.
 
-This module wraps kapps_ogm.OGM access behind the aas_middleware Connector protocol,
-as decided in ADR 0006 (knowledge-graph-connector): all middleware graph access goes
-through a Connector abstraction rather than calling ogm.fetch/ogm.commit ad hoc from
-workflow/state registration code.
+This module wraps kapps_ogm.OGM access behind the aas_middleware Connector protocol.
+ADR 0006 (knowledge-graph-connector) decided this. All middleware graph access goes
+through a Connector abstraction. Neither workflow registration code nor state
+registration code calls ogm.fetch or ogm.commit directly.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class KnowledgeGraphConnector:
     A Connector that provides synchronized access to a single entity in the knowledge graph.
 
     This connector wraps OGM fetch/commit operations behind the aas_middleware Connector
-    protocol, enabling uniform treatment of knowledge graph synchronization alongside
+    protocol, which enables uniform treatment of knowledge graph synchronization alongside
     OT device connectors (MQTT, OPC UA, HTTP).
     """
 
@@ -44,10 +44,10 @@ class KnowledgeGraphConnector:
         Args:
             ogm: The OGM instance for graph operations.
             instance_iri: The IRI of the graph entity this connector syncs.
-            class_scope: Passed through to OGM.fetch for selective hydration.
-            class_spec: Passed through to OGM.fetch for class specification.
+            class_scope: Pass through to OGM.fetch for selective hydration.
+            class_spec: Pass through to OGM.fetch for class specification.
             materialize: Whether to materialize the fetched node (default True).
-            named_graph: Named graph to commit changes to (passed to OGM.commit).
+            named_graph: The named graph to commit changes to. Pass to OGM.commit.
         """
         self.ogm = ogm
         self.instance_iri = instance_iri
@@ -58,11 +58,11 @@ class KnowledgeGraphConnector:
 
     async def connect(self) -> None:
         """
-        Establish connection to the knowledge graph backend.
+        Establish a connection to the knowledge graph backend.
 
-        This is a lightweight liveness check. Since the OGM/GraphDB owns its own
-        connection lifecycle and we don't want to invent GraphDB methods that may
-        not exist, this is currently a safe no-op that returns immediately.
+        This is a lightweight liveness check. The OGM and GraphDB own their own
+        connection lifecycle. We do not want to invent GraphDB methods that may not
+        exist. This operation is a no-op. It returns immediately.
 
         Raises:
             ConnectionError: If the backend is not reachable (currently never raised).
@@ -87,7 +87,7 @@ class KnowledgeGraphConnector:
         """
         Fetch the current state of the graph entity.
 
-        Runs OGM.fetch off the event loop via anyio.to_thread.run_sync to avoid
+        Run OGM.fetch off the event loop via anyio.to_thread.run_sync to avoid
         blocking async execution.
 
         Returns:
@@ -107,14 +107,14 @@ class KnowledgeGraphConnector:
             return await anyio.to_thread.run_sync(fetch_call)
         except Exception as exc:
             raise ConnectionError(
-                f"Failed to fetch instance {self.instance_iri} from knowledge graph"
+                f"Failed to fetch instance {self.instance_iri} from the knowledge graph"
             ) from exc
 
     async def consume(self, body: Any) -> None:
         """
         Commit updated data to the graph entity.
 
-        Runs OGM.commit off the event loop via anyio.to_thread.run_sync to avoid
+        Run OGM.commit off the event loop via anyio.to_thread.run_sync to avoid
         blocking async execution.
 
         Args:
@@ -133,5 +133,5 @@ class KnowledgeGraphConnector:
             await anyio.to_thread.run_sync(commit_call)
         except Exception as exc:
             raise ConnectionError(
-                f"Failed to commit instance {self.instance_iri} to knowledge graph"
+                f"Failed to commit instance {self.instance_iri} to the knowledge graph"
             ) from exc

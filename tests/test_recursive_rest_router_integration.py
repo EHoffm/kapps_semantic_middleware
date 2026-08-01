@@ -1,16 +1,17 @@
 """Recursive REST router integration: route generation from the real materialized tree.
 
-``tests/test_recursive_rest_router.py`` proves the router's logic against hand-built pydantic
-models. That cannot prove the router works on the tree the **OGM actually materializes** — the
-shape it walks (which nodes carry an ``id``, what the field annotations really are, how the
-parameter blanknodes come back) is exactly what a hand-built fixture assumes rather than tests.
-This file closes that gap: it generates routes from a real seeded TransferUnit and asserts the
-paths that come out.
+``tests/test_recursive_rest_router.py`` proves the router logic against hand-built pydantic
+models. That cannot prove the router works on the tree the **OGM materializes**. The
+shape it walks is what a hand-built fixture assumes. Test the shape. Which nodes
+carry an ``id``. What the field annotations are. How the parameter blanknodes come
+back. This file closes that gap. Generate routes from a real seeded TransferUnit.
+Assert the paths that come out.
 
-Scope honestly: this covers **route generation from the real materialized tree**. Write semantics
-are covered precisely by the unit tests, where the persistence connector is observable; driving a
-live PUT here would reach connectors that are registered but not connected (no ASGI lifespan has
-run), which would test the framework's failure handling rather than this router.
+Scope honestly: this covers **route generation from the real materialized tree**.
+Write semantics are covered by the unit tests. The persistence connector is
+observable there. Drive a live PUT here. Reach connectors that are registered but
+not connected. No ASGI lifespan ran. Test the framework failure handling. Not this
+router.
 """
 
 from __future__ import annotations
@@ -37,26 +38,25 @@ import seed  # noqa: E402
 def scenario3_ogm(graphdb):
     """A seeded scenario 3 and a fresh OGM over it.
 
-    Function-scoped, and that is load-bearing however tempting the ~80 round trips a seed
-    costs are: several tests here could add interface metadata with a raw SPARQL INSERT to
-    prove a declared term survives the read. Sharing one seed across the module lets those
-    writes leak forward — an envelope path inserted by one test puts a later test's formatter
-    into envelope mode, and it then reads a raw scalar as an unobserved payload.
+    Function-scoped. Load-bearing. Tempt the ~80 round trips a seed costs. Several
+    tests here add interface metadata with a raw SPARQL INSERT. Prove a declared
+    term survives the read. Share one seed across the module. Writes leak forward.
+    An envelope path inserted by one test puts a later test formatter into envelope
+    mode. It reads a raw scalar as an unobserved payload.
     """
     seed.seed_scenario3(graphdb, OGM(db=graphdb))
-    # A *fresh* OGM, deliberately not the one that seeded: the seeding client carries state
-    # from its own writes, and a test that plans a wiring must read the graph the way a
-    # cold middleware would.
+    # A *fresh* OGM. Deliberately not the one that seeded. The seeding client carries
+    # state from its own writes. A test plans a wiring. Read the graph the way a
+    # cold middleware reads it.
     return graphdb, OGM(db=graphdb)
 
 
 def _unit_view() -> ClassScope:
-    """The consumer's view of a TransferUnit: the unit, its components, their parameters.
+    """The consumer view of a TransferUnit: the unit, its components, their parameters.
 
-    Two levels, because a TransferUnit's parameters hang off its belts and barriers. A view
-    belongs to its consumer and is configured here in embedding code rather than in the
-    ontology (ADR 0018) — the ontology cannot know how deep any particular consumer cares to
-    look.
+    Two levels. A TransferUnit parameters hang off its belts and barriers. A view
+    belongs to its consumer. Configure here in embedding code. Not in the ontology
+    (ADR 0018). The ontology cannot know how deep a consumer cares to look.
     """
     return ClassScope.from_property_chains(
         [
@@ -69,9 +69,9 @@ def _unit_view() -> ClassScope:
 def _model_name(mw: SemanticMiddleware, ogm: OGM) -> str:
     """Derive the materialized model class name the way production does.
 
-    ``SemanticMiddleware`` never stores the materialized instance — ``_load_resource_datamodel``
-    fetches it into a local and lets it go. This re-fetches via the wiring's northbound kwargs
-    to get the class name for building expected route paths.
+    ``SemanticMiddleware`` never stores the materialized instance.
+    ``_load_resource_datamodel`` fetches it into a local. Let it go. Re-fetch via
+    the wiring northbound kwargs. Get the class name. Build expected route paths.
     """
     node = ogm.fetch(instance_iri=seed.TRANSFER_UNIT_1, **mw._wiring.northbound_fetch_kwargs())
     return type(node.instance).__name__
@@ -81,16 +81,16 @@ def _model_name(mw: SemanticMiddleware, ogm: OGM) -> str:
 
 @requires_graphdb
 class TestParameterRoutes:
-    """The deep parameter routes exist and have the right verbs per access mode."""
+    """The deep parameter routes exist. Verbs are right per access mode."""
 
     @pytest.mark.asyncio
     async def test_the_left_belts_speed_is_addressable(self, scenario3_ogm):
-        """The deep path for ConveyorBelt/left/hasConveyorSpeed exists and serves GET.
+        """The deep path for ConveyorBelt/left/hasConveyorSpeed exists. Serve GET.
 
-        This is the route the whole ticket exists to create: a parameter nested two levels
-        beneath the root instance, reached through a list of belts, then the speed property
-        on a specific belt. If this path does not exist, the recursive router failed to walk
-        the materialized tree.
+        This is the route the whole ticket exists to create. A parameter nests two
+        levels beneath the root instance. Reach through a list of belts. Then the
+        speed property on a specific belt. This path does not exist. The recursive
+        router failed to walk the materialized tree.
         """
         graphdb, ogm = scenario3_ogm
 
@@ -121,12 +121,13 @@ class TestParameterRoutes:
 
     @pytest.mark.asyncio
     async def test_a_settable_parameter_gets_a_put(self, scenario3_ogm):
-        """The conveyor speed path also serves PUT, because the seeded parameter is readwrite.
+        """The conveyor speed path also serves PUT. The seeded parameter is readwrite.
 
-        Access mode is read from the graph (``inf:accessMode`` on the parameter node), and
-        verb gating is per individual: one belt may be ``readwrite`` while a barrier on the
-        same unit is ``read``. A PUT to a read-only parameter returns 405 because the route
-        does not exist; FastAPI handles that automatically. This asserts the readwrite case.
+        Access mode is read from the graph. ``inf:accessMode`` on the parameter node.
+        Verb gating is per individual. One belt may be ``readwrite``. A barrier on
+        the same unit is ``read``. A PUT to a read-only parameter returns 405. The
+        route does not exist. FastAPI handles that automatically. Assert the
+        readwrite case.
         """
         graphdb, ogm = scenario3_ogm
 
@@ -156,12 +157,12 @@ class TestParameterRoutes:
 
     @pytest.mark.asyncio
     async def test_a_read_only_sensor_gets_no_put(self, scenario3_ogm):
-        """The light barrier path serves GET and **not** PUT.
+        """The light barrier path serves GET. **Not** PUT.
 
-        A write to a light barrier must be a 405 from a route that does not exist. The seeded
-        barrier's ``inf:accessMode`` is ``READ``, so the router must not generate a PUT handler
-        for it. This guards against the regression where access mode was ignored and every
-        parameter became writable.
+        A write to a light barrier must be a 405 from a route that does not exist.
+        The seeded barrier ``inf:accessMode`` is ``READ``. The router must not
+        generate a PUT handler for it. Guard against the regression. Access mode
+        was ignored. Every parameter became writable.
         """
         graphdb, ogm = scenario3_ogm
 
@@ -194,18 +195,18 @@ class TestParameterRoutes:
 
 @requires_graphdb
 class TestRecursionTermination:
-    """The walk stops at parameters and does not descend further."""
+    """The walk stops at parameters. Do not descend further."""
 
     @pytest.mark.asyncio
     async def test_no_route_is_generated_below_a_parameter(self, scenario3_ogm):
         """No generated route path starts with another generated route path plus ``/``.
 
-        Recursion terminates at COMPLEX properties because RDF has no properties-about-properties:
-        metadata about a conveyor speed (its unit, its MQTT topic) is modelled as a blanknode
-        hanging off the parameter property. That blanknode materializes as an ``AnonymousClass``
-        with no ``id`` — not ``Identifiable``, therefore never routable. Treating the blanknode
-        dict as the atomic element makes the id-less problem disappear. This asserts that no
-        route descends below a parameter.
+        Recursion terminates at COMPLEX properties. RDF has no properties-about-properties.
+        Metadata about a conveyor speed is modelled as a blanknode. Hang it off the
+        parameter property. Its unit. Its MQTT topic. That blanknode materializes as
+        an ``AnonymousClass``. No ``id``. Not ``Identifiable``. Never routable. Treat
+        the blanknode dict as the atomic element. The id-less problem disappears. Assert
+        that no route descends below a parameter.
         """
         graphdb, ogm = scenario3_ogm
 
@@ -238,13 +239,14 @@ class TestCoverage:
 
     @pytest.mark.asyncio
     async def test_every_recognised_parameter_is_addressable(self, scenario3_ogm):
-        """The number of generated parameter routes equals the number of bindings, and every
-        binding's ``field_id`` appears as the last segment of some generated path.
+        """The number of generated parameter routes equals the number of bindings. Every
+        binding ``field_id`` appears as the last segment of some generated path.
 
-        This is the claim that the tree walk reaches everything recognition found — the failure
-        mode where the walk silently misses a branch. Recognition happens from the graph; routing
-        happens from the materialized instance. If the instance tree differs from what recognition
-        expects, a parameter could be recognised but unreachable via REST.
+        This is the claim. The tree walk reaches everything recognition found. The
+        failure mode exists. The walk silently misses a branch. Recognition happens
+        from the graph. Routing happens from the materialized instance. The instance
+        tree differs from what recognition expects. A parameter is recognised but
+        unreachable via REST.
         """
         graphdb, ogm = scenario3_ogm
 
@@ -272,11 +274,12 @@ class TestCoverage:
 
     @pytest.mark.asyncio
     async def test_the_top_level_crud_still_exists(self, scenario3_ogm):
-        """The framework's top-level route for the TransferUnit model is still present.
+        """The framework top-level route for the TransferUnit model is still present.
 
-        The local router calls the framework generator before adding its own routes. This guards
-        the "scenarios 1 and 2 are unaffected" criterion at the route level: adding recursive
-        parameter routes must not break the existing top-level CRUD that other consumers rely on.
+        The local router calls the framework generator. Add its own routes after. Guard
+        the "scenarios 1 and 2 are unaffected" criterion at the route level. Add
+        recursive parameter routes. Do not break the existing top-level CRUD. Other
+        consumers rely on it.
         """
         graphdb, ogm = scenario3_ogm
 
@@ -294,11 +297,10 @@ class TestCoverage:
         await mw._load_resource_datamodel()
 
         model_name = _model_name(mw, ogm)
-        # The framework parameterises the item: `/{Model}/{item_id}`, matched at request time.
-        # The parameter routes below it are literal instead, because the verb gate is
-        # per individual (ADR 0017) — so the two levels legitimately encode ids differently,
-        # and a consumer derives the deep paths structurally from a GET rather than building
-        # them by hand (#43).
+        # The framework parameterises the item: `/{Model}/{item_id}`. Match at request time.
+        # The parameter routes below it are literal. The verb gate is per individual
+        # (ADR 0017). The two levels legitimately encode ids differently. A consumer
+        # derives the deep paths structurally from a GET. Not build them by hand (#43).
         top_level_path = f"/{model_name}/{{item_id}}"
 
         assert any(r.path == top_level_path for r in mw.app.routes)

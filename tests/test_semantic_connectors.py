@@ -1,8 +1,8 @@
 """Unit tests for the semantic-connector seam (#40, ADR 0023 / ADR 0028).
 
-Pure logic — no GraphDB, no broker, no network. The seam exists precisely so that a binding
-can be described and reasoned about without a running middleware, and these tests are the
-first consumer of that property.
+Pure logic. No GraphDB, no broker, no network. The seam exists so a binding
+can be described and reasoned about without a running middleware. These tests
+are the first consumer of that property.
 """
 
 from __future__ import annotations
@@ -41,13 +41,13 @@ OTHER_NS = "https://example.org/other#"
 
 
 class _NodeModel(BaseModel):
-    """Stands in for the AnonymousClass the OGM generates for a parameter node."""
+    """Stand in for the AnonymousClass the OGM generates for a parameter node."""
 
     model_config = {"extra": "forbid"}
 
 
 def _node_model():
-    """A node model with the field names the OGM would mangle out of the inf: IRIs."""
+    """A node model with field names the OGM mangles from the inf: IRIs."""
     fields = {
         INF.hasValue.lined: (list, []),
         INF.accessMode.lined: (list, []),
@@ -80,7 +80,7 @@ def _binding(access_mode=AccessMode.READWRITE, value_path=None, set_topic="belt/
 
 
 class TestRegistry:
-    """Resolution is by interface property; the registry knows what each binding reads."""
+    """Resolution is by interface property. The registry knows what each binding reads."""
 
     def test_resolves_a_registered_descriptor(self):
         registry = SemanticConnectorRegistry([MQTTBinding])
@@ -94,7 +94,7 @@ class TestRegistry:
         assert registry.for_interface_property(IRI(f"{OTHER_NS}isSomethingElse")) is None
 
     def test_a_second_interface_class_registers_without_touching_core(self):
-        """#40's acceptance: a stub protocol registers alongside MQTT, no core change."""
+        """#40 acceptance: a stub protocol registers alongside MQTT. No core change."""
 
         class StubBinding:
             connector_cls = object
@@ -121,23 +121,23 @@ class TestRegistry:
         }
 
     def test_no_binding_declares_hasvalue_or_accessmode(self):
-        """Northbound-safe content must survive the projection, or the view is useless."""
+        """Northbound-safe content must survive the projection. The view is useless otherwise."""
         southbound = SemanticConnectorRegistry([MQTTBinding]).declared_connection_metadata()
         assert str(INF.hasValue) not in southbound
         assert str(INF.accessMode) not in southbound
 
 
 class TestDefaultRegistry:
-    """The default registry must be populated by import alone.
+    """The default registry populates by import alone.
 
-    A middleware constructed without an explicit ``connector_registry`` gets the default one.
-    If nothing imported the binding modules, no protocol is recognised, so nothing is wired
-    and every parameter comes up dead. Every test that builds
-    ``SemanticConnectorRegistry([MQTTBinding])`` explicitly is structurally blind to this,
-    which is exactly how it went unnoticed.
+    A middleware constructed without an explicit ``connector_registry`` gets the
+    default one. Nothing imported the binding modules. No protocol is recognised.
+    Nothing is wired. Every parameter comes up dead. Every test builds
+    ``SemanticConnectorRegistry([MQTTBinding])`` explicitly. It is structurally
+    blind to this. This is how it went unnoticed.
 
-    Note the *projection* no longer depends on this being populated — it asks the ontology
-    (ADR 0028) — so an empty registry is now a wiring failure rather than a leak.
+    Note the *projection* no longer depends on this being populated. It asks the
+    ontology (ADR 0028). An empty registry is now a wiring failure. It is not a leak.
     """
 
     def test_importing_the_package_registers_the_builtin_bindings(self):
@@ -169,12 +169,12 @@ class TestDefaultRegistry:
 
 
 class TestDirection:
-    """Direction is the most restrictive of accessMode x flavour; neither may widen."""
+    """Direction is the most restrictive of accessMode x flavour. Neither may widen."""
 
     @pytest.mark.parametrize(
         "access_mode, flavour, expected",
         [
-            # A controller may drive a settable parameter -- the only writable combination.
+            # A controller may drive a settable parameter. This is the only writable combination.
             (AccessMode.READWRITE, SyncDirection.BIDIRECTIONAL, SyncDirection.BIDIRECTIONAL),
             # A monitor cannot drive even a settable one.
             (AccessMode.READWRITE, SyncDirection.TO_PERSISTENCE, SyncDirection.TO_PERSISTENCE),
@@ -208,7 +208,7 @@ class TestDirection:
 
 
 class TestMQTTBindingBuild:
-    """4 parameters -> 4 bindings -> 6 connectors: a settable parameter needs two."""
+    """4 parameters -> 4 bindings -> 6 connectors. A settable parameter needs two."""
 
     def test_settable_parameter_yields_read_and_write_registrations(self):
         registrations = list(MQTTBinding.build(_binding(), SyncDirection.BIDIRECTIONAL))
@@ -221,7 +221,7 @@ class TestMQTTBindingBuild:
             "belt/speed",
             "belt/speed_set",
         ]
-        # Both legs share one broker, and one ConnectionInfo will bind them (ADR 0023).
+        # Both legs share one broker. One ConnectionInfo binds them (ADR 0023).
         assert {r.connector.mqtt_broker_ip for r in registrations} == {"127.0.0.1"}
 
     def test_read_only_direction_yields_only_the_read_leg(self):
@@ -232,7 +232,7 @@ class TestMQTTBindingBuild:
         assert registrations[0].connector.topic == "belt/speed"
 
     def test_readwrite_without_a_set_topic_degrades_to_read_only(self, caplog):
-        """The connector publishes where it subscribes, so no set topic means no write leg."""
+        """The connector publishes where it subscribes. No set topic means no write leg."""
         registrations = list(
             MQTTBinding.build(_binding(set_topic=None), SyncDirection.BIDIRECTIONAL)
         )
@@ -241,7 +241,7 @@ class TestMQTTBindingBuild:
         assert "readwrite but declares no" in caplog.text
 
     def test_missing_broker_binds_nothing_and_says_why(self, caplog):
-        """A silently dead parameter is the failure mode this warning exists to prevent."""
+        """A silently dead parameter is the failure mode this warning prevents."""
         binding = _binding()
         binding.metadata.pop(str(INF.hasMQTTBrokerIP))
 
@@ -271,15 +271,15 @@ class TestMQTTFormatter:
         assert getattr(node, INF.hasValue.lined) == [12.1]
 
     def test_deserialize_preserves_the_static_facets(self):
-        """setattr replaces the whole list, so a bare value would blank the unit in the
-        model that is served over REST (ADR 0023; the graph half is ADR 0027)."""
+        """setattr replaces the whole list. A bare value blanks the unit in the
+        model served over REST (ADR 0023, the graph half is ADR 0027)."""
         [node] = self._formatter().deserialize(12.1)
 
         assert getattr(node, IRI("https://example.org/tu#hasUnit").lined) == ["m/s"]
         assert getattr(node, INF.accessMode.lined) == ["readwrite"]
 
     def test_serialize_produces_a_raw_scalar_payload(self):
-        """consume() publishes its argument raw, so the formatter encodes it."""
+        """consume() publishes its argument raw. The formatter encodes it."""
         formatter = self._formatter()
         [node] = formatter.deserialize(3.5)
 
@@ -291,7 +291,7 @@ class TestMQTTFormatter:
         assert json.loads(formatter.serialize(formatter.deserialize(7.25))) == 7.25
 
     def test_round_trips_a_json_envelope(self):
-        """inf:hasMQTTValuePath is one property, honoured symmetrically (ADR 0023)."""
+        """inf:hasMQTTValuePath is one property. Honour it symmetrically (ADR 0023)."""
         formatter = self._formatter(value_path="payload.speed")
 
         [node] = formatter.deserialize({"payload": {"speed": 4.5}, "ts": 123})
@@ -307,7 +307,7 @@ class TestMQTTFormatter:
         assert "value path" in caplog.text
 
     def test_an_unobserved_parameter_serializes_as_null(self):
-        """Scenario 3 is a locator: a parameter has no value until the device publishes."""
+        """Scenario 3 is a locator. A parameter has no value until the device publishes."""
         formatter = self._formatter()
         [node] = formatter.deserialize(None)
 
@@ -315,11 +315,10 @@ class TestMQTTFormatter:
 
 
 class _FakeOGM:
-    """Answers the two SPARQL shapes `projection` issues, from a declared hierarchy.
+    """Answer the two SPARQL shapes that `projection` issues from a declared hierarchy.
 
-    The projection reads the ontology, so a unit test has to supply one. Rather than mock the
-    functions under test, this mocks the *store* — the queries stay real, and a mistake in one
-    still shows up here.
+    The projection reads the ontology. A unit test supplies one. Mock the
+    *store*. The queries stay real. A mistake in one shows up here.
     """
 
     def __init__(self, markers, declares):
@@ -357,10 +356,10 @@ def _ogm(*markers):
 
 
 class TestProjection:
-    """The northbound view is the pruned spec, and the ontology decides what is pruned."""
+    """The northbound view is the pruned spec. The ontology decides what is pruned."""
 
     class _Spec:
-        """A minimal stand-in with the two attributes the prune walks."""
+        """A minimal stand-in with two attributes the prune walks."""
 
         def __init__(self, properties):
             self.properties = properties
@@ -390,12 +389,12 @@ class TestProjection:
         }
 
     def test_an_unregistered_protocol_is_pruned_too(self):
-        """The regression this whole mechanism exists for.
+        """The regression this whole mechanism prevents.
 
-        A belt reachable over MQTT *and* OPC-UA, with no OPC-UA binding registered anywhere.
-        The old registry-derived prune set removed the MQTT metadata and served the OPC-UA
-        endpoint, because a set built from registered code only knows the protocols we happen
-        to have written. Asking the ontology finds it.
+        A belt reachable over MQTT *and* OPC-UA. No OPC-UA binding registered
+        anywhere. The old registry-derived prune set removed the MQTT metadata.
+        It served the OPC-UA endpoint. A set built from registered code knows
+        only the protocols we wrote. Ask the ontology. Find it.
         """
         spec = self._resource_spec(extra=[OPCUA_ENDPOINT])
 
@@ -408,7 +407,7 @@ class TestProjection:
         assert IRI(OPCUA_ENDPOINT) not in pruned.properties[SPEED].nested.properties
 
     def test_a_property_with_no_protocol_marker_is_untouched(self):
-        """An ordinary object property is not interface-accessible and loses nothing."""
+        """An ordinary object property is not interface-accessible. It loses nothing."""
         pruned = prune_southbound(self._resource_spec(), ogm=_ogm())
 
         assert set(pruned.properties[SPEED].nested.properties) == {
@@ -420,7 +419,7 @@ class TestProjection:
         }
 
     def test_prune_does_not_mutate_the_input_spec(self):
-        """Both shapes are needed at once: the full one wires, the pruned one serves."""
+        """Both shapes are needed at once. The full one wires. The pruned one serves."""
         spec = self._resource_spec()
 
         prune_southbound(spec, ogm=_ogm(MQTT_MARKER))
@@ -428,11 +427,11 @@ class TestProjection:
         assert INF.hasMQTTBrokerIP in spec.properties[SPEED].nested.properties
 
     def test_unreadable_protocol_ranges_refuse_to_serve(self):
-        """A projection that cannot prove a payload safe must not serve it.
+        """A projection proves payload unsafe. Do not serve it.
 
-        The ontology says the parameter is reached over a protocol, but nothing can be read
-        from that protocol's range — a missing TBox, or a range shape we do not understand.
-        Continuing would mean serving fields we have not classified.
+        The ontology says the parameter is reached over a protocol. Nothing can
+        be read from that protocol range. A TBox does not exist. A range shape is
+        not understood. Continue. Serve fields we have not classified.
         """
         blind = _FakeOGM(markers={str(SPEED): [MQTT_MARKER]}, declares={})
 
@@ -443,7 +442,7 @@ class TestProjection:
 
 
 class TestCrossCheck:
-    """The ontology governs; a binding's declaration is compared against it and reported."""
+    """The ontology governs. Compare a binding declaration against it. Report."""
 
     def test_agreement_is_silent(self, caplog):
         cross_check(SPEED, [INF.hasMQTTTopic], [INF.hasMQTTTopic])
@@ -456,7 +455,7 @@ class TestCrossCheck:
         assert "hasMQTTValuePath" in caplog.text
 
     def test_a_term_only_the_binding_declares_is_reported(self, caplog):
-        """The direction that costs debugging time: it will not survive a write."""
+        """The direction costs debugging time. It will not survive a write."""
         cross_check(SPEED, [INF.hasMQTTTopic], [INF.hasMQTTTopic, INF.hasMQTTSetTopic])
 
         assert "hasMQTTSetTopic" in caplog.text
@@ -476,7 +475,7 @@ class TestLeakDetector:
         assert carries_southbound(payload, southbound) == {str(INF.hasMQTTBrokerIP)}
 
     def test_carries_southbound_detects_a_mangled_field_name(self):
-        """A served JSON body carries IRI-mangled field names, not raw IRIs."""
+        """A served JSON body carries IRI-mangled field names. Not raw IRIs."""
         southbound = SemanticConnectorRegistry([MQTTBinding]).declared_connection_metadata()
         payload = {INF.hasMQTTBrokerIP.lined: ["127.0.0.1"]}
 
@@ -491,7 +490,7 @@ class TestLeakDetector:
 
 class TestRegistrationShape:
     def test_registration_is_hashable_and_frozen(self):
-        """Registrations are described, not performed, so they must be safe to pass around."""
+        """Registrations are described. Not performed. They must be safe to pass around."""
         registration = Registration(
             connector=object(),
             sync_direction=SyncDirection.TO_PERSISTENCE,
@@ -502,12 +501,12 @@ class TestRegistrationShape:
 
 
 class TestActivityLogging:
-    """Inbound logs at INFO only on change; outbound logs every setpoint.
+    """Inbound logs at INFO only on change. Outbound logs every setpoint.
 
-    This keeps the activity feed readable: the mock PLC republishes every value
-    every 0.2 s across four topics, so logging each arrival at INFO buries the feed
-    in seconds. Measured on a live run, this suppresses 97.9 % of arrivals — 240
-    messages became 5 INFO lines.
+    Keep the activity feed readable. The mock PLC republishes every value every
+    0.2 s across four topics. Log each arrival at INFO. Bury the feed in
+    seconds. Measure on a live run. Suppress 97.9 % of arrivals. 240 messages
+    became 5 INFO lines.
     """
 
     def _formatter(self, caplog):
@@ -529,7 +528,7 @@ class TestActivityLogging:
         )
 
     def test_a_changed_inbound_value_logs_at_info(self, caplog):
-        """A changed value is news and must appear at INFO."""
+        """A changed value is news. Appear at INFO."""
         formatter = self._formatter(caplog)
 
         formatter.deserialize(1.5)
@@ -540,7 +539,7 @@ class TestActivityLogging:
         assert all("belt/speed" in r.message for r in records)
 
     def test_a_repeated_inbound_value_drops_to_debug(self, caplog):
-        """A periodic republish of an unchanged value is noise; a change is news.
+        """A periodic republish of an unchanged value is noise. A change is news.
 
         Without this split the feed is unreadable within seconds.
         """
@@ -559,7 +558,7 @@ class TestActivityLogging:
     def test_the_first_value_is_always_news_even_if_it_is_none(self, caplog):
         """The _UNSET sentinel ensures the first reading logs even when None.
 
-        Initialising last value to None instead would silently swallow the first
+        Initialize last value to None instead. Silently swallow the first
         reading of a parameter that legitimately starts unobserved.
         """
         formatter = self._formatter(caplog)
@@ -571,14 +570,14 @@ class TestActivityLogging:
         assert "belt/speed" in records[0].message
 
     def test_an_outbound_setpoint_always_logs_at_info(self, caplog):
-        """Outbound logs at INFO every time; the asymmetry with inbound is deliberate.
+        """Outbound logs at INFO every time. The asymmetry with inbound is deliberate.
 
-        A setpoint is always news — something chose to act — so no change-detection
+        A setpoint is always news. Something chose to act. No change-detection
         applies here.
         """
         formatter = self._formatter(caplog)
-        # Building a node to send costs one inbound line; drop it so the count below is
-        # about the setpoints alone rather than about how the fixture got its value.
+        # Build a node to send. Cost one inbound line. Drop it. The count below is
+        # about the setpoints alone. Not about how the fixture got its value.
         [node] = formatter.deserialize(3.5)
         caplog.clear()
 

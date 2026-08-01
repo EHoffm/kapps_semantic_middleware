@@ -1,6 +1,6 @@
 """The control station runner for the factory demo.
 
-Serves the Controller (ticket #43) as a resource-mode middleware.
+It serves the Controller (ticket #43) as a resource-mode middleware.
 Uvicorn runs on the main thread, and owns the process event loop, the same
 way the middleware runner does (ADR 0029). The process reads GRAPHDB_* from
 its environment.
@@ -44,8 +44,8 @@ async def main() -> None:
         default=None,
         help="Resource IRI (default: the seeded control station)",
     )
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind")
-    parser.add_argument("--port", type=int, default=0, help="Port to bind (0 = free)")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="The host to bind")
+    parser.add_argument("--port", type=int, default=0, help="The port to bind (0 = free)")
     args = parser.parse_args()
 
     port = args.port if args.port != 0 else find_free_port()
@@ -65,7 +65,7 @@ async def main() -> None:
         port=port,
     )
 
-    print(f"Control station running on http://{args.host}:{port}/", flush=True)
+    print(f"The control station runs on http://{args.host}:{port}/", flush=True)
     await run_server(args.host, port, controller)
 
 

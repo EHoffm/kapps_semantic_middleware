@@ -1,19 +1,19 @@
-"""Connectors: the knowledge-graph connector and the semantic-connector seam.
+"""This package contains the knowledge-graph connector and the semantic-connector seam.
 
-Importing this package **registers the built-in binding descriptors** on
-``semantic.default_registry``. That import is load-bearing rather than a convenience: a
-middleware constructed without an explicit ``connector_registry`` gets the default one, and an
-empty default registry would mean an empty prune set, which would mean the northbound
-projection removes nothing and every served parameter carries its broker address and topics
-(ADR 0028). The registry is what tells the projection which properties are southbound, so it
-must be populated before anything is served — not merely before anything is wired.
+When you import this package, it **registers the built-in binding descriptors** on
+``semantic.default_registry``. That import is necessary. A middleware
+constructed with no explicit ``connector_registry`` gets the default one. An empty default
+registry means an empty prune set. An empty prune set means the northbound projection removes
+nothing, and every served parameter carries its broker address and topics (ADR 0028). The
+registry tells the projection which properties are southbound. Population before serving is
+the requirement. Population before wiring is not enough on its own.
 """
 
 from kapps_semantic_middleware.connectors.knowledge_graph_connector import (
     KnowledgeGraphConnector,
 )
 
-# Imported for its registration side effect; `MQTTBinding` is re-exported so a caller can
+# Imported for its registration side effect. `MQTTBinding` is re-exported so a caller can
 # reference it directly (to build a restricted registry, or to override it).
 from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding
 from kapps_semantic_middleware.connectors.semantic import (

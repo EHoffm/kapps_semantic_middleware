@@ -269,6 +269,6 @@ def seed_handover(db, ogm) -> None:
     create_possession(ogm, workpiece_iri=HANDOVER_BOX, possessor_iri=HANDOVER_SOURCE)
 
 
-# Resource *class* IRIs (code types instances above with these).
+# Resource *class* IRIs (the code types the instances above with these classes).
 HELLO_RESOURCE_CLASS = IRI(f"{DEMO_NS}DemoResource")
 PLANNER_RESOURCE_CLASS = IRI(f"{DEMO_NS}PlannerResource")

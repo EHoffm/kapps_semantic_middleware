@@ -32,7 +32,7 @@ requires_graphdb = pytest.mark.skipif(
             "GRAPHDB_REPOSITORY",
         )
     ),
-    reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
+    reason="GRAPHDB_* environment variables are not set. The test skips live-GraphDB integration.",
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
@@ -47,7 +47,7 @@ def ogm(graphdb):
 
 @pytest.fixture
 def seeded_graph(ogm):
-    """Seed the graph with scenario 3 data, plus a live Service for the unit.
+    """Seed the graph with scenario 3 data and a live Service for the unit.
 
     seed_scenario3 (map #24) creates the ABox of one TransferUnit only. It writes
     no Service, since no real middleware instance runs against it here. A
@@ -272,7 +272,7 @@ class TestParameterPathDerivation:
 
     @staticmethod
     def _make_tree():
-        """A TransferUnit-shaped tree: two belts, each with a speed parameter."""
+        """The tree represents a TransferUnit. It has two belts. Each belt has a speed parameter."""
         return {
             "id": TestParameterPathDerivation.UNIT_IRI,
             "tu:hasConveyorBelt": [

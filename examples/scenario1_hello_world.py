@@ -2,12 +2,12 @@
 
 A debugger-friendly, plain-Python equivalent of ``scenario1_hello_world.ipynb``. It
 connects to the dedicated GraphDB repository configured through ``GRAPHDB_*`` environment
-variables, clears and seeds it, then drives the complete **operation-coordination**
-lifecycle: registration, graph discovery, dispatch through the event trigger, pull-and-run,
-provenance, and deregistration.
+variables. It clears and seeds that repository. Then it drives the complete
+**operation-coordination** lifecycle: registration, graph discovery, dispatch through the
+event trigger, pull-and-run, provenance, and deregistration.
 
 Run this file from a debugger or as a script. The numbered functions correspond to the
-notebook's steps and provide convenient debugger breakpoints.
+notebook steps and provide convenient debugger breakpoints.
 """
 
 from __future__ import annotations
@@ -101,10 +101,10 @@ def step_2_start_hello_world_middleware(db: GraphDB) -> tuple[SemanticMiddleware
 
 
 def step_3_inspect_registration(db: GraphDB, ogm: OGM) -> Registration:
-    """Verify the Service/Capability/Workflow structure and reachability triples.
+    """Verify the Service/Capability/Workflow and reachability triples.
 
     The Service IRI is *discovered* through ``svc:isServiceOf``, not rebuilt from the resource
-    IRI: it carries an instance discriminator now, and one resource may carry several Services
+    IRI. It carries an instance discriminator now, and one resource may carry several Services
     (ADR 0022). This scenario runs a single instance, so exactly one is reachable.
     """
     print("\nStep 3 — Inspect What Registration Wrote")
@@ -137,9 +137,9 @@ def step_4_dispatch_and_run(
 ) -> tuple[IRI, uvicorn.Server, threading.Thread]:
     """Dispatch an operation through the event trigger, then pull-and-run it.
 
-    A second middleware (a planner) dispatches an operation for the hello capability: it
-    creates the Operation ``queued`` in the graph and rings the hello resource's event
-    trigger over REST — resolving the peer purely through the graph. The hello resource
+    A second middleware (a planner) dispatches an operation for the hello capability. It
+    creates the Operation ``queued`` in the graph. It then rings the event trigger of the
+    hello resource, over REST. This resolves the peer purely through the graph. The hello resource
     then pulls the queued operation and runs the work (ADR 0009/0010).
     """
     print("\nStep 4 — Dispatch through the Event Trigger, then Pull-and-Run")

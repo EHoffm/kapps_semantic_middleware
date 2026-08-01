@@ -1,11 +1,11 @@
 """Scenario 3: a TransferUnit driven over MQTT — the graph wires the connectors.
 
-A debugger-friendly, plain-Python walkthrough of the mock PLC → middleware → controller loop
-(map #24). Where scenario 1 demonstrates operation coordination and scenario 2 direct
-workflow invocation, this one demonstrates **ontology-driven wiring**: nothing in this file
+A debugger-friendly, plain-Python walkthrough of the mock PLC to middleware to controller loop
+(map #24). Scenario 1 demonstrates operation coordination. Scenario 2 demonstrates direct
+workflow invocation. This scenario demonstrates **ontology-driven wiring**: nothing in this file
 names a topic or a broker. The middleware reads the seeded TransferUnit out of the knowledge
-graph, works out that four of its properties are interface-accessible parameters, and builds
-six MQTT connectors pointed at the addresses the graph gave it.
+graph. The middleware works out that four of its properties are interface-accessible parameters.
+The middleware builds six MQTT connectors pointed at the addresses the graph gave it.
 
 The device end is deliberately dumb. ``MockTransferUnit`` speaks MQTT and knows nothing about
 the graph, the ontology, or the middleware — which is the asymmetry the scenario exists to
@@ -14,7 +14,7 @@ show.
 Run from a debugger or as a script. The numbered functions are convenient breakpoints.
 
 Prerequisites: the ``GRAPHDB_*`` environment variables, and an MQTT broker on 127.0.0.1:1883.
-If nothing is listening there, the script starts a pure-Python one for its own lifetime and
+If nothing listens there, the script starts a pure-Python one for its own lifetime and
 says so, so it runs on a bare checkout.
 """
 
@@ -46,11 +46,11 @@ SETPOINT = 2.5
 
 
 def transfer_unit_view() -> ClassScope:
-    """The consumer's view of a TransferUnit: the unit, its components, their parameters.
+    """The consumer view of a TransferUnit: the unit, its components, their parameters.
 
-    Two levels, because a TransferUnit's parameters hang off its belts and barriers. A view
-    belongs to its consumer and is configured here in embedding code rather than in the
-    ontology (ADR 0018) — the ontology cannot know how deep any particular consumer cares to
+    Two levels, because the parameters of a TransferUnit hang off its belts and barriers. A view
+    belongs to its consumer. It is configured here in embedding code rather than in the
+    ontology (ADR 0018). The ontology cannot know how deep any particular consumer cares to
     look.
     """
     return ClassScope.from_property_chains(
@@ -69,7 +69,7 @@ def _broker_is_running() -> bool:
 
 @contextlib.asynccontextmanager
 async def _broker():
-    """Use the broker already on 1883, or run one in-process for this script's lifetime."""
+    """Use the broker already on 1883, or run one in-process for the lifetime of this script."""
     if _broker_is_running():
         print(f"Using the MQTT broker already listening on {BROKER_HOST}:{BROKER_PORT}")
         yield
@@ -112,7 +112,7 @@ def step_1_seed_clean_repository(db: GraphDB) -> None:
     ):
         print(f"  component created: {str(iri).split('#')[-1]}")
 
-    # The metadata is in the graph, and it is the only place any topic is written down.
+    # The metadata is in the graph, and it is the only place where any topic is written down.
     rows = db.query(
         f"SELECT ?t FROM <http://www.ontotext.com/explicit> WHERE {{ ?n <{INF.hasMQTTTopic}> ?t }}",
         convert_bindings=True,
@@ -124,9 +124,9 @@ def step_2_start_the_middleware(db: GraphDB) -> SemanticMiddleware:
     """Construct the TransferUnit middleware — wiring happens here, not on startup.
 
     Passing a ``class_scope`` is what asks for the parameters under it to be wired. The
-    constructor resolves them from the ClassSpec and the graph and registers the connectors
-    immediately, because ``lifespan`` connects everything in the registry *before* running
-    startup callbacks — a connector registered later never connects, and its inbound
+    constructor resolves them from the ClassSpec and the graph. It registers the connectors
+    immediately, because ``lifespan`` connects everything in the registry *before* it runs
+    startup callbacks. A connector registered later never connects, and its inbound
     direction dies silently (ADR 0023).
     """
     print("\nStep 2 — Construct the Middleware (connectors are wired in the constructor)")
@@ -138,8 +138,8 @@ def step_2_start_the_middleware(db: GraphDB) -> SemanticMiddleware:
         host="127.0.0.1",
         port=UNIT_PORT,
         class_scope=transfer_unit_view(),
-        # The controller flavour: reads live values and may drive the device. A monitor
-        # passes connector_sync_direction=TO_PERSISTENCE; an inspector passes
+        # The controller's connector wiring: reads live values and may drive the device. A monitor
+        # passes connector_sync_direction=TO_PERSISTENCE. An inspector passes
         # autoregister_connectors=False (ADR 0022).
         connector_sync_direction=SyncDirection.BIDIRECTIONAL,
     )
@@ -176,9 +176,9 @@ def step_3_inspect_what_recognition_found(unit: SemanticMiddleware) -> None:
 def step_4_show_the_northbound_projection(unit: SemanticMiddleware) -> None:
     """The served payload carries the value, unit and access mode — and no way to reach the device.
 
-    The connection metadata is not filtered out of the data; it is removed from the *shape*
-    before anything is fetched, so the northbound model has no field to carry a broker address
-    in (ADR 0028).
+    The connection metadata is not filtered out of the data. It is removed from the *shape*
+    before anything is fetched. The northbound model therefore has no field to carry a broker
+    address in (ADR 0028).
     """
     print("\nStep 4 — The Northbound Projection")
     plan = unit._wiring
@@ -190,7 +190,7 @@ def step_4_show_the_northbound_projection(unit: SemanticMiddleware) -> None:
 
     belt = served[seed.TU_HAS_CONVEYOR_BELT.lined][0]
     parameter = belt[seed.TU_HAS_CONVEYOR_SPEED.lined][0]
-    print("  a belt's speed parameter, as a peer would receive it:")
+    print("  a belt speed parameter, as a peer would receive it:")
     for field, value in parameter.items():
         print(f"    {field.split('_h_')[-1]:16} = {value}")
 
@@ -201,7 +201,7 @@ def step_4_show_the_northbound_projection(unit: SemanticMiddleware) -> None:
 
 
 async def step_5_read_a_live_value(unit: SemanticMiddleware, plc: TransferUnit) -> None:
-    """The mock PLC publishes a speed; the connector the graph built receives it."""
+    """The mock PLC publishes a speed. The connector the graph built receives it."""
     print("\nStep 5 — A Live Value Flows Device -> Middleware")
     read = _registration(unit, "ConveyorBelt/left/speed", SyncDirection.TO_PERSISTENCE)
 

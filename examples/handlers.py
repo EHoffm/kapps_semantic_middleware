@@ -1,10 +1,10 @@
 """Workflow and state handlers for the example scenarios.
 
 These live in an importable module (rather than inline in the notebooks) for a
-concrete reason: ``@workflow`` runs each function through aas_middleware's
-typeguard-based instrumentation, which reads the function's *module source*. A
+concrete reason: ``@workflow`` runs each function through aas_middleware
+typeguard-based instrumentation, which reads the function *module source*. A
 function defined in a Jupyter cell belongs to ``__main__``, which has no source
-file, so that instrumentation fails. Defining the handlers here gives them a real
+file, so that instrumentation fails. Definition of the handlers here gives them a real
 module source and keeps the shared in-memory door state in one place.
 """
 
@@ -52,7 +52,7 @@ def door_close() -> str:
 
 
 def door_status() -> str:
-    """State getter: the door's current status, served live from memory."""
+    """State getter: the door current status, served live from memory."""
     return _door["status"]
 
 

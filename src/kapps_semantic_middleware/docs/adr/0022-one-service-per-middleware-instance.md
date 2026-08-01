@@ -37,13 +37,12 @@ share a single node, with three consequences, none of them detectable at runtime
 The connector flags (ADR 0020) address none of this: they govern the device side, while this is the
 graph side of the same two-instance scenario.
 
-### Flavours out of the same puzzle pieces
+### Roles and wirings out of the same puzzle pieces
 
 Resource mode is a **library woven into a domain expert's Python package**, not a monolithic server.
-Controller, monitor and inspector are configurations of one library, and a design that permits only
-one instance per resource forces the alternative shape — a single privileged process that everything
-else must go through. Making service identity per-instance is what lets the flavours coexist without
-special-casing any of them.
+The three connector wirings are configurations of one library. A design that permits only one instance
+per resource forces the alternative shape. That shape is a single privileged process, and everything
+else must use it. Per-instance service identity is what lets the configurations coexist.
 
 ### Discoverability without dispatchability
 
@@ -67,6 +66,10 @@ mechanism. Discoverable and un-dispatchable falls out of machinery that already 
   updated.
 - Amends the registration model behind ADR 0004; ADR 0002's Capability-based resolution and ADR
   0007's liveness model are relied upon, not changed.
+- **ADR 0032 removes this decision's motivating example from scenario 3.** The controller and the
+  monitor are consumers, and each roots at its own station resource. No two instances share a resource
+  in the demo. This decision stays valid for a redundant pair, or for a restart before deregistration.
+  Ticket #47 is therefore not a prerequisite of the monitor.
 
 ## The scheme, as implemented
 
