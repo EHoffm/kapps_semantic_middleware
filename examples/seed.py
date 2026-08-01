@@ -24,6 +24,7 @@ from kapps_semantic_middleware.seeding import (
     CORE_GRAPH,
     MES_GRAPH,
     SERVICE_GRAPH,
+    _read_mes_ontology,
     clear_repository,
     load_shared_ontologies,
 )
@@ -236,15 +237,6 @@ def seed_scenario2(db) -> None:
     load_scenario2_ontologies(db)
     create_resource(db, DOOR_RESOURCE, DOOR_RESOURCE_CLASS)
     create_resource(db, MOBILE_ROBOT, MOBILE_ROBOT_RESOURCE_CLASS)
-
-
-def _read_mes_ontology() -> str:
-    """Return the packaged mes: ontology Turtle (handover-ability vocabulary)."""
-    return (
-        resources.files("kapps_semantic_middleware")
-        .joinpath("ontology", "mes.ttl")
-        .read_text(encoding="utf-8")
-    )
 
 
 def seed_handover(db, ogm) -> None:

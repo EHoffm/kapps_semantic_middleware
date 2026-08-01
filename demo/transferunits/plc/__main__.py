@@ -16,19 +16,26 @@ from .transfer_unit import TransferUnit
 from .panel import app, configure_plc
 
 
-def find_free_port() -> int:
-    """Find a free port on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        s.listen(1)
-        return s.getsockname()[1]
+def bind_free_socket(host: str) -> socket.socket:
+    """Bind and listen on an OS-assigned free port, without releasing it.
+
+    Reading back a discovered port, closing the socket, and letting uvicorn bind a new
+    one reopens the allocate-hand-off-bind race ADR 0029 credits self-allocation with
+    removing -- another process could take the port in between. Handing uvicorn this same,
+    still-listening socket instead of a bare port number closes that gap.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, 0))
+    sock.listen(1)
+    return sock
 
 
-async def run_server(host: str, port: int) -> None:
+async def run_server(host: str, port: int, sock: socket.socket | None = None) -> None:
     """Run the FastAPI server using asyncio directly."""
     config = __import__("uvicorn").Config(app=app, host=host, port=port, log_level="warning")
     server = __import__("uvicorn").Server(config=config)
-    await server.serve()
+    await server.serve(sockets=[sock] if sock is not None else None)
 
 
 async def main() -> None:
@@ -40,7 +47,11 @@ async def main() -> None:
     args = parser.parse_args()
 
     # Determine panel port
-    panel_port = args.panel_port if args.panel_port != 0 else find_free_port()
+    if args.panel_port == 0:
+        sock: socket.socket | None = bind_free_socket("127.0.0.1")
+        panel_port = sock.getsockname()[1]
+    else:
+        sock, panel_port = None, args.panel_port
 
     # Create and configure PLC
     plc = TransferUnit(
@@ -53,7 +64,7 @@ async def main() -> None:
     # Start PLC and server concurrently
     async with plc:
         print(f"Panel running on http://127.0.0.1:{panel_port}/", flush=True)
-        await run_server("127.0.0.1", panel_port)
+        await run_server("127.0.0.1", panel_port, sock)
 
 
 if __name__ == "__main__":

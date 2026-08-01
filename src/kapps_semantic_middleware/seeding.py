@@ -12,10 +12,13 @@ from importlib import resources
 
 from graph_db_interface import IRI
 
+from kapps_semantic_middleware.vocabulary import CORE_ONTOLOGY, MES_ONTOLOGY, SVC_ONTOLOGY
 
-CORE_GRAPH = IRI("https://w3id.org/circularfactory/Core")
-SERVICE_GRAPH = IRI("https://w3id.org/circularfactory/Service")
-MES_GRAPH = IRI("https://w3id.org/circularfactory/MES")
+# Named-graph IRIs for seeding — same terms as vocabulary.py's *_ONTOLOGY constants (ADR 0021),
+# aliased here because "graph to load ontology X into" is this module's own concern.
+CORE_GRAPH = CORE_ONTOLOGY
+SERVICE_GRAPH = SVC_ONTOLOGY
+MES_GRAPH = MES_ONTOLOGY
 
 
 def _read_core_ontology() -> str:

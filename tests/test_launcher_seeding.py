@@ -7,10 +7,13 @@ test_recursive_rest_router.py.
 
 from __future__ import annotations
 
+import subprocess
+from unittest.mock import MagicMock
+
 from graph_db_interface import IRI
 
 from demo.transferunits import seed
-from demo.transferunits.launcher import _strip_graphdb_env
+from demo.transferunits.launcher import _spawn_plc, _strip_graphdb_env
 
 from conftest import requires_graphdb  # noqa: E402
 
@@ -97,6 +100,32 @@ class TestEnvironmentHandling:
     def test_strip_graphdb_env_handles_empty(self):
         """_strip_graphdb_env works on an empty dict."""
         assert _strip_graphdb_env({}) == {}
+
+    def test_spawn_plc_passes_stripped_env_to_popen(self, monkeypatch):
+        """_spawn_plc's actual Popen call carries no GRAPHDB_* var (ADR 0029: "asserted, not assumed").
+
+        test_strip_graphdb_env_removes_all_graphdb_vars only exercises the helper in isolation;
+        this asserts the wiring between "helper strips" and "spawn uses the stripped copy".
+        """
+        monkeypatch.setenv("GRAPHDB_URL", "http://localhost:7200")
+        monkeypatch.setenv("GRAPHDB_REPOSITORY", "test")
+
+        captured_env: dict = {}
+
+        def fake_popen(cmdline, *, stdout, stderr, env, text, bufsize):
+            captured_env.update(env)
+            proc = MagicMock()
+            proc.pid = 12345
+            proc.stdout = iter(["Panel running on http://127.0.0.1:54321/\n"])
+            return proc
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+        handle = _spawn_plc(1)
+
+        assert "GRAPHDB_URL" not in captured_env
+        assert "GRAPHDB_REPOSITORY" not in captured_env
+        assert handle.address == "http://127.0.0.1:54321/"
 
 
 @requires_graphdb

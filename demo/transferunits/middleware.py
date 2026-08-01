@@ -22,21 +22,30 @@ from kapps_semantic_middleware import Mode, SemanticMiddleware
 from . import seed
 
 
-def find_free_port() -> int:
-    """Find a free port on the localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        s.listen(1)
-        return s.getsockname()[1]
+def bind_free_socket(host: str) -> socket.socket:
+    """Bind and listen on an OS-assigned free port, without releasing it.
+
+    Reading back a discovered port, closing the socket, and letting uvicorn bind a new
+    one reopens the allocate-hand-off-bind race ADR 0029 credits self-allocation with
+    removing -- another process could take the port in between. Handing uvicorn this same,
+    still-listening socket instead of a bare port number closes that gap.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, 0))
+    sock.listen(1)
+    return sock
 
 
-async def run_server(host: str, port: int, middleware: SemanticMiddleware) -> None:
+async def run_server(
+    host: str, port: int, middleware: SemanticMiddleware, sock: socket.socket | None = None
+) -> None:
     """Run the FastAPI server directly on this loop (uvicorn on the main thread)."""
     config = __import__("uvicorn").Config(
         app=middleware.app, host=host, port=port, log_level="warning"
     )
     server = __import__("uvicorn").Server(config=config)
-    await server.serve()
+    await server.serve(sockets=[sock] if sock is not None else None)
 
 
 async def main() -> None:
@@ -54,7 +63,11 @@ async def main() -> None:
     parser.add_argument("--port", type=int, default=0, help="The port to bind (0 = free)")
     args = parser.parse_args()
 
-    port = args.port if args.port != 0 else find_free_port()
+    if args.port == 0:
+        sock: socket.socket | None = bind_free_socket(args.host)
+        port = sock.getsockname()[1]
+    else:
+        sock, port = None, args.port
 
     resource_iri = (
         args.resource_iri
@@ -85,7 +98,7 @@ async def main() -> None:
     # No broker flag here: the connector reads the broker address (and, per
     # ADR 0031, an absent port means 1883) off the graph at wiring time.
     print(f"Middleware running on http://{args.host}:{port}/", flush=True)
-    await run_server(args.host, port, middleware)
+    await run_server(args.host, port, middleware, sock)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from graph_db_interface import GraphDB
+from kapps_semantic_middleware.vocabulary import SVC
 
 from . import seed
 
@@ -194,8 +195,8 @@ def _poll_service_address(db: GraphDB, resource_iri: str, timeout: float = 15.0)
     while datetime.now(timezone.utc) < deadline:
         sparql = f"""
         SELECT ?addr WHERE {{
-            ?svc <https://w3id.org/circularfactory/Service#isServiceOf> <{resource_iri}> .
-            ?svc <https://w3id.org/circularfactory/Service#address> ?addr .
+            ?svc <{SVC.isServiceOf}> <{resource_iri}> .
+            ?svc <{SVC.address}> ?addr .
         }}
         """
         result = db.query(sparql, convert_bindings=True)
