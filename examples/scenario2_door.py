@@ -27,7 +27,6 @@ from kapps_ogm import OGM
 from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
-    mint_service_iri,
     mint_state_property_iri,
     mint_workflow_iri,
     services_of_resource,
@@ -186,6 +185,7 @@ def step_5_verify_state_not_persisted(db: GraphDB, service_iri: str) -> None:
 def step_6_shutdown(
     db: GraphDB,
     service_iri: str,
+    robot_service: IRI,
     servers: list[tuple[uvicorn.Server, threading.Thread]],
 ) -> None:
     """Stop both servers and verify reachability is removed while individuals remain.
@@ -202,7 +202,6 @@ def step_6_shutdown(
     status_sp = mint_state_property_iri(service_iri, "door_status")
     endpoint_gone = len(list(db.triples_get(sub=status_sp, pred=SVC.endpoint))) == 0
     preserved = db.triple_exists((status_sp, RDF.type, seed.DOOR_STATUS_STATE_CLASS))
-    robot_service = mint_service_iri(IRI(seed.MOBILE_ROBOT))
     robot_address_gone = len(list(db.triples_get(sub=robot_service, pred=SVC.address))) == 0
 
     print(f"  State property endpoint removed:    {endpoint_gone}")
@@ -220,9 +219,10 @@ def main() -> None:
     print(f"Connected to GraphDB repository: {os.getenv('GRAPHDB_REPOSITORY')}")
 
     step_1_seed_clean_repository(db)
-    _door_mw, server, thread = step_2_start_door_middleware(db)
+    door_mw, server, thread = step_2_start_door_middleware(db)
     running: list[tuple[uvicorn.Server, threading.Thread]] = [(server, thread)]
     service_iri: str | None = None
+    robot_service: IRI | None = None
     try:
         service_iri = step_3_inspect_registration(db, door_mw.ogm)
         # The mobile robot: a minimal second middleware. Its scripted logic discovers and
@@ -242,7 +242,9 @@ def main() -> None:
         # door is a peer, and peers are discoverable — the door could ring it back.
         robot_server, robot_thread = _start_server(robot, ROBOT_PORT)
         running.append((robot_server, robot_thread))
-        robot_service = mint_service_iri(IRI(seed.MOBILE_ROBOT))
+        assert robot.service_iri is not None, "the robot is served, so it must have registered"
+        dispatched_robot_service = robot.service_iri
+        robot_service = dispatched_robot_service
         robot_address = list(db.triples_get(sub=robot_service, pred=SVC.address))
         print(f"\nMobile robot served on port {ROBOT_PORT}")
         print(f"  Service registered:   {bool(robot_address)}")
@@ -253,8 +255,8 @@ def main() -> None:
         step_5_verify_state_not_persisted(db, service_iri)
     finally:
         reset_door()
-        if service_iri is not None:
-            step_6_shutdown(db, service_iri, running)
+        if service_iri is not None and robot_service is not None:
+            step_6_shutdown(db, service_iri, robot_service, running)
         else:
             for srv, thr in running:
                 srv.should_exit = True

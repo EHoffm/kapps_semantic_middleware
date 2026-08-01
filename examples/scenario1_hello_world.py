@@ -26,7 +26,6 @@ from kapps_ogm import OGM
 from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
-    mint_service_iri,
     mint_workflow_iri,
     services_of_resource,
 )
@@ -134,7 +133,7 @@ def step_3_inspect_registration(db: GraphDB, ogm: OGM) -> Registration:
 
 def step_4_dispatch_and_run(
     db: GraphDB, hello_mw: SemanticMiddleware, registration: Registration
-) -> tuple[IRI, uvicorn.Server, threading.Thread]:
+) -> tuple[IRI, IRI, uvicorn.Server, threading.Thread]:
     """Dispatch an operation through the event trigger, then pull-and-run it.
 
     A second middleware (a planner) dispatches an operation for the hello capability. It
@@ -157,7 +156,8 @@ def step_4_dispatch_and_run(
     # a label with no runtime consequence, and a reader would reasonably copy that. A client
     # that dispatches work is a peer like any other, and peers are discoverable.
     planner_server, planner_thread = _start_server(planner, PLANNER_PORT)
-    planner_service = mint_service_iri(IRI(seed.PLANNER_RESOURCE))
+    assert planner.service_iri is not None, "the planner is served, so it must have registered"
+    planner_service = planner.service_iri
     planner_address = list(db.triples_get(sub=planner_service, pred=SVC.address))
     print(f"Planner served on port {PLANNER_PORT}")
     print(f"  Service registered:   {bool(planner_address)}")
@@ -176,7 +176,7 @@ def step_4_dispatch_and_run(
     with hello_mw.claim_next() as claimed:
         claimed.result = hello_world()
     print(f"Hello resource pulled and ran the operation -> result: {claimed.result!r}")
-    return op_iri, planner_server, planner_thread
+    return op_iri, planner_service, planner_server, planner_thread
 
 
 def step_5_inspect_decision_provenance(db: GraphDB, operation_iri: IRI) -> None:
@@ -203,6 +203,7 @@ def _stop(server: uvicorn.Server, thread: threading.Thread) -> None:
 def step_6_shutdown_and_verify(
     db: GraphDB,
     registration: Registration,
+    planner_service: IRI,
     servers: list[tuple[uvicorn.Server, threading.Thread]],
 ) -> None:
     """Stop both servers and verify reachability is removed while individuals remain.
@@ -217,7 +218,6 @@ def step_6_shutdown_and_verify(
 
     address_after = list(db.triples_get(sub=registration.service_iri, pred=SVC.address))
     endpoint_after = list(db.triples_get(sub=registration.workflow_iri, pred=SVC.endpoint))
-    planner_service = mint_service_iri(IRI(seed.PLANNER_RESOURCE))
     planner_address_after = list(db.triples_get(sub=planner_service, pred=SVC.address))
 
     print("After shutdown:")
@@ -243,16 +243,18 @@ def main() -> None:
     hello_mw, server, thread = step_2_start_hello_world_middleware(db)
     running: list[tuple[uvicorn.Server, threading.Thread]] = [(server, thread)]
     registration: Registration | None = None
+    planner_service: IRI | None = None
     try:
-        registration = step_3_inspect_registration(db)
-        operation_iri, planner_server, planner_thread = step_4_dispatch_and_run(
+        registration = step_3_inspect_registration(db, hello_mw.ogm)
+        operation_iri, dispatched_planner_service, planner_server, planner_thread = step_4_dispatch_and_run(
             db, hello_mw, registration
         )
+        planner_service = dispatched_planner_service
         running.append((planner_server, planner_thread))
         step_5_inspect_decision_provenance(db, operation_iri)
     finally:
-        if registration is not None:
-            step_6_shutdown_and_verify(db, registration, running)
+        if registration is not None and planner_service is not None:
+            step_6_shutdown_and_verify(db, registration, planner_service, running)
         else:
             for srv, thr in running:
                 _stop(srv, thr)
