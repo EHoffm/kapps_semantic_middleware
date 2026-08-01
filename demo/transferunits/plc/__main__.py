@@ -48,7 +48,7 @@ async def main() -> None:
 
     # Determine panel port
     if args.panel_port == 0:
-        sock: socket.socket | None = bind_free_socket("127.0.0.1")
+        sock = bind_free_socket("127.0.0.1")
         panel_port = sock.getsockname()[1]
     else:
         sock, panel_port = None, args.panel_port

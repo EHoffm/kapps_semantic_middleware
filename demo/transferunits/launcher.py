@@ -1,4 +1,4 @@
-"""Launcher for the multi-process TransferUnit factory.
+"""Launcher machinery for the multi-process TransferUnit factory.
 
 Builds the initial situation (seeds the graph) and spawns every participant
 process: one PLC and panel, and one middleware, per unit, plus one control
@@ -6,21 +6,25 @@ station. Credentials go only to graph-side children. A PLC process never
 receives GRAPHDB_* (ADR 0029). Teardown is ordered: middleware and the
 control station first, so each deregisters while its PLC still answers,
 then the PLCs.
+
+No HTTP route lives here (ADR 0029 / #72) -- the ``Factory`` class only
+seeds, spawns, tracks and stops. ``index.py`` reads its state to serve the
+Launcher's index page.
 """
 
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Deque, List, Optional
 
 from graph_db_interface import GraphDB
 from kapps_semantic_middleware.vocabulary import SVC
@@ -30,16 +34,25 @@ from . import seed
 BROKER_HOST = "127.0.0.1"
 BROKER_PORT = 1883
 
+SLOW_AFTER_SECONDS = 30.0
+WATCH_INTERVAL_SECONDS = 1.0
+
 
 @dataclass
 class ChildHandle:
-    """Tracking information for one spawned child process."""
+    """Tracking information, and live state, for one spawned child process."""
 
+    proc: subprocess.Popen
     pid: int
     kind: str  # "plc", "middleware", or "controller"
     unit_index: Optional[int]  # None for the controller
     cmdline: str
     address: Optional[str] = None
+    source: Optional[str] = None  # "pipe", "graph", "flag", or "env"
+    state: str = "starting"  # starting | slow | live | failed | stopped
+    started_at: float = field(default_factory=time.time)
+    stopping: bool = False
+    output: Deque[str] = field(default_factory=lambda: deque(maxlen=20))
 
 
 def _broker_listening(host: str = BROKER_HOST, port: int = BROKER_PORT) -> bool:
@@ -104,6 +117,9 @@ def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BR
     Its environment carries no GRAPHDB_* variable — enforced by construction,
     not by discipline (ADR 0029). Its panel address arrives as one line on
     stdout, since a PLC holds no graph credentials to register one itself.
+    Blocks until that line arrives or the process exits, so the returned
+    handle already carries its outcome — starting a PLC panel is fast, and a
+    live index page has nothing useful to show before it either way.
     """
     cmdline = [
         sys.executable,
@@ -125,27 +141,32 @@ def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BR
     proc = subprocess.Popen(
         cmdline,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
         env=env,
         text=True,
         bufsize=1,
     )
 
+    handle = ChildHandle(proc=proc, pid=proc.pid, kind="plc", unit_index=unit_index, cmdline=cmdline_str)
+
+    assert proc.stdout is not None
     panel_port = None
     for line in proc.stdout:
+        handle.output.append(line.rstrip("\n"))
         if "Panel running on http://" in line:
             match = _PANEL_PORT_RE.search(line.strip())
             if match:
                 panel_port = int(match.group(1))
             break
 
-    return ChildHandle(
-        pid=proc.pid,
-        kind="plc",
-        unit_index=unit_index,
-        cmdline=cmdline_str,
-        address=f"http://127.0.0.1:{panel_port}/" if panel_port else None,
-    )
+    if panel_port:
+        handle.address = f"http://127.0.0.1:{panel_port}/"
+        handle.source = "pipe"
+        handle.state = "live"
+    elif proc.poll() is not None:
+        handle.state = "failed"
+
+    return handle
 
 
 def _spawn_middleware(unit_index: int) -> ChildHandle:
@@ -164,12 +185,14 @@ def _spawn_middleware(unit_index: int) -> ChildHandle:
 
     proc = subprocess.Popen(
         cmdline,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         env=os.environ.copy(),
+        text=True,
+        bufsize=1,
     )
 
-    return ChildHandle(pid=proc.pid, kind="middleware", unit_index=unit_index, cmdline=cmdline_str)
+    return ChildHandle(proc=proc, pid=proc.pid, kind="middleware", unit_index=unit_index, cmdline=cmdline_str)
 
 
 def _spawn_controller() -> ChildHandle:
@@ -180,34 +203,27 @@ def _spawn_controller() -> ChildHandle:
 
     proc = subprocess.Popen(
         cmdline,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         env=os.environ.copy(),
+        text=True,
+        bufsize=1,
     )
 
-    return ChildHandle(pid=proc.pid, kind="controller", unit_index=None, cmdline=cmdline_str)
+    return ChildHandle(proc=proc, pid=proc.pid, kind="controller", unit_index=None, cmdline=cmdline_str)
 
 
-def _poll_service_address(db: GraphDB, resource_iri: str, timeout: float = 15.0) -> Optional[str]:
-    """Poll the graph for the svc:address of the resource until it appears or the timeout expires."""
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout)
-
-    while datetime.now(timezone.utc) < deadline:
-        sparql = f"""
-        SELECT ?addr WHERE {{
-            ?svc <{SVC.isServiceOf}> <{resource_iri}> .
-            ?svc <{SVC.address}> ?addr .
-        }}
-        """
-        result = db.query(sparql, convert_bindings=True)
-        bindings = (
-            result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
-        )
-        if bindings:
-            return str(bindings[0]["addr"])
-        time.sleep(0.5)
-
-    return None
+def _check_service_address(db: GraphDB, resource_iri: str) -> Optional[str]:
+    """One-shot check of the graph for the svc:address of a resource. No wait, no loop."""
+    sparql = f"""
+    SELECT ?addr WHERE {{
+        ?svc <{SVC.isServiceOf}> <{resource_iri}> .
+        ?svc <{SVC.address}> ?addr .
+    }}
+    """
+    result = db.query(sparql, convert_bindings=True)
+    bindings = result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    return str(bindings[0]["addr"]) if bindings else None
 
 
 def probe_and_seed(units: int, force: bool = False) -> None:
@@ -289,57 +305,151 @@ def stop_factory(children: List[ChildHandle], timeout: float = 5.0) -> None:
         print(f"Killed, past their timeout: {', '.join(stragglers)}", flush=True)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="TransferUnit factory launcher")
-    parser.add_argument("--units", type=int, default=2, help="Number of TransferUnits (default: 2)")
-    parser.add_argument(
-        "--force", action="store_true", help="Clear the graph even if a live factory runs"
-    )
-    args = parser.parse_args()
+class Factory:
+    """Owns every spawned child process and its live state.
 
-    probe_and_seed(args.units, force=args.force)
-    broker_proc = _start_broker()
-    children: List[ChildHandle] = []
+    ``start`` seeds and spawns, once, at launcher startup. After that, a background
+    thread promotes each graph-registered child from ``starting`` to ``live``/``slow``/
+    ``failed`` as its address appears (or doesn't) in the graph, and one reader thread
+    per child drains its output into a bounded ring buffer. ``index.py`` reads
+    ``state_snapshot`` and ``output`` to serve the page; nothing here renders HTML or
+    speaks HTTP.
+    """
 
-    try:
-        for n in range(1, args.units + 1):
-            children.append(_spawn_plc(n))
-            children.append(_spawn_middleware(n))
-        children.append(_spawn_controller())
+    def __init__(self) -> None:
+        self.children: List[ChildHandle] = []
+        self.broker_proc: Optional[subprocess.Popen] = None
+        self._db = GraphDB.from_env()
 
-        db = GraphDB.from_env()
-        for child in children:
-            if child.kind == "middleware":
-                resource_iri = str(seed._mint_transfer_unit_iri(child.unit_index))
-            elif child.kind == "controller":
-                resource_iri = str(seed.CONTROL_STATION)
-            else:
+    def start(self, units: int, force: bool = False) -> None:
+        """Seed the graph and spawn every participant. Blocking; call once at startup."""
+        probe_and_seed(units, force=force)
+        self.broker_proc = _start_broker()
+
+        for n in range(1, units + 1):
+            self.children.append(_spawn_plc(n))
+            self.children.append(_spawn_middleware(n))
+        self.children.append(_spawn_controller())
+
+        for child in self.children:
+            threading.Thread(target=self._drain_output, args=(child,), daemon=True).start()
+
+        threading.Thread(target=self._watch, daemon=True).start()
+
+    def _drain_output(self, child: ChildHandle) -> None:
+        """Keep reading a child's stdout after spawn, so /api/output stays current."""
+        assert child.proc.stdout is not None
+        for line in child.proc.stdout:
+            child.output.append(line.rstrip("\n"))
+
+    def _resource_iri(self, child: ChildHandle) -> Optional[str]:
+        if child.kind == "middleware" and child.unit_index is not None:
+            return str(seed._mint_transfer_unit_iri(child.unit_index))
+        if child.kind == "controller":
+            return str(seed.CONTROL_STATION)
+        return None
+
+    def _watch(self) -> None:
+        """Background loop: repeat _watch_once until the process exits."""
+        while True:
+            time.sleep(WATCH_INTERVAL_SECONDS)
+            self._watch_once()
+
+    def _watch_once(self) -> None:
+        """One pass: promote each graph-registered child starting -> live/slow/failed."""
+        for child in list(self.children):
+            if child.stopping or child.kind == "plc" or child.state in ("live", "failed", "stopped"):
                 continue
-            address = _poll_service_address(db, resource_iri)
+            if child.proc.poll() is not None:
+                child.state = "failed"
+                continue
+            resource_iri = self._resource_iri(child)
+            address = _check_service_address(self._db, resource_iri) if resource_iri else None
             if address:
                 child.address = address
-                label = f"unit {child.unit_index}" if child.unit_index else "control station"
-                print(f"  {child.kind} ({label}) registered at {address}", flush=True)
+                child.source = "graph"
+                child.state = "live"
+            elif time.time() - child.started_at > SLOW_AFTER_SECONDS:
+                child.state = "slow"
 
-        print("\nFactory running. Press Ctrl+C to stop.", flush=True)
+    def _unit_children(self, index: int) -> List[ChildHandle]:
+        return [c for c in self.children if c.unit_index == index]
 
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        # Each spawn occurs inside this try block. A Ctrl+C during seeding,
-        # spawning, or address polling reaches this teardown. This includes
-        # a Ctrl+C during the final wait.
-        print("\nStopping factory...", flush=True)
+    def stop_unit(self, index: int) -> None:
+        """Stop one unit: SIGTERM its middleware first, then its PLC (ADR 0029)."""
+        children = self._unit_children(index)
+        for c in children:
+            c.stopping = True
+
+        graph_children = [c for c in children if c.kind == "middleware"]
+        plc_children = [c for c in children if c.kind == "plc"]
+        _terminate_and_wait(graph_children, timeout=5.0)
+        _terminate_and_wait(plc_children, timeout=5.0)
+
+        for c in children:
+            c.state = "stopped"
+            c.address = None
+            c.source = None
+
+    def stop_all(self) -> None:
+        """Stop the whole factory: every middleware and the control station, then every PLC."""
+        children = list(self.children)
+        for c in children:
+            c.stopping = True
+
         stop_factory(children)
-        if broker_proc is not None:
-            broker_proc.terminate()
+
+        if self.broker_proc is not None:
+            self.broker_proc.terminate()
             try:
-                broker_proc.wait(timeout=2)
+                self.broker_proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                broker_proc.kill()
+                self.broker_proc.kill()
 
+        for c in children:
+            c.state = "stopped"
+            c.address = None
+            c.source = None
 
-if __name__ == "__main__":
-    main()
+    def output(self, index: int, part: str) -> List[str]:
+        """The last 20 lines of output of one process. index=0 selects the controller."""
+        for c in self.children:
+            if part == "controller" and c.kind == "controller":
+                return list(c.output)
+            if c.unit_index == index and c.kind == part:
+                return list(c.output)
+        return []
+
+    def state_snapshot(self, launcher_address: str) -> dict:
+        """Serialize every participant's live state for the index page."""
+        broker_address = f"{BROKER_HOST}:{BROKER_PORT}"
+        if self.broker_proc is None:
+            broker_state = "live" if _broker_listening() else "failed"
+        else:
+            broker_state = "live" if self.broker_proc.poll() is None else "failed"
+
+        def entry(child: ChildHandle) -> dict:
+            return {
+                "state": child.state,
+                "address": child.address,
+                "source": child.source,
+                "pid": child.pid,
+            }
+
+        units: dict = {}
+        controller_entry = None
+        for child in self.children:
+            if child.kind == "controller":
+                controller_entry = entry(child)
+                continue
+            bucket = units.setdefault(child.unit_index, {"index": child.unit_index})
+            bucket[child.kind] = entry(child)
+
+        return {
+            "graph": {"state": "live", "address": os.environ.get("GRAPHDB_URL", ""), "source": "env"},
+            "broker": {"state": broker_state, "address": broker_address, "source": "flag"},
+            "launcher": {"state": "live", "address": launcher_address, "source": "flag"},
+            "controller": controller_entry
+            or {"state": "starting", "address": None, "source": None, "pid": None},
+            "unit": [units[i] for i in sorted(units)],
+        }

@@ -58,7 +58,7 @@ async def main() -> None:
     args = parser.parse_args()
 
     if args.port == 0:
-        sock: socket.socket | None = bind_free_socket(args.host)
+        sock = bind_free_socket(args.host)
         port = sock.getsockname()[1]
     else:
         sock, port = None, args.port
