@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Semantic middleware for industrial data integration, built on aas-middleware"
 readme = "README.md"
 requires-python = ">=3.12"
+authors = [{ name = "Etienne Hoffmann", email = "etienne.hoffmann@kit.edu" }]
+maintainers = [{ name = "Etienne Hoffmann", email = "etienne.hoffmann@kit.edu" }]
 dependencies = [
     "kapps-ogm>=0.1.2",
     "graph-db-interface>=2.0.1",

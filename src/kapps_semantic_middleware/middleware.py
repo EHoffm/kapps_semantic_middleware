@@ -128,6 +128,83 @@ class SemanticMiddleware(Middleware):
     Capability to a Workflow endpoint, which is then invoked over HTTP.
     """
 
+    #: What this product calls itself. The base class names the framework it is built on,
+    #: which is accurate for the framework and wrong for anything hitting *our* address --
+    #: a visitor landing on a middleware instance should be told what it reached. Root
+    #: ADR 0001 allows only bugfixes in sibling repos, so the name is corrected here rather
+    #: than there: the base class stays as it is, and every override lives on this side.
+    APP_TITLE = "semantic-middleware"
+    APP_DESCRIPTION = (
+        "The KAPPS Semantic Middleware. It reads a resource out of a knowledge graph, "
+        "wires its connectors from what it finds there, and serves the resulting datamodel."
+    )
+    APP_WELCOME = "Welcome to semantic middleware!"
+    APP_CONTACT = {"name": "Etienne Hoffmann", "email": "etienne.hoffmann@kit.edu"}
+
+    @staticmethod
+    def _app_version() -> str:
+        """This package's version, not the framework's.
+
+        The base class defaults to ``aas_middleware.VERSION``, so an unmodified header
+        advertises the framework release as though it were this product's. Read from
+        installed metadata rather than hardcoded, so it tracks ``pyproject.toml`` and
+        cannot drift. Falls back when the package is run from a tree that was never
+        installed.
+        """
+        try:
+            from importlib.metadata import version
+
+            return version("kapps-semantic-middleware")
+        except Exception:  # pragma: no cover - only when run uninstalled
+            return "0+unknown"
+
+    def _rebrand(self) -> None:
+        """Name this product rather than the framework, in the OpenAPI metadata.
+
+        Every field the ``/docs`` header renders comes from here: the title (which is also
+        the browser-tab name), the description, the version badge and the contact link. The
+        base class fills all four in for the framework it ships, which is accurate for the
+        framework and wrong on *our* address.
+
+        It has to run before anything touches ``self.app``, because the base class builds
+        the FastAPI object once and caches it, reading the metadata at that moment.
+        """
+        self.set_meta_data(
+            title=self.APP_TITLE,
+            description=self.APP_DESCRIPTION,
+            version=self._app_version(),
+            contact=self.APP_CONTACT,
+        )
+
+    @property
+    def app(self):
+        """The FastAPI app, with its root route renamed.
+
+        The base class registers ``GET /`` inside its own ``app`` property, so the route
+        exists the moment the app does. Starlette matches routes in order and a second
+        registration would never be reached, so the original is removed rather than
+        shadowed. Guarded by a flag: the base property caches, but this one is consulted
+        on every access.
+        """
+        app = Middleware.app.fget(self)  # type: ignore[attr-defined]
+        if not getattr(app, "_kapps_root_replaced", False):
+            app._kapps_root_replaced = True
+            for route in list(app.routes):
+                methods = getattr(route, "methods", None) or set()
+                if getattr(route, "path", None) == "/" and "GET" in methods:
+                    app.routes.remove(route)
+
+            welcome = self.APP_WELCOME
+
+            @app.get("/", response_model=str)
+            async def root() -> str:
+                return welcome
+
+            # The schema is generated lazily and cached. Drop any copy built before the
+            # swap, so /docs and /openapi.json describe the routes that actually exist.
+            app.openapi_schema = None
+        return app
+
     def __init__(
         self,
         *,
@@ -150,6 +227,7 @@ class SemanticMiddleware(Middleware):
         activity_capacity: int = 200,
     ) -> None:
         super().__init__()
+        self._rebrand()
 
         if mode not in modes.ALL:
             raise ValueError(
