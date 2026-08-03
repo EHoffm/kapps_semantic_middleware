@@ -75,9 +75,18 @@ start at 0001, so the prefix is not optional.
 
 ### Core Middleware records
 
-ADR 0001 to ADR 0028, and ADR 0031. Some numbers in that span retired into their successors. These
-records govern the library. They hold for every consumer of the middleware, and not only for the
-demonstration.
+ADR 0001 to ADR 0028, ADR 0031, **ADR 0033** and **ADR 0034**. Some numbers in that span retired into
+their successors. These records govern the library. They hold for every consumer of the middleware,
+and not only for the demonstration.
+
+ADR 0033 is a core record even though the demonstration forced it. It puts a REST binding descriptor
+beside the MQTT one, so the connector seam reaches a peer middleware as readily as a device, and it
+names no domain term.
+
+ADR 0034 is core for the same reason and with a caveat of its own. The demonstration forced it, it
+adds a public constructor argument rather than a domain term, and it deliberately keeps every
+transport implementation out of `src/`. Its shape is provisional until the demo has used it: the
+record says so, and says to revisit it once the factory runs.
 
 ### TransferUnit Factory records
 
@@ -87,6 +96,11 @@ numbered sequence, because they cite the core records constantly.
 A factory record may correct a core record. ADR 0032 does exactly that. It retires the word "flavour"
 from ADR 0020 and from the Core Middleware glossary. Read the core record first, and then read the
 factory record that amends it.
+
+**The correction runs both ways.** ADR 0033 is a core record that amends a factory one: it retires
+ADR 0032's `Role` axis, because the axis rested on consumers having no connector wiring and they now
+have it. Where a core and a factory record disagree, the later record wins whichever context it sits
+in, and it says so explicitly in an amendment section rather than leaving the reader to date them.
 
 ### Example Scenarios records
 

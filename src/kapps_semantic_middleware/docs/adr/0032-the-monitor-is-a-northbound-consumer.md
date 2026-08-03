@@ -12,13 +12,16 @@ to each unit. The monitor does not bind to a unit. The library does not need a n
 parameters are `autoregister_connectors` and `connector_sync_direction` (ADR 0020). This axis stays
 valid and unchanged.
 
-**Role** describes what an instance exists for. Two roles exist:
+**Role** described what an instance exists for. **This axis is retired — see the amendment below.**
+It rested on whether an instance had connector wiring, and ADR 0033 gives every instance connector
+wiring. An instance is now described by its connector's **protocol** and **direction**, and by
+nothing else.
 
-- **Resource middleware** — it abstracts one device. It is device-facing. It has a connector wiring.
-- **Consumer** — it does not abstract a device. It does not have connector wiring. It reads the graph and other
-  middleware instances over REST.
+The text this ADR originally carried, kept for the record:
 
-The controller and the monitor are consumers. The unit middleware is a resource middleware.
+> - **Resource middleware** — it abstracts one device. It is device-facing. It has a connector wiring.
+> - **Consumer** — it does not abstract a device. It does not have connector wiring. It reads the
+>   graph and other middleware instances over REST.
 
 ADR 0020 named three connector wirings `controller`, `monitor` and `inspector`. Those names describe
 products, and the columns beside them describe settings. The code contradicts the names.
@@ -49,11 +52,20 @@ workflows, state properties and interface-accessible parameters.
 **The middleware REST surface.** Content. The monitor reads a live value over the recursive datamodel
 routes of ADR 0017.
 
-The monitor never calls `ogm.fetch` for a value. Two facts decide this. ADR 0024 puts scenario 3 on
-the locator pattern, so the graph holds no `inf:hasValue` literal, and a graph fetch renders empty
-cells. `prune_southbound` also runs inside the instance that serves the data, so an OGM fetch returns
-the unpruned specification. A monitor that fetches from the OGM must repeat the northbound
-projection, or it renders the broker address. ADR 0028 exists to prevent that.
+The monitor never calls `ogm.fetch` **for a value**. Two facts decide this, and ADR 0033 separates
+them, because only one of them is an objection.
+
+ADR 0024 puts scenario 3 on the locator pattern, so the graph holds no `inf:hasValue` literal, and a
+graph fetch renders empty cells. **This is no obstacle to fetching structure** — an empty-slotted
+skeleton is exactly what a connector should fill, and ADR 0033 builds on that.
+
+`prune_southbound` also runs inside the instance that serves the data, so an OGM fetch returns the
+unpruned specification. **This objection is real and stands.** An instance that fetches from the OGM
+must repeat the northbound projection, or it holds the broker address. ADR 0028 exists to prevent
+that. ADR 0033 discharges it by pruning at load time rather than by forbidding the fetch.
+
+So the rule is sharper than the sentence above: **structure may come from the graph and must be
+pruned; a value never comes from the graph.**
 
 ## The middleware is the interface boundary
 
@@ -67,22 +79,33 @@ resources they abstract.
 
 ## Two forms of one invariant
 
-A monitor must never drive a device. The demonstration now needs two separate arguments, because the
-two roles are different.
+A monitor must never drive a device. This ADR originally held that two separate arguments were
+needed, because the two roles were different:
 
-- **A device-facing observer** cannot drive, because it registers no `FROM_PERSISTENCE` connector
-  (ADR 0023).
-- **A consumer** cannot drive, because its own code holds no method that sends a PUT request.
+> - **A device-facing observer** cannot drive, because it registers no `FROM_PERSISTENCE` connector
+>   (ADR 0023).
+> - **A consumer** cannot drive, because its own code holds no method that sends a PUT request.
+>
+> Neither argument covers the other case.
 
-Neither argument covers the other case. A guard test in the demo asserts the second one.
+**ADR 0033 inverts this.** Once the monitor reaches its peers through a connector, the second
+argument stops meaning anything — the PUT lives in the connector, not in the monitor's own code — and
+the first argument covers both cases. The two arguments **unify**: an instance cannot drive when it
+registers no write-direction connector, whether that connector faces a device or a peer.
+
+The guard test follows the wiring rather than the source text. The demo keeps the original
+no-PUT-method assertion as well, because it is cheap and it covers the UI path a connector guard does
+not reach.
 
 ## Consequences
 
 - The monitor lives in `demo/`, per **root ADR 0004**. It duplicates the discovery code rather
   than shares it.
-- The monitor runs in resource mode over a `fac:MonitoringStation` individual, with `class_scope=None`
-  and `autoregister_connectors=False`. It registers its own Service, holds a heartbeat, and inherits
-  the `/activity` feed. It appears in its own dashboard.
+- The monitor runs in resource mode over a `fac:MonitoringStation` individual, with `class_scope=None`.
+  It registers its own Service, holds a heartbeat, and inherits the `/activity` feed. It appears in
+  its own dashboard. *(This ADR originally also said `autoregister_connectors=False`. ADR 0033
+  supersedes that: the monitor autoregisters REST connectors at an observing wiring, which is what
+  makes it structurally unable to drive.)*
 - The seed writes a second `fac:` individual for the monitoring station (ADR 0030).
 - **#47 is no longer a prerequisite of the monitor.** The unit middleware roots at the unit, the
   controller at a control station, and the monitor at a monitoring station. No two instances share a
@@ -97,3 +120,38 @@ Neither argument covers the other case. A guard test in the demo asserts the sec
   axis is "connector wiring".
 
 Resolves wayfinder ticket #59 under map #57.
+
+## Amendment, 2026-08-03, ticket #33
+
+**What ADR 0033 changes here, and why.** This ADR was written for a monitor that reached its peers
+with direct HTTP calls. Ticket #33 asked the same question of the controller and got a different
+answer: a consumer reaches a peer *through a connector*, because a peer middleware's REST surface is
+a protocol like any other. Four claims above do not survive that.
+
+**The role axis is retired.** `Resource middleware` versus `Consumer` rested on whether an instance
+had connector wiring. Every instance now has connector wiring, so the distinction distinguishes
+nothing. An instance is described by its connector's **protocol** and **direction**. The `Role` entry
+leaves `CONTEXT.md`; **Connector wiring** stays and becomes the only axis, extended with protocol.
+The two facts the Role entry carried that were never about roles — that the controller and the
+monitor each root at their own station resource and register a Service, and that neither registers a
+Workflow so an Operation never resolves to one (ADR 0002) — move into the demo's own `CONTEXT.md`,
+where they describe the two stations rather than a role.
+
+**The two non-driving arguments unify** rather than staying separate. See the section above.
+
+**`ogm.fetch` is permitted for structure** and forbidden for values, rather than forbidden outright.
+The locator half of the original objection was never an objection; the projection half is discharged
+by pruning at load time.
+
+**ADR 0020's three wirings become accurate.** This ADR observed that `Controller.__init__` passes
+`autoregister_connectors=False` and therefore sat in the *inspecting* row while being called a
+controller, and it treated that as evidence the names were wrong. Under ADR 0033 the controller is
+genuinely **driving**, the monitor genuinely **observing**, and the unit middleware **driving**. The
+names were right; the code had not caught up.
+
+**What stands unchanged.** Everything this ADR decided about *what the monitor shows* — resources
+first with Services attached, the three row states, a collapsed row carrying no data, expand querying
+`svc:StateProperty` and the subproperties of `inf:isInterfaceAccessibleParameter`, a refresh control
+per attribute, no aggregated `/activity` feed, no operation provenance — is untouched. So is "the
+middleware is the interface boundary", which ADR 0033 leans on rather than revises. So is the finding
+that #47 is not a prerequisite.

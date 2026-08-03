@@ -48,3 +48,26 @@ belongs, and one person makes every promotion decision at that point.
 - A new module in `src/` needs a stated reason. The reason names the second consumer that needs it.
 
 This decision comes from wayfinder ticket #59, under map #57.
+
+## Amendment, 2026-08-03, ticket #33 — what "extraction waits" governs
+
+This ADR says scenario parts live in `demo/`, the core grows only generic features, and **extraction
+waits until the demo runs**. Ticket #33 produced the first case where those clauses point in opposite
+directions, so the boundary between them is now stated rather than inferred.
+
+**The rule.** *"Extraction waits"* governs code that **carries domain knowledge** — code written
+against one scenario, whose generic shape can only be known once the scenario runs. A **protocol
+mechanism the middleware itself defines** carries no domain knowledge at any point in its life. It is
+generic at birth, there is nothing scenario-specific to strip out later, and it enters `src/`
+directly.
+
+**The case that forced it.** ADR 0033's REST connector speaks the ADR 0017 route structure — a
+protocol this middleware defines — and names no domain term. Waiting for the demo to run would teach
+it nothing it does not already know. Two further facts settled it: `connectors/mqtt_binding.py`, its
+exact sibling, is already in the library, and the recognition rule it depends on is a change to
+`connectors/semantic.py`, which is in the library regardless. Splitting a recognition rule from the
+class it recognises is worse than either placement.
+
+**What this does not license.** The controller, the monitor and the mock PLC stay in `demo/`. They
+carry domain knowledge, and the original rule governs them unchanged. A new module in `src/` still
+needs a stated reason, and "it is a protocol mechanism" is now one of the reasons it may state.

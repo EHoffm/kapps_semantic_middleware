@@ -28,23 +28,35 @@ _Avoid_: Middleware instance (that is the Python object; Service is its graph re
 
 **Connector wiring** (of a resource-mode instance):
 A configuration of the one library, not a distinct class. Resource mode is a **library woven into a
-domain expert's Python package**, never a monolithic server. **Driving**: connectors wired
-bidirectionally, drives the device. **Observing**: connectors wired `TO_PERSISTENCE`, reads live
-values, structurally unable to drive the device. **Inspecting**: `autoregister_connectors=False`,
-nothing connected, structure and graph content only. Recognition and the **Projection** run
-identically in all three, so connection metadata never leaks (ADR 0020, ADR 0032).
-_Avoid_: Flavour, retired by ADR 0032. Read-only mode, because a **Mode** is
-`resource`/`server`/`watchdog`, and a connector wiring is a configuration *within* resource mode.
-Monitor mode.
+domain expert's Python package**, never a monolithic server. A wiring is two facts: a **protocol**
+and a **direction**. This is the only axis that describes an instance (ADR 0033).
 
-**Role** (of a middleware instance):
-What the instance exists for. Orthogonal to **Connector wiring** (ADR 0032). A **Resource
-middleware** abstracts one device, is device-facing, and has a connector wiring. A **Consumer**
-abstracts no device and has no connector wiring. A consumer reads the graph, and it reads other
-instances over REST. The **Controller** and the **Monitor** are consumers. Each one roots at its own
-station resource, and each one registers a Service, so both stay discoverable. Neither registers a
-Workflow, so neither holds a Capability, and an Operation never resolves to one (ADR 0002).
-_Avoid_: Flavour for this axis. Monitor flavour.
+*Direction.* **Driving**: connectors wired bidirectionally, writes as well as reads. **Observing**:
+connectors wired `TO_PERSISTENCE`, reads live values, structurally unable to write. **Inspecting**:
+`autoregister_connectors=False`, nothing connected, structure and graph content only.
+
+*Protocol.* **MQTT** reaches a device, recognised on the parameter (`inf:hasMQTTTopic`). **REST**
+reaches another middleware instance over its ADR 0017 routes, recognised through the resource's
+Service (`svc:address`). A peer middleware is a device as far as the seam is concerned.
+
+Recognition and the **Projection** run identically in every combination, so connection metadata never
+leaks (ADR 0020, ADR 0032, ADR 0033).
+_Avoid_: Flavour, retired by ADR 0032. **Role**, retired by ADR 0033 — an instance has no property
+beyond its wiring. Consumer and Resource middleware as *defined* terms; they survive only as informal
+shorthand. Read-only mode, because a **Mode** is `resource`/`server`/`watchdog`, and a connector
+wiring is a configuration *within* resource mode. Monitor mode.
+
+**Transport**:
+The thing a connector dials, as opposed to the connector that dials it — an MQTT broker, and
+nothing else so far. A Parameter's connection metadata *names* a transport by address; it never
+provides one. A middleware may be asked to **ensure** a transport exists at a declared address
+before it registers the first connector aimed there, but it never holds a transport
+implementation: it states the need and the deployment meets it (ADR 0034). So a transport is the
+one part of the southbound path that is neither in the graph nor in this library.
+_Avoid_: Connector (the client this middleware constructs, one per topic — it *uses* a transport);
+Binding / Binding descriptor (the recognition rule that builds connectors, ADR 0023); Broker as a
+general term, since it is one transport and the seam is not MQTT-shaped; Endpoint and Address,
+which are northbound (`svc:address`, the ADR 0017 routes).
 
 **Workflow**:
 An invokable function exposed by a Service, registered with `@mw.workflow(...)`. Realizes
