@@ -71,10 +71,25 @@ async def set_barrier(position: str, request: Request) -> JSONResponse:
     return JSONResponse(get_plc().snapshot())
 
 
+#: Marker in panel.html that the unit graphic is substituted into.
+GRAPHIC_SLOT = "<!--UNIT-GRAPHIC-->"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def panel() -> HTMLResponse:
-    """Serve the panel HTML page."""
+    """Serve the panel HTML page, with the unit graphic inlined.
+
+    The graphic is *inlined* rather than served from ``/static`` and referenced with an
+    ``<img>``: the page's script addresses ids inside it -- it sets each chain's
+    animation-duration and play-state from the published speed, swaps each barrier group
+    between ``clear`` and ``occupied``, and writes live values into the labels. An image
+    in an ``<img>`` has no reachable DOM, so none of that would work.
+
+    It stays its own file rather than being pasted into the template so the drawing can be
+    edited as a drawing, and so the id contract it documents lives beside the shapes.
+    """
     from pathlib import Path
-    template_path = Path(__file__).parent / "templates" / "panel.html"
-    html_content = template_path.read_text(encoding="utf-8")
-    return HTMLResponse(html_content)
+    here = Path(__file__).parent
+    html_content = (here / "templates" / "panel.html").read_text(encoding="utf-8")
+    graphic = (here / "static" / "transferunit.svg").read_text(encoding="utf-8")
+    return HTMLResponse(html_content.replace(GRAPHIC_SLOT, graphic))

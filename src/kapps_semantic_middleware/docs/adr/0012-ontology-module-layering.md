@@ -1,53 +1,17 @@
 # Ontology-module layering: cfc: (Core) / mes: (MES) / svc: (Service)
 
-Vocabulary lives in three layers, each a separate ontology module:
+Vocabulary lives in three layers. Each layer is a separate ontology module:
 
-- **`cfc:` — Core** (`https://w3id.org/circularfactory/Core#`): published, external, superior.
-  `Operation`, `Capability`, `Resource`, `Task`. **Imported and specialized, never modified.**
-- **`mes:` — MES** (newly minted at `https://w3id.org/circularfactory/MES#`, MES =
-  Manufacturing Execution System): a **domain** ontology that `owl:imports` Core and *details it
-  out* with manufacturing-execution functionality — **possession** (`mes:hasPossession` /
-  `mes:isPossessedBy`) and the **handover-ability** tag (`mes:hasHandoverAbility`) with its six
-  enumerated individuals (`Put`/`Receive`/`Pick`/`Release`/`Pass`/`Retrieve`). Domain experts
-  touch this layer.
-- **`svc:` — Service** (`https://w3id.org/circularfactory/Service#`): middleware-to-middleware
-  **reachability and coordination only**, not touched by domain experts. `Service`/`Workflow`/
-  `StateProperty`, `address`/`endpoint`/`lastHeartbeat`, the resolution chain, and the
-  **Operation status + execution provenance** (ADR 0009) — coordination state, so it belongs
-  here and joins the provenance block already present.
+- **`cfc:` — Core** (`https://w3id.org/circularfactory/Core#`): published, external, superior. Includes `Operation`, `Capability`, `Resource`, `Task`. **Imported and specialized, never modified.**
+- **`mes:` — MES** (newly minted at `https://w3id.org/circularfactory/MES#`, MES = Manufacturing Execution System): a **domain** ontology that `owl:imports` Core and *details it out* with manufacturing-execution functionality. Functionality includes **possession** (`mes:hasPossession` / `mes:isPossessedBy`) and the **handover-ability** tag (`mes:hasHandoverAbility`) with its six enumerated individuals (`Put`/`Receive`/`Pick`/`Release`/`Pass`/`Retrieve`). Domain experts touch this layer.
+- **`svc:` — Service** (`https://w3id.org/circularfactory/Service#`): middleware-to-middleware **reachability and coordination only**. Domain experts do not touch this layer. Includes `Service`/`Workflow`/`StateProperty`, `address`/`endpoint`/`lastHeartbeat`, the resolution chain, and the **Operation status + execution provenance** (ADR 0009). This is coordination state, so it belongs here. It joins the provenance block already present.
 
-The governing principle: **Core is superior. `mes:` extends Core by importing and specializing
-it. Whatever is in Core is imported and extended, not duplicated or re-homed.** `mes:` and
-`svc:` are sibling modules that both import Core — `mes:` domain-facing, `svc:` middleware-facing.
+The governing principle: **Core is superior.** `mes:` extends Core. It imports Core and specializes it. Whatever is in Core is imported and extended. Nothing is duplicated or re-homed. `mes:` and `svc:` form sibling modules. Both import Core. `mes:` is domain-facing. `svc:` is middleware-facing.
 
-**Why**: an earlier framing (the #7 resolution) parked possession and handover vocabulary in
-`svc:`, which conflates domain manufacturing-execution concepts with pure reachability and drags
-domain experts into the middleware's communication vocabulary. Separating them keeps `svc:`
-domain-free and gives MES functionality a home the project owns and can evolve. Possession was
-placed in `mes:` rather than `cfc:` deliberately: treating "which resource holds a workpiece" as
-Core material-flow state would mean **extending the published Core** — the single ontology
-engineer's domain, shared across ~20 domain engineers — for what is really execution state. The
-project keeps Core minimal and stable and mints its own module instead.
+**Why**: an earlier framing (the #7 resolution) parked possession and handover vocabulary in `svc:`. This conflates domain manufacturing-execution concepts with pure reachability. This drags domain experts into the middleware's communication vocabulary. Separating them keeps `svc:` domain-free. Separating them gives MES functionality a home the project owns and can evolve. Possession was placed in `mes:` rather than `cfc:` deliberately. Treating "which resource holds a workpiece" as Core material-flow state would mean **extending the published Core**. The single ontology engineer's domain is shared across ~20 domain engineers. Extending Core is for what is really execution state. The project keeps Core minimal and stable. The project mints its own module instead.
 
-**Consequence**: the handover primitive (ADR 0011) reads/writes the `mes:` predicates while its
-*code* stays generic core-middleware machinery — vocabulary is MES-layered, mechanism is core.
-Operation-status and provenance vocabulary lives in `svc:` (the folded status machine of ADR
-0009). Re-authoring the use-case ontologies onto this stack (UC possession/handover → `mes:`,
-Service/Workflow → `svc:`, Operation/Capability → `cfc:`) is downstream in
-[#6](https://github.com/EHoffm/kapps_semantic_middleware/issues/6)/Map #2. **Alignment of `mes:`
-with an external manufacturing-execution ontology standard is deferred** to a `/research`
-sub-task and does not block minting our own module (same posture as importing Core). Promotes the
-resolution of [#10](https://github.com/EHoffm/kapps_semantic_middleware/issues/10).
+**Consequence**: the handover primitive (ADR 0011) reads/writes the `mes:` predicates. Its *code* stays generic core-middleware machinery. Vocabulary is MES-layered. Mechanism is core. Operation-status and provenance vocabulary lives in `svc:` (the folded status machine of ADR 0009). Re-authoring the use-case ontologies onto this stack is downstream in [#6](https://github.com/EHoffm/kapps_semantic_middleware/issues/6)/Map #2. UC possession/handover maps to `mes:`. Service/Workflow maps to `svc:`. Operation/Capability maps to `cfc:`. **Alignment of `mes:` with an external manufacturing-execution standard is deferred** to a `/research` sub-task. This does not block minting our own module. This posture matches importing Core. Promotes the resolution of [#10](https://github.com/EHoffm/kapps_semantic_middleware/issues/10).
 
 ---
 
-**Amendment (2026-07-21, #18 — possession is Core, not `mes:`).** The reasoning above ("possession
-placed in `mes:` rather than `cfc:` … would mean extending the published Core") rested on a false
-premise: **Core 0.9.0 already defines possession** — `cfc:PossessionState` with `cfc:hasPossessor`
-/ `cfc:hasPossessedWorkpiece` (and an optional `cfc:hasPossessionInterval`), including a Workpiece
-cardinality-1 on `hasPossessedWorkpiece`. So possession is **not** re-minted in `mes:`. The project
-uses Core's possession model directly (ADR 0011 amended), and `mes:hasPossession` /
-`mes:isPossessedBy` are removed. The `mes:` module now carries **only handover ability**
-(`mes:hasHandoverAbility` + the six enumerated individuals + `mes:complements`) — which Core
-genuinely lacks — so the "mint our own module for what Core does not have" principle still holds,
-with a smaller `mes:` surface. Lesson: check the published Core before minting a domain term.
+**Amendment (2026-07-21, #18 — possession is Core, not `mes:`).** The reasoning above ("possession placed in `mes:` rather than `cfc:` … would mean extending the published Core") rested on a false premise. **Core 0.9.0 already defines possession**. Core defines `cfc:PossessionState` with `cfc:hasPossessor` / `cfc:hasPossessedWorkpiece`. Core includes an optional `cfc:hasPossessionInterval`. Core includes a Workpiece cardinality-1 on `hasPossessedWorkpiece`. Possession is **not** re-minted in `mes:`. The project uses Core's possession model directly (ADR 0011 amended). `mes:hasPossession` / `mes:isPossessedBy` are removed. The `mes:` module now carries **only handover ability**. This includes `mes:hasHandoverAbility` and the six enumerated individuals and `mes:complements`. Core genuinely lacks handover ability. The "mint our own module for what Core does not have" principle still holds. The `mes:` surface is smaller. Lesson: check the published Core before minting a domain term.

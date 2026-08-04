@@ -1,0 +1,190 @@
+"""Offline tests for Factory's state machine (#72): starting -> live/slow/failed/stopped.
+
+No live GraphDB and no real subprocess here -- every ChildHandle wraps a MagicMock standing
+in for a subprocess.Popen, and the graph lookup is monkeypatched.
+"""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock
+
+import demo.transferunits.launcher as launcher
+from demo.transferunits.launcher import ChildHandle, Factory
+
+
+def make_factory() -> Factory:
+    """A Factory with no real GraphDB connection -- __init__ is bypassed."""
+    factory = Factory.__new__(Factory)
+    factory.children = []
+    factory.broker_proc = None
+    factory._db = MagicMock()
+    return factory
+
+
+def make_child(kind: str, unit_index, state: str = "starting", alive: bool = True) -> ChildHandle:
+    proc = MagicMock()
+    proc.poll.return_value = None if alive else 1
+    return ChildHandle(proc=proc, pid=4242, kind=kind, unit_index=unit_index, cmdline="x", state=state)
+
+
+class TestWatchOnce:
+    """This class tests Factory._watch_once's starting -> live/slow/failed promotion."""
+
+    def test_middleware_promotes_to_live_when_address_appears(self, monkeypatch):
+        factory = make_factory()
+        child = make_child("middleware", 1)
+        factory.children = [child]
+
+        monkeypatch.setattr(launcher, "_check_service_address", lambda db, iri: "http://127.0.0.1:9001/")
+
+        factory._watch_once()
+
+        assert child.state == "live"
+        assert child.address == "http://127.0.0.1:9001/"
+        assert child.source == "graph"
+
+    def test_controller_stays_starting_with_no_address_yet(self, monkeypatch):
+        factory = make_factory()
+        child = make_child("controller", None)
+        factory.children = [child]
+
+        monkeypatch.setattr(launcher, "_check_service_address", lambda db, iri: None)
+
+        factory._watch_once()
+
+        assert child.state == "starting"
+        assert child.address is None
+
+    def test_promotes_to_slow_after_the_threshold(self, monkeypatch):
+        factory = make_factory()
+        child = make_child("middleware", 1)
+        child.started_at = time.time() - launcher.SLOW_AFTER_SECONDS - 1
+
+        factory.children = [child]
+        monkeypatch.setattr(launcher, "_check_service_address", lambda db, iri: None)
+
+        factory._watch_once()
+
+        assert child.state == "slow"
+
+    def test_process_exit_before_address_is_failed(self, monkeypatch):
+        factory = make_factory()
+        child = make_child("middleware", 1, alive=False)
+        factory.children = [child]
+
+        monkeypatch.setattr(launcher, "_check_service_address", lambda db, iri: None)
+
+        factory._watch_once()
+
+        assert child.state == "failed"
+
+    def test_plc_is_never_touched_by_watch(self, monkeypatch):
+        """PLC state is resolved synchronously at spawn time (_spawn_plc), not by _watch_once."""
+        factory = make_factory()
+        child = make_child("plc", 1, state="starting")
+        factory.children = [child]
+
+        def boom(db, iri):
+            raise AssertionError("the graph should never be queried for a PLC")
+
+        monkeypatch.setattr(launcher, "_check_service_address", boom)
+
+        factory._watch_once()
+
+        assert child.state == "starting"
+
+    def test_stopping_child_is_skipped(self, monkeypatch):
+        factory = make_factory()
+        child = make_child("middleware", 1, alive=False)
+        child.stopping = True
+        factory.children = [child]
+
+        monkeypatch.setattr(launcher, "_check_service_address", lambda db, iri: None)
+
+        factory._watch_once()
+
+        assert child.state == "starting"
+
+
+class TestStopUnit:
+    """This class tests Factory.stop_unit and stop_all mark the right children stopped."""
+
+    def test_stop_unit_marks_only_that_units_children(self, monkeypatch):
+        factory = make_factory()
+        unit1_mw = make_child("middleware", 1, state="live")
+        unit1_mw.address = "http://127.0.0.1:9001/"
+        unit1_plc = make_child("plc", 1, state="live")
+        unit2_mw = make_child("middleware", 2, state="live")
+        factory.children = [unit1_mw, unit1_plc, unit2_mw]
+
+        monkeypatch.setattr(launcher, "_terminate_and_wait", lambda handles, timeout: [])
+
+        factory.stop_unit(1)
+
+        assert unit1_mw.state == "stopped" and unit1_mw.address is None
+        assert unit1_plc.state == "stopped"
+        assert unit2_mw.state == "live", "stopping unit 1 must not touch unit 2"
+
+    def test_stop_all_marks_every_child_stopped(self, monkeypatch):
+        factory = make_factory()
+        children = [make_child("middleware", 1), make_child("plc", 1), make_child("controller", None)]
+        factory.children = children
+
+        monkeypatch.setattr(launcher, "stop_factory", lambda children, timeout=5.0: None)
+
+        factory.stop_all()
+
+        assert all(c.state == "stopped" for c in children)
+
+
+class TestStateSnapshot:
+    """This class tests Factory.state_snapshot's shape: graph/broker/launcher/controller/unit."""
+
+    def test_snapshot_groups_children_by_unit(self):
+        factory = make_factory()
+        mw1 = make_child("middleware", 1, state="live")
+        plc1 = make_child("plc", 1, state="live")
+        ctrl = make_child("controller", None, state="live")
+        factory.children = [mw1, plc1, ctrl]
+
+        snapshot = factory.state_snapshot("http://127.0.0.1:8080/")
+
+        assert snapshot["launcher"]["address"] == "http://127.0.0.1:8080/"
+        assert snapshot["controller"]["state"] == "live"
+        assert snapshot["unit"] == [
+            {
+                "index": 1,
+                "middleware": {"state": "live", "address": None, "source": None, "pid": 4242},
+                "plc": {"state": "live", "address": None, "source": None, "pid": 4242},
+            }
+        ]
+
+    def test_snapshot_with_no_children_has_a_placeholder_controller(self):
+        factory = make_factory()
+
+        snapshot = factory.state_snapshot("http://127.0.0.1:8080/")
+
+        assert snapshot["controller"]["state"] == "starting"
+        assert snapshot["unit"] == []
+
+
+class TestOutput:
+    """This class tests Factory.output selects the right child, including the controller."""
+
+    def test_output_selects_by_unit_index_and_kind(self):
+        factory = make_factory()
+        mw1 = make_child("middleware", 1)
+        mw1.output.extend(["line one", "line two"])
+        factory.children = [mw1]
+
+        assert factory.output(1, "middleware") == ["line one", "line two"]
+        assert factory.output(1, "plc") == []
+
+    def test_output_index_zero_selects_the_controller(self):
+        factory = make_factory()
+        ctrl = make_child("controller", None)
+        ctrl.output.append("controller booted")
+        factory.children = [ctrl]
+
+        assert factory.output(0, "controller") == ["controller booted"]

@@ -1,14 +1,15 @@
 """Scenario 2 end-to-end integration test against a live GraphDB.
 
-A decentrally-controlled door and a minimal mobile robot, demonstrating the **direct
-workflow/state invocation** interaction pattern — as opposed to scenario 1's asynchronous
-operation-coordination model. The door exposes two workflows (open, close) and one live
-StateProperty (status); it has **no operation queue** — its workflow endpoints execute
-synchronously when invoked directly. The mobile robot is a minimal consumer: it discovers
-the door purely through the knowledge graph (a SPARQL query), reads the door's live state
-via the StateProperty GET endpoint, and — finding it closed — invokes the door's open
-workflow directly by hitting the execute URL it found in the graph. This is NOT operation
-based. Skipped when GRAPHDB_* env vars are absent (see conftest).
+A decentrally-controlled door and a minimal mobile robot. Demonstrate **direct invocation**
+of workflows and state. Contrast with scenario 1
+asynchronous operation-coordination model. The door exposes two workflows (open,
+close) and one live StateProperty (status). It has **no operation queue**. Its
+workflow endpoints execute synchronously when invoked directly. The mobile robot
+is a minimal consumer. It discovers the door purely through the knowledge graph.
+A SPARQL query. It reads the door live state via the StateProperty GET endpoint.
+It finds it closed. Invoke the door open workflow directly. Hit the execute URL
+it found in the graph. This is NOT operation based. Skip when GRAPHDB_* env vars
+are absent (see conftest).
 """
 
 from __future__ import annotations
@@ -63,9 +64,9 @@ def _start_server(mw: SemanticMiddleware, port: int) -> tuple[uvicorn.Server, th
 
 
 def _discover_door_endpoints(ogm, door_resource_iri) -> tuple[str, str]:
-    """Discover the door's live-state GET endpoint and its open-workflow execute URL purely
-    from the knowledge graph, via a SPARQL query (no hardcoded URLs). This is how the robot
-    finds the door it is approaching and the reachable endpoints it needs."""
+    """Discover the door live status GET endpoint and its open-workflow execute URL purely
+    from the knowledge graph. Via a SPARQL query (no hardcoded URLs). This is how the robot
+    finds the door it approaches and the reachable endpoints it needs."""
     sparql = f"""
     SELECT ?status_url ?open_url WHERE {{
         ?svc <{SVC.isServiceOf}> <{door_resource_iri}> .
@@ -79,18 +80,18 @@ def _discover_door_endpoints(ogm, door_resource_iri) -> tuple[str, str]:
     """
     result = ogm.db.query(sparql, convert_bindings=True)
     bindings = result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
-    assert bindings, "robot could not discover the door's endpoints in the knowledge graph"
+    assert bindings, "robot could not discover the door endpoints in the knowledge graph"
     b = bindings[0]
     return str(b["status_url"]), str(b["open_url"])
 
 
 def robot_pass_through_door(ogm, door_resource_iri) -> list[str]:
-    """The mobile robot's scripted behaviour.
+    """The mobile robot scripted behavior.
 
-    Deterministic, one step after another; the only forks are "is the door open?" and, if
-    not, "open it". Discovery is via SPARQL against the knowledge graph; the live state and
-    the workflow invocation are direct REST calls to the endpoints found in the graph. Not
-    operation based, no queue.
+    Deterministic. One step after another. The only forks are "is the door open?"
+    and, if not, "open it". Discovery is via SPARQL against the knowledge graph.
+    The live state and the workflow invocation are direct REST calls. Endpoints
+    found in the graph. Not operation based. No queue.
     """
     log: list[str] = []
     status_url, open_url = _discover_door_endpoints(ogm, door_resource_iri)
@@ -110,8 +111,8 @@ def robot_pass_through_door(ogm, door_resource_iri) -> list[str]:
     ensure_open("approach")
     log.append("drove through the door")
     # (Story, not implemented: drop the load somewhere behind the door, then drive back.)
-    # On return the door auto-closes after 30 s, but the drop-off took less time, so it is
-    # still open and the robot drives straight back through without further interaction.
+    # On return the door auto-closes after 30 s. The drop-off took less time. It is
+    # still open. The robot drives straight back through without further interaction.
     ensure_open("return")
     log.append("drove back through the door")
     return log
@@ -123,13 +124,8 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
     reset_door()
     seed.seed_scenario2(db)
 
-    service_iri = seed.DOOR_RESOURCE + "_service"
-    open_wf = mint_workflow_iri(service_iri, "door_open")
-    close_wf = mint_workflow_iri(service_iri, "door_close")
-    status_sp = mint_state_property_iri(service_iri, "door_status")
-
     # The door middleware: two workflows + one live StateProperty. This scenario does not
-    # use the operation queue at all — the workflow endpoints execute synchronously.
+    # use the operation queue at all. The workflow endpoints execute synchronously.
     door = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.DOOR_RESOURCE,
@@ -151,9 +147,16 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         state_property_class=seed.DOOR_STATUS_STATE_CLASS,
     )(door_status)
 
+    # Per-instance since ADR 0022. Everything hanging off the Service is derived from the
+    # instance own IRI. Not reconstructed from the resource.
+    service_iri = door.service_iri
+    open_wf = mint_workflow_iri(service_iri, "door_open")
+    close_wf = mint_workflow_iri(service_iri, "door_close")
+    status_sp = mint_state_property_iri(service_iri, "door_status")
+
     server, thread = _start_server(door, DOOR_PORT)
     try:
-        # Registration wrote the door's structure + reachability (instance-owned inverse
+        # Registration wrote the door structure + reachability (instance-owned inverse
         # side, ADR 0006): both workflows and the state property, with reachable endpoints.
         assert db.triple_exists((open_wf, SVC.isWorkflowOf, service_iri))
         assert db.triple_exists((close_wf, SVC.isWorkflowOf, service_iri))
@@ -164,9 +167,9 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         assert db.triples_get(sub=status_sp, pred=SVC.endpoint)
         assert db.triples_get(sub=open_wf, pred=SVC.endpoint)
 
-        # The mobile robot: a minimal second middleware. It exposes nothing itself; its
+        # The mobile robot: a minimal second middleware. It exposes nothing itself. Its
         # scripted domain logic discovers and drives the door purely through the graph +
-        # REST, using its own OGM connection for the SPARQL discovery.
+        # REST. Use its own OGM connection for the SPARQL discovery.
         robot = SemanticMiddleware(
             mode="resource",
             resource_iri=seed.MOBILE_ROBOT,
@@ -177,18 +180,18 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         )
         log = robot_pass_through_door(robot.ogm, seed.DOOR_RESOURCE)
 
-        # The robot found the door closed on approach, invoked the open workflow directly,
-        # drove through, and on return found it still open (auto-close had not fired).
+        # The robot found the door closed on approach. Invoked the open workflow directly.
+        # Drove through. On return found it still open (auto-close had not fired).
         assert "discovered door endpoints via SPARQL" in log
         assert "drove through the door" in log
         assert "drove back through the door" in log
-        # The open workflow was invoked exactly once — only on approach, not on return.
+        # The open workflow was invoked exactly once. Only on approach. Not on return.
         assert sum("invoked open workflow" in line for line in log) == 1
         # The direct workflow invocation actually opened the door (live state).
         assert door_status() == "opened"
 
-        # The live status value is NEVER written to the graph: the state property carries
-        # only structural triples + endpoint; no "opened"/"closed" literal appears on it.
+        # The live status value is NEVER written to the graph. The state property carries
+        # only structural triples + endpoint. No "opened"/"closed" literal appears on it.
         for _, _, obj in db.triples_get(sub=status_sp):
             assert str(obj) not in ("opened", "closed"), "state value must not be persisted"
     finally:
@@ -197,6 +200,6 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         thread.join(timeout=20)
         time.sleep(0.5)
 
-    # Deregistration removed the state property endpoint too, but kept the individual.
+    # Deregistration removed the state property endpoint too. Kept the individual.
     assert not db.triples_get(sub=status_sp, pred=SVC.endpoint)
     assert db.triple_exists((status_sp, RDF.type, seed.DOOR_STATUS_STATE_CLASS))

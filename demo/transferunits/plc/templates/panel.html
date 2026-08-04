@@ -41,29 +41,9 @@
      directly. Nothing here talks to the middleware.</p>
 
   <div class="card">
-    <svg class="graphic" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
-      <!-- Conveyor belts -->
-      <g id="belt-left-motion" style="animation: none;">
-        <rect x="50" y="100" width="120" height="40" fill="#ddd" stroke="#999"/>
-        <text id="label-left" x="110" y="125" text-anchor="middle" font-size="12">left  0.00 m/s</text>
-      </g>
-      <g id="belt-right-motion" style="animation: none;">
-        <rect x="230" y="100" width="120" height="40" fill="#ddd" stroke="#999"/>
-        <text id="label-right" x="290" y="125" text-anchor="middle" font-size="12">right  0.00 m/s</text>
-      </g>
-      <!-- Light barriers -->
-      <g id="barrier-front" class="clear">
-        <circle cx="100" cy="200" r="15" fill="#4a4"/>
-        <text id="label-front" x="100" y="230" text-anchor="middle" font-size="12">front  clear</text>
-        <circle id="barrier-front-hit" cx="100" cy="200" r="8" fill="#b23b00" style="display:none;"/>
-      </g>
-      <g id="barrier-back" class="clear">
-        <circle cx="300" cy="200" r="15" fill="#4a4"/>
-        <text id="label-back" x="300" y="230" text-anchor="middle" font-size="12">back  clear</text>
-        <circle id="barrier-back-hit" cx="300" cy="200" r="8" fill="#b23b00" style="display:none;"/>
-      </g>
-    </svg>
-  </div>
+    <!-- panel.py substitutes static/transferunit.svg here. Inlined, not <img>: the script
+         below drives ids inside the drawing. -->
+    <!--UNIT-GRAPHIC--></div>
 
   <div class="card belts">
     <div class="belt" data-pos="left">

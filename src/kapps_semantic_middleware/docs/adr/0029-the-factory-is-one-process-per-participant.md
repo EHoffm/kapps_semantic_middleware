@@ -10,8 +10,8 @@ launcher            fixed port, the only bookmarkable one; seeds the graph, spaw
 ├── middleware-1    SemanticMiddleware               (uvicorn owns the process's only loop)
 ├── plc-2           …
 ├── middleware-2    …
-├── controller      SemanticMiddleware, resource-mode planner
-└── monitor         SemanticMiddleware, multi-resource observer
+├── controller      SemanticMiddleware, northbound consumer, drives units (ADR 0032)
+└── monitor         SemanticMiddleware, northbound consumer, read-only (ADR 0032)
 ```
 
 Nothing is a thread of something else. A PLC really is its own box, and a middleware instance
@@ -142,8 +142,9 @@ It is not an intention that the next edit can quietly undo.
   (scenarios 1 and 2). `demo/` holds runnable multi-process scenarios, each with its own README.
   `examples/scenario3_transferunit.py` and its notebook retire when the factory lands, replaced
   rather than repaired.
-- **ADR 0022 is relied upon, not changed.** Two flavours on one unit already have distinct Service
-  nodes. This ADR is what finally puts them in distinct processes.
+- **ADR 0022 is relied upon, not changed.** Two instances on one unit already have distinct Service
+  nodes. This ADR is what finally puts them in distinct processes. Read the 2026-08-01 amendment
+  below. Scenario 3 no longer places two instances on one unit.
 - Ontology terms are unaffected — no new vocabulary enters, so ADR 0021 is untouched.
 
 Decided on wayfinder ticket #58, under map #57.
@@ -169,6 +170,23 @@ unit on its own shutdown. Wire #47 as a blocker before ticket #59 is taken up.
 
 ---
 
+**Amendment (2026-08-01, wayfinder ticket #59).** The monitor is a **northbound consumer** (ADR
+0032). It wires no connector. It roots at its own `fac:MonitoringStation` individual, and the
+controller does the same at its own control station.
+
+**This supersedes the #47 paragraph above.** No monitor roots at a unit's own IRI in this demo. No
+instance therefore overwrites a unit's `svc:address`. Ticket #47 is not a prerequisite of ticket #59.
+ADR 0022 stays valid for a redundant pair, or for a restart before deregistration.
+
+Two further corrections. `mint_service_iri` **is** implemented now, on branch
+`feat/47-service-iri-per-instance` in commit `0c49041`, so the correction above describes `main` and
+not that branch. And the demo runs **2N+3** processes with no two instances on one resource, so the
+per-instance discriminator changes nothing for scenario 3.
+
+The target topology stays **2N+3**, and the monitor stays in milestone 2.
+
+---
+
 **Amendment (2026-07-31, ticket #60).** The directory is **`demo/transferunits/`**, a real Python
 package. This ADR wrote the directory as `demo/TransferUnits/` and the runner as
 `python -m demo.transferunits.middleware`. Those two disagree, and a directory named
@@ -188,3 +206,65 @@ defers. The claim stays true, and it stays unproven until #35 lands.
 **The broker.** This ADR states that the PLC is the only process that must be told where the
 broker is. That stays correct. ADR 0031 adds a port to the broker metadata the middleware reads
 from the graph, so the launcher can put a broker on a free port.
+
+## Amendment, 2026-08-03, ticket #33 — the broker is per unit, and the launcher does not own it
+
+**One broker per TransferUnit, brought up by that unit's own middleware.** The launcher loses
+`_start_broker` and the `BROKER_HOST` / `BROKER_PORT` constants.
+
+**Why.** This ADR made the launcher plain infrastructure that manufactures the initial situation a
+real factory would already have, and a shared broker looked like exactly that. But it left the
+TransferUnit Expert's job incomplete: they configure a middleware to offer their product's
+connectivity, and then depend on somebody else having arranged transport. A middleware that brings up
+the transport it needs closes that gap, and the expert's job becomes self-contained.
+
+**Per unit rather than one shared.** A single middleware-owned broker would make whichever unit won
+the race a silent single point of failure — `stop_unit` on that one unit would take MQTT down for the
+whole factory. Per-unit brokers remove the race entirely, because each aims at its own
+graph-declared address. `stop_unit` then stops one unit's PLC, middleware and broker together, which
+is correct: they are one machine. A local broker per machine or per cell is an ordinary edge pattern,
+so this costs no realism.
+
+**And it makes the demonstration's claim exact.** With a shared broker, units share transport
+infrastructure. With one broker each, **the knowledge graph is the only artifact any two units have
+in common** — which is what the whole demonstration asserts. That claim was approximately true
+before and is literally true now.
+
+**Three consequences.**
+
+1. **#69 becomes a hard prerequisite of milestone 1.** The middleware reads its broker off the
+   parameter binding and today can read only `inf:hasMQTTBrokerIP`. Without
+   `inf:hasMQTTBrokerPort`, per-unit brokers are not merely inconvenient — they are impossible.
+   #69's justification changes from "the launcher can use a free port" to "units cannot have their
+   own brokers at all".
+2. **The broker port derives from the unit index**, written by the seed. Two readers need it: the
+   middleware through the graph, and the PLC through `--broker-port`. Dynamic allocation cannot serve
+   both, since the PLC holds no graph credentials. This extends ADR 0030's rule — the unit index is
+   the identity, and every IRI and every topic derives from it — one property further.
+3. **The PLC retries its broker connection.** `TransferUnit.start` connects once and dies on refusal,
+   which was safe only because the launcher started the broker before spawning anything. It now
+   retries with a backoff. That is device concern, not middleware concern, so tier 1 stays free of
+   any middleware knowledge — and a real machine has to survive a broker restart anyway.
+
+**Teardown is unchanged.** The launcher still SIGTERMs middleware first so each deregisters while its
+PLC still answers. A unit's broker dies with its unit.
+
+### Sharpened 2026-08-03, ticket #69 — *when* the middleware brings it up
+
+The amendment above says the unit's own middleware brings up its broker. It does not say when, and
+"at startup" turns out to be the wrong answer.
+
+**At the first MQTT connector registration, and not before.** Etienne, 2026-08-03: *"every
+transferunit instance in the demo gets its own mqtt broker, that gets initiated on the first time a
+mqttconnector gets registered. For every attribute that will get a connector after that, the
+middlewares then existing broker serves as a broker."* Transport comes up because the graph said the
+unit needs it, which is the same discovery-driven story ADR 0033 tells about everything else the
+expert's middleware does. An instance with no MQTT parameter brings up nothing.
+
+**ADR 0034 records the mechanism**: the binding calls an `ensure_transport(host, port)` hook, once
+per distinct declared address, and the demo's unit runner fills it with an in-process `amqtt` broker
+on a daemon thread. The library holds no broker implementation. The thread is what makes *a unit's
+broker dies with its unit* true with no teardown code at all.
+
+**The port is `18830 + unit_index`** (ADR 0030 as amended). The launcher hands each PLC its own
+`--broker-port`; `_start_broker`, `BROKER_HOST` and `BROKER_PORT` leave `launcher.py`.

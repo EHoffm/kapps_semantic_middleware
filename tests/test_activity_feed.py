@@ -1,23 +1,26 @@
-"""Activity feed tests for the middleware's machinery.
+"""Activity feed tests for the middleware machinery.
 
-This module guards the live activity feed implementation against regressions that would break
-the browser-readable log stream. The feed is the only window into the middleware's internal
-wiring decisions, message traffic, registrations, and heartbeats — not resource state, which
-belongs to the monitor. Keeping these apart is a decided boundary; mixing them would conflate
-the middleware's health with the device's status, making debugging ambiguous.
+This module guards the live activity feed implementation against regressions.
+Regressions would break the browser-readable log stream. The feed is the only
+window into the middleware internal wiring decisions, message traffic,
+registrations, and heartbeats. Resource state belongs to the monitor. Keep
+these apart. This boundary is decided. Mix them and you conflate the middleware
+health with the device status. Debugging becomes ambiguous.
 
-**Why these tests exist:** The feed's thread-safety depends on numbering and insertion happening
-under one lock. A refactor that split them — taking a sequence number in one critical section,
-inserting in another — would allow two threads to interleave and leave the deque ordered
-``[.., 6, 5]``, causing the stream to re-send record 6 on every poll forever. The concurrency
-test pins this race.
+**Why these tests exist:** The feed thread-safety depends on numbering and
+insertion under one lock. A refactor split them. It took a sequence number in
+one critical section. It inserted in another. Two threads interleave. The deque
+orders ``[.., 6, 5]``. The stream re-sends record 6 on every poll forever. The
+concurrency test pins this race.
 
-**Critical hazard:** The SSE endpoint is an endless generator. TestClient runs it on a blocking
-portal that waits for the generator to finish, so iterating through it hangs the test run
-forever, even if you break and exit the with block. Tests drive the generator directly instead.
-The HTML page at /activity is safe to fetch with TestClient.
+**Critical hazard:** The SSE endpoint is an endless generator. TestClient runs
+it on a blocking portal. The portal waits for the generator to finish. Iterate
+through it and the test run hangs forever. Break and exit the with block. The
+hang persists. Tests drive the generator directly instead. The HTML page at
+/activity is safe to fetch with TestClient.
 
-No GraphDB, no broker, no network: these tests run entirely offline under ``pytest -m 'not live'``.
+No GraphDB, no broker, no network. These tests run entirely offline under
+``pytest -m 'not live'``.
 """
 
 from __future__ import annotations
@@ -42,12 +45,13 @@ from kapps_semantic_middleware.activity import (
 
 @pytest.fixture(autouse=True)
 def _snapshot_logger_state():
-    """Snapshot and restore the package logger's handlers and level around each test.
+    """Snapshot and restore the package logger handlers and level around each test.
 
-    These tests attach handlers to the real ``kapps_semantic_middleware`` logger. Without
-    cleanup, a handler leaked from one test would persist into others, corrupting their
-    assertions about what reaches the feed. This fixture captures the logger's state before
-    each test and restores it after, preventing cross-test contamination.
+    These tests attach handlers to the real ``kapps_semantic_middleware`` logger.
+    Cleanup prevents leaks. A handler leaked from one test persists into others.
+    Leaks corrupt assertions about what reaches the feed. This fixture captures
+    the logger state before each test. It restores the state after each test.
+    Cross-test contamination stops.
     """
     logger = logging.getLogger("kapps_semantic_middleware")
     original_level = logger.level
@@ -64,11 +68,11 @@ def _snapshot_logger_state():
 
 
 class _FakeMiddleware:
-    """The whole surface `enable_activity_feed` touches: an app, and somewhere to put the feed.
+    """The whole surface `enable_activity_feed` touches: an app and a feed location.
 
-    Module scope rather than nested in the fixture, because a test that enables the feed twice
-    needs two independent instances. Constructing a real `SemanticMiddleware` would drag in a
-    graph connection for no gain here.
+    Module scope, not nested in the fixture. A test enables the feed twice. It
+    needs two independent instances. Construct a real `SemanticMiddleware`. A
+    graph connection loads for no gain here.
     """
 
     def __init__(self) -> None:
@@ -78,21 +82,22 @@ class _FakeMiddleware:
 
 @pytest.fixture
 def fake_middleware():
-    """One fake middleware, for the tests that only need a single instance."""
+    """One fake middleware for tests that need a single instance."""
     return _FakeMiddleware()
 
 
 async def _drive_stream(mw: Any, n: int, timeout: float = 3.0) -> list[str]:
-    """Drive the SSE generator directly, returning n chunks.
+    """Drive the SSE generator directly and return n chunks.
 
-    **Critical:** Do NOT use TestClient for /activity/stream. The endpoint returns an
-    endless StreamingResponse generator. TestClient runs it on a blocking portal that
-    waits for the generator to finish, so iterating through it hangs the test run
-    forever, even if you break and exit the with block.
+    **Critical:** Do NOT use TestClient for /activity/stream. The endpoint
+    returns an endless StreamingResponse generator. TestClient runs it on a
+    blocking portal. The portal waits for the generator to finish. Iterate
+    through it. The test run hangs forever. Break and exit the with block. The
+    hang persists.
 
-    This helper bypasses TestClient entirely: it finds the route, calls the endpoint
-    directly with a fake request that never disconnects, and pulls n chunks from the
-    async iterator with a timeout.
+    This helper bypasses TestClient. It finds the route. It calls the endpoint
+    directly with a fake request. The request never disconnects. It pulls n
+    chunks from the async iterator with a timeout.
     """
     route = next(r for r in mw.app.routes if getattr(r, "path", "") == "/activity/stream")
 
@@ -108,15 +113,15 @@ async def _drive_stream(mw: Any, n: int, timeout: float = 3.0) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Buffer behaviour tests (ActivityFeed directly, no HTTP)
+# Buffer behavior tests (ActivityFeed directly, no HTTP)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_the_buffer_is_bounded():
-    """The rolling window drops oldest records when capacity is exceeded.
+    """The rolling window drops oldest records when capacity exceeds.
 
-    With capacity 3, appending 5 records leaves only the last 3 in the buffer.
-    This prevents unbounded memory growth during long-running middleware sessions.
+    Capacity is 3. Append 5 records. Only the last 3 remain in the buffer.
+    Memory growth stops during long-running middleware sessions.
     """
     feed = ActivityFeed(capacity=3)
     
@@ -129,13 +134,13 @@ def test_the_buffer_is_bounded():
 
 
 def test_sequence_numbers_survive_concurrent_appends():
-    """Numbering and insertion happen under one lock, preventing interleaving races.
+    """Numbering and insertion happen under one lock. Interleaving races stop.
 
-    If numbering occurred in one critical section and insertion in another, two threads
-    could interleave to leave the deque ordered ``[.., 6, 5]``. The stream would then
-    report last_seq as 5 and re-send record 6 on every poll indefinitely. This test
-    spawns multiple threads appending simultaneously and verifies sequence numbers are
-    strictly increasing in deque order with no duplicates.
+    Numbering occurs in one critical section. Insertion occurs in another. Two
+    threads interleave. The deque orders ``[.., 6, 5]``. The stream reports
+    last_seq as 5. Record 6 re-sends on every poll indefinitely. This test
+    spawns multiple threads. They append simultaneously. Sequence numbers are
+    strictly increasing in deque order. No duplicates exist.
     """
     feed = ActivityFeed(capacity=500)
     threads = []
@@ -162,8 +167,8 @@ def test_sequence_numbers_survive_concurrent_appends():
 def test_since_returns_only_what_is_new():
     """since(last_seq) filters to records newer than the given sequence.
 
-    After capturing the current state, appending one more record should return exactly
-    that new record when querying since the previous last sequence number.
+    Capture the current state. Append one more record. Query since the previous
+    last sequence number. Exactly that new record returns.
     """
     feed = ActivityFeed(capacity=10)
     
@@ -186,10 +191,11 @@ def test_since_returns_only_what_is_new():
 
 
 def test_a_log_record_reaches_the_feed(fake_middleware):
-    """Attaching at the package root catches child loggers with a single handler.
+    """Attach at the package root. Catch child loggers with a single handler.
 
-    Logging through kapps_semantic_middleware.connectors.mqtt_binding (a child logger)
-    should land in the feed, confirming the one-attach-at-package-root design works.
+    Log through kapps_semantic_middleware.connectors.mqtt_binding. This is a
+    child logger. The feed receives the message. The one-attach-at-package-root
+    design works.
     """
     enable_activity_feed(fake_middleware)
     
@@ -203,15 +209,16 @@ def test_a_log_record_reaches_the_feed(fake_middleware):
 
 
 def test_enabling_lowers_the_package_logger_to_the_handler_level():
-    """Enabling the feed lowers `kapps_semantic_middleware`'s level so records exist at all.
+    """Enable the feed. Lower `kapps_semantic_middleware` level so records exist.
 
-    The package logger is NOTSET by default, so its effective level is root's — WARNING unless
-    the host application configured logging. A handler cannot rescue a record that was never
-    emitted, so a version that touched only the handler's level left the feed permanently and
-    *silently* empty in the default case: page loads, stream connects, nothing appears.
+    The package logger is NOTSET by default. Its effective level is root level.
+    Root defaults to WARNING unless the host application configured logging. A handler
+    cannot rescue a record that was never emitted. A version touched only the
+    handler level. The feed stayed permanently and silently empty in the default
+    case. Page loads. Stream connects. Nothing appears.
 
-    The widening is the documented cost of opting in, and it widens only — an application that
-    has already asked for something more verbose keeps it.
+    The widening is the documented cost of opt-in. It widens only. An
+    application asked for something more verbose. It keeps that level.
     """
     package_logger = logging.getLogger("kapps_semantic_middleware")
     package_logger.setLevel(logging.WARNING)
@@ -227,10 +234,10 @@ def test_enabling_lowers_the_package_logger_to_the_handler_level():
     assert package_logger.level == logging.DEBUG
 
 def test_enabling_twice_does_not_attach_a_second_handler(fake_middleware):
-    """Calling enable_activity_feed twice returns the existing feed without adding handlers.
+    """Call enable_activity_feed twice. Return the existing feed. Add no handlers.
 
-    Multiple calls should be idempotent — same feed object back, exactly one handler
-    attached to the package logger.
+    Multiple calls are idempotent. Same feed object returns. Exactly one handler
+    attaches to the package logger.
     """
     logger = logging.getLogger("kapps_semantic_middleware")
     original_handler_count = len(logger.handlers)
@@ -243,12 +250,13 @@ def test_enabling_twice_does_not_attach_a_second_handler(fake_middleware):
 
 
 def test_the_handler_never_raises_into_logging():
-    """A handler that throws takes down whatever was logging — so this one swallows and reports.
+    """A handler throws. It takes down whatever logged. This one swallows and reports.
 
-    Driven against `_ActivityHandler.emit` directly rather than through `logger.info(...)`,
-    and deliberately: pytest installs its own `LogCaptureHandler` whose `handleError` *re-raises*
-    so bad log calls surface during tests. Going through the logging chain would therefore
-    measure pytest's handler, not this one.
+    Drive against `_ActivityHandler.emit` directly. Do not go through
+    `logger.info(...)`. Do this deliberately. Pytest installs its own
+    `LogCaptureHandler`. Its `handleError` re-raises. Bad log calls surface
+    during tests. Go through the logging chain. Measure pytest handler, not this
+    one.
     """
     feed = ActivityFeed(capacity=4)
     handler = _ActivityHandler(feed)
@@ -277,11 +285,12 @@ def test_the_handler_never_raises_into_logging():
 
 
 def test_the_page_is_self_contained(fake_middleware):
-    """The HTML page contains no external references that would break on isolated networks.
+    """The HTML page contains no external references. Isolated networks work.
 
-    GET /activity returns 200 with body containing no http:// or https:// URLs,
-    no <script src= tags, and no <link rel="stylesheet"> tags. Everything must be
-    inline so the page renders on a factory network without CDN access.
+    GET /activity returns 200. Body contains no http:// URLs. Body contains no
+    https:// URLs. No <script src= tags exist. No <link rel="stylesheet"> tags
+    exist. Everything is inline. The page renders on a factory network. CDN
+    access is not required.
     """
     enable_activity_feed(fake_middleware)
     
@@ -299,10 +308,10 @@ def test_the_page_is_self_contained(fake_middleware):
 
 @pytest.mark.asyncio
 async def test_the_stream_replays_the_backlog(fake_middleware):
-    """A viewer connecting mid-run sees existing records, not an empty page.
+    """A viewer connects mid-run. Existing records appear. No empty page.
 
-    Log two records before opening the stream, then drive the generator and verify
-    both appear as data: lines with correct messages and ascending sequence numbers.
+    Log two records. Open the stream. Drive the generator. Verify both appear
+    as data: lines. Messages are correct. Sequence numbers ascend.
     """
     feed = enable_activity_feed(fake_middleware)
     
@@ -325,9 +334,9 @@ async def test_the_stream_replays_the_backlog(fake_middleware):
 
 @pytest.mark.asyncio
 async def test_the_stream_is_server_sent_events(fake_middleware):
-    """The response uses SSE media type and disables caching.
+    """The response uses SSE media type. Caching disables.
 
-    Verify media_type is text/event-stream and Cache-Control header is no-cache.
+    Verify media_type is text/event-stream. Cache-Control header is no-cache.
     """
     enable_activity_feed(fake_middleware)
     
@@ -351,10 +360,10 @@ async def test_the_stream_is_server_sent_events(fake_middleware):
 
 
 def test_disabled_allocates_nothing():
-    """A middleware built without activity_feed=True has no activity routes.
+    """Build a middleware without activity_feed=True. No activity routes exist.
 
-    This is the acceptance criterion for the off state: activity_feed is None
-    and no route path contains 'activity'.
+    This is the acceptance criterion for the off state. activity_feed is None.
+    No route path contains 'activity'.
     """
     from kapps_semantic_middleware import SemanticMiddleware, Mode
     
@@ -367,12 +376,12 @@ def test_disabled_allocates_nothing():
 
 
 def test_the_feed_is_mounted_the_same_way_regardless_of_mode():
-    """Controller and monitor inherit the feed from the same code path without flavour-specific branching.
+    """Controller and monitor inherit the feed from the same code path. No flavour-specific branching exists.
 
-    ADR 0022 establishes that controller and monitor are the same library configured
-    differently. Build a middleware in Mode.WATCHDOG with activity_feed=True and
-    verify the activity routes exist. The mode-independence is structural —
-    enable_activity_feed takes no mode argument.
+    ADR 0022 establishes that controller and monitor are the same library.
+    Configure them differently. Build a middleware in Mode.WATCHDOG with
+    activity_feed=True. Verify the activity routes exist. The mode-independence
+    is structural. enable_activity_feed takes no mode argument.
     """
     from kapps_semantic_middleware import SemanticMiddleware, Mode
     
@@ -391,10 +400,10 @@ def test_the_feed_is_mounted_the_same_way_regardless_of_mode():
 
 @pytest.mark.asyncio
 async def test_a_client_that_falls_behind_is_told_records_were_dropped(fake_middleware):
-    """A feed that quietly loses lines is worse than one that admits it, because the viewer
-    cannot distinguish 'nothing happened' from 'I missed it'. The stream detects when the
-    ring buffer has evicted records the client hasn't seen yet, and emits a synthetic
-    WARNING before continuing with normal records.
+    """A feed loses lines quietly. This is worse than admission. The viewer
+    cannot distinguish 'nothing happened' from 'I missed it'. The stream
+    detects when the ring buffer evicted records. The client has not seen them
+    yet. Emit a synthetic WARNING. Continue with normal records.
     """
     feed = enable_activity_feed(fake_middleware, capacity=5)
     
@@ -419,7 +428,7 @@ async def test_a_client_that_falls_behind_is_told_records_were_dropped(fake_midd
         chunk = await asyncio.wait_for(iterator.__anext__(), timeout=2.0)
         seed_chunks.append(chunk)
     
-    # Now append enough to force eviction of records the client hasn't consumed.
+    # Now append enough to force eviction of records the client has not consumed.
     for i in range(200):
         logger.info(f"post_msg{i}")
     
@@ -439,14 +448,14 @@ async def test_a_client_that_falls_behind_is_told_records_were_dropped(fake_midd
     
     assert found_warning, "Expected a WARNING about dropped records"
 
-    # The count is derived from where the buffer now starts, not hardcoded: the client had
-    # consumed through seq 20 when it fell behind.
+    # The count is derived from where the buffer now starts, not hardcoded. The
+    # client consumed through seq 20 when it fell behind.
     expected_dropped = feed.oldest_seq - 20 - 1
     assert warning_data["message"].startswith(f"{expected_dropped} record(s) dropped")
 
-    # The stream carries on afterwards rather than stalling on the gap. Pulled *after* the
-    # warning was found -- the search loop above breaks on it, so `chunks` ends there and
-    # looking inside it for what comes next can only ever fail.
+    # The stream carries on afterwards rather than stalling on the gap. Pulled
+    # after the warning was found. The search loop above breaks on it. `chunks`
+    # ends there. Looking inside it for what comes next can only fail.
     following = []
     for _ in range(3):
         chunk = await asyncio.wait_for(iterator.__anext__(), timeout=2.0)
@@ -463,10 +472,10 @@ async def test_a_client_that_falls_behind_is_told_records_were_dropped(fake_midd
 
 @pytest.mark.asyncio
 async def test_the_stream_stops_when_the_client_disconnects(fake_middleware):
-    """The generator checks await request.is_disconnected() each poll and returns when true.
-    Without that, a disconnected viewer leaves a polling loop running forever under any server
-    that does not cancel the task, and the endpoint cannot be tested at all -- an endless
-    generator hangs any client that stops reading.
+    """The generator checks await request.is_disconnected() each poll. Return
+    when true. Without that check, a disconnected viewer leaves a polling loop
+    running forever. The server does not cancel the task. The endpoint cannot
+    be tested. An endless generator hangs any client that stops reading.
     """
     feed = enable_activity_feed(fake_middleware)
     

@@ -14,7 +14,7 @@ also states how to turn one parameter's metadata into one or more `add_synced_co
 ```python
 @semantic_connector
 class MQTTBinding:
-    connector_cls       = MqttClientConnector          # local class, ADR 0031
+    connector_cls       = MqttClientConnector          # the framework's own class
     interface_property  = INF.isInterfaceAccessibleMQTTParameter
     connection_metadata = (INF.hasMQTTTopic, INF.hasMQTTBrokerIP,
                            INF.hasMQTTSetTopic, INF.hasMQTTValuePath,
@@ -23,11 +23,13 @@ class MQTTBinding:
     @staticmethod
     def build(metadata, conn_info, direction):
         broker = metadata[INF.hasMQTTBrokerIP]
+        port   = metadata.get(INF.hasMQTTBrokerPort, 1883)   # ADR 0031
+        ensure_transport(broker, port)                       # once per address, ADR 0034
         fmt    = ScalarInBlanknode(metadata)           # caches the static facets
-        yield Registration(MqttClientConnector(broker, metadata[INF.hasMQTTTopic]),
+        yield Registration(MqttClientConnector(broker, metadata[INF.hasMQTTTopic], port),
                            conn_info, SyncDirection.TO_PERSISTENCE, fmt, float)
         if direction is SyncDirection.BIDIRECTIONAL:
-            yield Registration(MqttClientConnector(broker, metadata[INF.hasMQTTSetTopic]),
+            yield Registration(MqttClientConnector(broker, metadata[INF.hasMQTTSetTopic], port),
                                conn_info, SyncDirection.FROM_PERSISTENCE, fmt, float)
 ```
 
@@ -155,7 +157,9 @@ connector-side analogue of ADR 0015's Path-2 escape hatch.
 **The MQTT contract** (scenario 3's, an *instance* convention — never baked into the class ontology):
 
 - Metadata: `inf:hasMQTTBrokerIP`, `inf:hasMQTTTopic`, `inf:hasMQTTSetTopic` (present iff `accessMode`
-  is `readwrite`), optional `inf:hasMQTTValuePath`, optional `inf:hasMQTTBrokerPort` (ADR 0031).
+  is `readwrite`), optional `inf:hasMQTTValuePath`, optional `inf:hasMQTTBrokerPort` — `xsd:integer`,
+  absent means 1883 (ADR 0031). Registering the first connector for a declared broker address also
+  asks the deployment to ensure that broker exists (ADR 0034).
 - Topic scheme `TransferUnit<n>/<component>/<position>/<param>`, and a setpoint appends `_set`.
   Confirmed for N units by ADR 0030.
 - `MockTransferUnit` **publishes 4** and **subscribes to 2**. The middleware is its mirror image.
@@ -180,3 +184,28 @@ connector-side analogue of ADR 0015's Path-2 escape hatch.
 The through-line: each step moved the seam *outward*, away from any requirement on the integrated code.
 
 Resolves wayfinder ticket #28 under map #24. Absorbs #30 (ADR 0016).
+
+## Amendment, 2026-08-03, ticket #33 — recognition may join through the Service
+
+This ADR defines a semantic connector as one that **registers itself from the graph**, recognised
+over ClassSpec plus graph. It assumed throughout that the evidence sits on the **parameter** — an
+MQTT connector recognises `inf:hasMQTTTopic` there, and its siblings sit beside it.
+
+**ADR 0033's REST connector has no parameter-local marker, and needs none.** Its evidence is that the
+parameter is interface-accessible and that the resource's Service carries an `svc:address`. That is
+still recognition from the graph. It joins one hop further out — through `svc:isServiceOf` to the
+Service — rather than reading a property of the parameter node.
+
+**Recognition therefore reads the graph, and the evidence may sit on the parameter or on the
+resource's Service.** Nothing else in this ADR changes. A semantic connector still names a
+`connector_cls` rather than being one, still registers at construction rather than after `lifespan`,
+and direction is still the most restrictive of `inf:accessMode` and the instance's connector wiring.
+
+**Two alternatives were rejected.** An explicit `inf:isRESTAccessibleParameter` term would restate
+what `svc:address` already implies, oblige every seed to write it, and gate this work behind #39.
+Hand-wiring the connectors would return the boilerplate this ADR exists to remove.
+
+**Recognition is unambiguous only because pruning happens first.** A fetched spec carries the unit's
+MQTT markers, so an instance that loaded one unpruned would match MQTT recognition against a device it
+must not touch. ADR 0033 prunes at load, which leaves the Service-joined rule as the only match. The
+two mechanisms depend on each other.

@@ -1,20 +1,21 @@
 """The MQTT semantic connector: the first instance of the binding seam (ADR 0023).
 
-A parameter is reached over MQTT when its domain property is a subproperty of
-``inf:isInterfaceAccessibleMQTTParameter``. The parameter node then carries a broker address,
-a read topic, and — if it is settable — a set topic.
+A parameter is reachable over MQTT when its domain property is a subproperty of
+``inf:isInterfaceAccessibleMQTTParameter``. The parameter node then carries a broker
+address and a read topic. A settable parameter node also carries a set topic.
 
-**Two connectors per settable parameter, one ConnectionInfo.** ``MqttClientConnector`` takes a
-single topic and its ``consume()`` publishes to the topic it subscribed to, so it physically
+**Two connectors per settable parameter, one ConnectionInfo.** ``MqttClientConnector`` takes
+a single topic. Its ``consume()`` publishes to the topic it subscribed to. So it physically
 cannot serve a read topic plus a distinct set topic. ``ConnectionRegistry.connections`` is
-``Dict[ConnectionInfo, List[str]]``, so both bind to one ``ConnectionInfo`` and differ only in
-``sync_direction`` — which is precisely what ``SyncDirection`` is for. For the scenario-3
+``Dict[ConnectionInfo, List[str]]``. So both bind to one ``ConnectionInfo``, and differ only
+in ``sync_direction`` — precisely what ``SyncDirection`` is for. For the scenario-3
 TransferUnit that is 4 parameters, 4 bindings, 6 connectors, 6 topics.
 
-``aiomqtt`` is an optional extra of ``aas_middleware`` (its ``industrial`` group), so the
+``aiomqtt`` is an optional extra of ``aas_middleware`` (its ``industrial`` group). So the
 connector class is imported lazily. Importing this module must not require a working MQTT
-stack — the registry has to exist for every flavour, including one that wires nothing
-(ADR 0028), and an inspector with no ``aiomqtt`` installed must still get the projection.
+stack. The registry must exist for every connector wiring, including one that wires nothing
+(ADR 0028). An inspecting instance with no ``aiomqtt`` installed must still receive the
+projection.
 """
 
 from __future__ import annotations
@@ -36,18 +37,19 @@ from kapps_semantic_middleware.vocabulary import INF
 
 logger = logging.getLogger(__name__)
 
-# Sentinel for tracking whether we have seen a value yet; distinct from None so a
+# Sentinel that tracks whether any value exists yet. Distinct from None, so a
 # genuine first None payload still counts as a change worth logging at INFO.
 _UNSET = object()
 
 
 def _is_a_change(value: Any, previous: Any) -> bool:
-    """Whether an inbound value is news, treating NaN as equal to itself.
+    """Whether an inbound value is news. Treat NaN as equal to itself.
 
-    ``float("nan") != float("nan")`` is true by IEEE-754, so a sensor stuck emitting NaN --
-    a failed probe, a divide-by-zero in the PLC -- would register every republish as a change
-    and flood the very feed this comparison exists to keep readable. That is precisely the
-    case where the operator least needs a scrolling wall of identical lines.
+    ``float("nan") != float("nan")`` is true by IEEE-754. So a sensor stuck at NaN (a
+    failed probe, a divide-by-zero in the PLC) would register every republish as a
+    change, and flood the very feed this comparison exists to keep readable. That is
+    precisely the case where the operator least needs a scrolling wall of identical
+    lines.
     """
     if isinstance(value, float) and isinstance(previous, float):
         if math.isnan(value) and math.isnan(previous):
@@ -60,15 +62,15 @@ try:
         MqttClientConnector,
     )
 except ImportError:  # pragma: no cover - depends on the optional extra being installed
-    # Importing this module must not require a working MQTT stack. The registry has to exist
+    # Importing this module must not require a working MQTT stack. The registry must exist
     # for every flavour, including one that wires nothing (ADR 0028), so an inspector on a
-    # host without aiomqtt must still get recognition and the projection. The failure is
+    # host without aiomqtt must still receive recognition and the projection. The failure is
     # deferred to the moment something actually tries to build a connector.
     MqttClientConnector = None  # type: ignore[assignment]
 
 
 def _mqtt_client_connector_cls():
-    """The framework connector class, or an actionable error if the extra is missing."""
+    """The framework connector class, or an actionable error if the extra is absent."""
     if MqttClientConnector is None:  # pragma: no cover - depends on the optional extra
         raise ImportError(
             "The MQTT semantic connector needs aiomqtt, an optional extra of "
@@ -83,30 +85,30 @@ class MQTTParameterFormatter:
 
     The persistence value of a COMPLEX property is a **list of one** generated model, not a
     scalar: ``[AnonymousClass(hasValue=[12.1], hasUnit=['m/s'], accessMode=['readwrite'])]``.
-    ``ConnectionInfo`` bottoms out at that property — ``field_id`` is a plain ``getattr`` and
-    the node's ``inf:hasValue`` is one level further down — so the formatter is what bridges
-    the device's scalar and the node the middleware persists (ADR 0023).
+    ``ConnectionInfo`` bottoms out at that property. ``field_id`` is a plain ``getattr`` and
+    the node's ``inf:hasValue`` is one level further down. The formatter bridges
+    the device scalar and the node the middleware persists (ADR 0023).
 
-    **Payload shape.** Raw scalar by default; if the parameter declares
-    ``inf:hasMQTTValuePath``, a JSON envelope with the value at that dotted path. The path is
+    **Payload shape.** Raw scalar by default. If the parameter declares
+    ``inf:hasMQTTValuePath``, use a JSON envelope with the value at that dotted path. The path is
     one property and is honoured symmetrically on both read and write (ADR 0023).
 
-    **Symmetry.** ``MqttClientConnector`` is asymmetric: its listener runs
-    ``json.loads(payload)`` on everything it receives, while ``consume()`` publishes its
-    argument raw. So ``deserialize`` is handed an already-parsed value and ``serialize`` must
-    produce the encoded bytes itself.
+    **Symmetry.** ``MqttClientConnector`` is asymmetric. Its listener runs
+    ``json.loads(payload)`` on everything it receives. ``consume()`` publishes its argument
+    raw. So ``deserialize`` receives an already-parsed value. ``serialize`` must produce the
+    encoded bytes.
 
     **Why the node is reassembled rather than replaced by a bare value.**
     ``update_persistence_with_value`` does ``setattr(contained_model, field_id, value)``,
-    replacing the whole list, and ``Formatter.deserialize`` sees only the payload — it has no
+    replacing the whole list. ``Formatter.deserialize`` sees only the payload. It has no
     access to the current persistence value. A bare scalar would therefore blank the unit and
-    the access mode *in the model being served over REST*. ADR 0027 removed the other half of
-    this problem, the graph one: a skolemised parameter node is addressable, so a commit
-    diffs per triple and an unchanged facet cannot be wiped. The in-memory half remains, and
-    it is what this reassembly is for — the northbound payload keeps its unit after the first
-    device message. The facets come from the same metadata the binding already read, so this
-    is a pure function per message with no read of current state — apart from ``_last_value``,
-    which exists solely for change-detection in logging and never affects the returned value.
+    the access mode *in the model served over REST*. ADR 0027 removed the other half of this
+    problem, the graph one. A skolemized parameter node is addressable. So a commit diffs per
+    triple, and the system cannot wipe an unchanged facet. The in-memory half remains, and it is what
+    this reassembly is for. The northbound payload keeps its unit after the first device
+    message. The facets come from the same metadata the binding already read. So this is a
+    pure function per message, with no read of current state. ``_last_value`` exists solely
+    for change-detection in logging, and never affects the returned value.
     """
 
     def __init__(
@@ -130,14 +132,14 @@ class MQTTParameterFormatter:
         self._last_value: Any = _UNSET
 
     def deserialize(self, data: Any) -> List[Any]:
-        """Device payload -> the persistence value (a one-element list holding the node)."""
+        """Device payload to the persistence value (a one-element list holding the node)."""
         value = self._extract(data)
         fields = dict(self.northbound_facets)
         fields[self.value_field] = [] if value is None else [value]
         # Log inbound values, but only at INFO when they change. The mock PLC republishes
         # every value on a fixed interval (0.2–0.5s per topic), so logging every message at
         # INFO makes the feed unreadable within seconds. A periodic republish of an unchanged
-        # value is noise; a change is news.
+        # value is noise. A change is news.
         label = self.parameter_label or "parameter"
         topic = self.topic or "topic"
         if _is_a_change(value, self._last_value):
@@ -148,7 +150,7 @@ class MQTTParameterFormatter:
         return [self.model_type(**fields)]
 
     def serialize(self, data: Any) -> bytes:
-        """Persistence value -> the device payload, encoded for ``consume``."""
+        """Persistence value to the device payload, encoded for ``consume``."""
         value = self._value_of(data)
         if self.value_path is None:
             result = json.dumps(value).encode()
@@ -160,22 +162,22 @@ class MQTTParameterFormatter:
                 cursor = cursor.setdefault(part, {})
             cursor[leaf] = value
             result = json.dumps(envelope).encode()
-        # Log outbound setpoints unconditionally at INFO. A setpoint is always news — it is
-        # an operator or a controller acting — so no change-detection here.
+        # Log outbound setpoints unconditionally at INFO. A setpoint is always news. It is
+        # an operator or a controller acting, so no change-detection here.
         label = self.parameter_label or "parameter"
         topic = self.set_topic or "set_topic"
         logger.info("%s -> %s = %r", label, topic, value)
         return result
 
     def _extract(self, data: Any) -> Any:
-        """Pull the scalar out of an inbound payload, honouring the envelope path."""
+        """Pull the scalar from an inbound payload. Honor the envelope path."""
         if self.value_path is None:
             return data
         cursor = data
         for part in self.value_path.split("."):
             if not isinstance(cursor, dict) or part not in cursor:
                 logger.warning(
-                    "MQTT payload has no %r at value path %r; treating it as unobserved",
+                    "MQTT payload has no %r at value path %r; treat it as unobserved",
                     part,
                     self.value_path,
                 )
@@ -184,11 +186,11 @@ class MQTTParameterFormatter:
         return cursor
 
     def _value_of(self, data: Any) -> Any:
-        """Pull the scalar out of a persistence value, whatever depth it arrives at.
+        """Pull the scalar from a persistence value, whatever depth it arrives at.
 
-        Accepts the one-element list the framework holds, a bare node, or an already-plain
-        scalar, because an outbound value can reach here from a PUT route as easily as from
-        the persistence model.
+        Accept the one-element list the framework holds, a bare node, or an
+        already-plain scalar. An outbound value can reach here from a PUT route as
+        easily as from the persistence model.
         """
         if isinstance(data, (list, tuple)):
             if not data:
@@ -221,11 +223,11 @@ class MQTTBinding:
     def build(
         binding: ParameterBinding, direction: SyncDirection
     ) -> Iterable[Registration]:
-        """One read registration always; one write registration when both sides permit it.
+        """One read registration always. One write registration when both sides permit it.
 
         ``direction`` has already been reduced to the most restrictive of the parameter's
-        ``inf:accessMode`` and the instance's flavour (ADR 0023), so this only has to honour
-        it — it must never re-widen.
+        ``inf:accessMode`` and the instance's flavour (ADR 0023), so this only honours
+        it. It must never re-widen.
         """
         connector_cls = _mqtt_client_connector_cls()
 
@@ -236,10 +238,10 @@ class MQTTBinding:
 
         if not broker or not topic:
             # A parameter marked MQTT-accessible whose metadata is incomplete would come up
-            # silently dead: no listener, no value, and nothing to say why. Name the property
-            # and what is missing (ADR 0023).
+            # silently dead: no listener, no value, and nothing to say why. Name the property,
+            # and name what is absent (ADR 0023).
             logger.warning(
-                "Not binding %s on %s over MQTT: missing %s. The parameter will be served "
+                "Do not bind %s on %s over MQTT. The metadata is missing %s. The parameter will be served "
                 "but no value will flow.",
                 binding.parameter_property,
                 binding.resource_iri,
@@ -266,7 +268,7 @@ class MQTTBinding:
 
         if not set_topic:
             logger.warning(
-                "%s on %s is readwrite but declares no %s; serving it read-only.",
+                "%s on %s is readwrite but declares no %s. Serve it read-only.",
                 binding.parameter_property,
                 binding.resource_iri,
                 INF.hasMQTTSetTopic,
@@ -290,9 +292,9 @@ def _formatter_for(
 ) -> MQTTParameterFormatter:
     """Build the formatter for one parameter from its already-resolved northbound facets.
 
-    The facets are the parameter node's properties minus the connection metadata — exactly the
-    northbound projection of the node (ADR 0028), reached here from the binding side rather
-    than from the spec side.
+    The facets are the parameter node's properties minus the connection metadata. These are exactly the
+    northbound projection of the node (ADR 0028), reached here from the binding side rather than
+    from the spec side.
     """
     southbound = {str(prop) for prop in MQTTBinding.connection_metadata}
     value_field = INF.hasValue.lined
@@ -302,8 +304,8 @@ def _formatter_for(
         if prop not in southbound and IRI(prop).lined != value_field
     }
     # Build a short human-readable label for log lines. Full mangled IRIs are correct in
-    # route paths (ADR 0021) but unreadable in a log line a human is watching scroll past;
-    # this string is display-only — never parsed, never used to address anything.
+    # route paths (ADR 0021) but unreadable in a log line a human watches scroll past.
+    # This string is display-only. Never parse it. Never use it to address anything.
     resource_fragment = (
         binding.resource_iri.fragment
         if hasattr(binding.resource_iri, "fragment") and binding.resource_iri.fragment

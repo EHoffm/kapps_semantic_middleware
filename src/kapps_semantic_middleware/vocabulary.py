@@ -1,28 +1,31 @@
 """Shared IRI vocabulary for the KAPPS Semantic Middleware.
 
-This module is the single source of truth for the ontology terms the middleware
-reads and writes. Every other module (registration, execution, connectors,
-tests, notebooks) imports its IRIs from here so that the Python code and the
-published ontologies (Core `cfc:`, the project's `svc:` module, and the domain
-`mes:` module) can never drift apart.
+This module is the single source of truth for the ontology terms the middleware reads and writes.
+Every other module (registration, execution, connectors, tests, notebooks) imports its IRIs from
+here. The Python code and the published ontologies (Core `cfc:`, the project `svc:` module, and
+the domain `mes:` module) can never drift apart.
 
-- `cfc:` — the published Circular Factory Core ontology
-  (https://w3id.org/circularfactory/Core#). Term names below are verified against
-  the 0.9.0 release.
-- `svc:` — this project's Service ontology module
-  (https://w3id.org/circularfactory/Service#), defined in
-  `kapps_semantic_middleware/ontology/service.ttl`.
-- `mes:` — Manufacturing Execution System domain ontology
-  (https://w3id.org/circularfactory/MES#), defined in
-  `kapps_semantic_middleware/ontology/mes.ttl`. Domain-facing; covers possession
-  and handover-ability vocabulary per ADR 0012.
-- `inf:` — the interface vocabulary: what makes a domain parameter reachable over a
-  protocol. Authored for now under the existing CrcInterfaces IRI so scenario 3 stays
-  vocabulary-compatible with the minimal example shared across `graph_db_interface` and
-  `kapps_ogm`. CrcInterfaces is deprecated and the consolidation capstone (#39) re-homes
-  these terms under the `inf:` name it mints — which is why they must only ever be reached
-  through `class INF`, never inlined at a use site (ADR 0021). A rename is then one
-  constant here plus a find-and-replace.
+Four namespaces appear below: `cfc:`, `svc:`, `mes:`, and `inf:`.
+
+`cfc:` is the published Circular Factory Core ontology
+(https://w3id.org/circularfactory/Core#). Term names below are verified against the 0.9.0
+release.
+
+`svc:` is this project's own Service ontology module
+(https://w3id.org/circularfactory/Service#), defined in
+`kapps_semantic_middleware/ontology/service.ttl`.
+
+`mes:` is the Manufacturing Execution System domain ontology
+(https://w3id.org/circularfactory/MES#), defined in `kapps_semantic_middleware/ontology/mes.ttl`.
+It is domain-facing. It covers possession and handover-ability vocabulary per ADR 0012.
+
+`inf:` is the interface vocabulary. It defines what makes a domain parameter reachable
+over a protocol. It is authored for now under the existing CrcInterfaces IRI, so scenario
+3 stays vocabulary-compatible with the minimal example shared across `graph_db_interface`
+and `kapps_ogm`. CrcInterfaces is deprecated. The consolidation capstone (#39) re-homes
+these terms under the `inf:` name it mints. Code must therefore reach these terms only
+through `class INF`, never inline at a use site (ADR 0021). A rename is then one constant
+here, plus a find-and-replace.
 """
 
 from __future__ import annotations
@@ -51,7 +54,7 @@ class CFC:
     ChangeabilityCapability = IRI("ChangeabilityCapability", base=CORE_NS)
     Operation = IRI("Operation", base=CORE_NS)
     Task = IRI("Task", base=CORE_NS)
-    # Possession (Core's reified, time-bound model — verified against Core 0.9.0).
+    # Possession (Core reified, time-bound model — verified against Core 0.9.0).
     PossessionState = IRI("PossessionState", base=CORE_NS)  # a Resource-holds-Workpiece state
     Workpiece = IRI("Workpiece", base=CORE_NS)
 
@@ -63,7 +66,7 @@ class CFC:
 
 
 class SVC:
-    """Terms from this project's Service ontology (`svc:`)."""
+    """Terms from this project Service ontology (`svc:`)."""
 
     # Classes
     Service = IRI("Service", base=SVC_NS)
@@ -99,11 +102,11 @@ class SVC:
 
 
 class MES:
-    """Terms from this project's MES ontology (`mes:`), defined in ontology/mes.ttl.
+    """Terms from this project MES ontology (`mes:`), defined in ontology/mes.ttl.
 
-    Scope is now handover *ability* only: possession itself is Core material-flow state
+    Scope is now handover *ability* only. Possession itself is Core material-flow state
     (``cfc:PossessionState`` / ``cfc:hasPossessor`` / ``cfc:hasPossessedWorkpiece``, see
-    ``class CFC``), so this module no longer mints its own possession vocabulary (ADR 0012).
+    ``class CFC``). This module no longer mints its own possession vocabulary (ADR 0012).
     """
 
     # Classes
@@ -114,36 +117,35 @@ class MES:
     complements = IRI("complements", base=MES_NS)  # HandoverAbility -> HandoverAbility (symmetric)
 
     # Handover-ability individuals (three complementary pairs)
-    Put = IRI("Put", base=MES_NS)  # Source-active giving; complements Receive
-    Receive = IRI("Receive", base=MES_NS)  # Passive counterpart of Put; complements Put
-    Pick = IRI("Pick", base=MES_NS)  # Destination-active taking; complements Release
-    Release = IRI("Release", base=MES_NS)  # Passive counterpart of Pick; complements Pick
-    Pass = IRI("Pass", base=MES_NS)  # Both-active giving; complements Retrieve
-    Retrieve = IRI("Retrieve", base=MES_NS)  # Both-active taking; complements Pass
+    Put = IRI("Put", base=MES_NS)  # Source-active giving. Complements Receive.
+    Receive = IRI("Receive", base=MES_NS)  # Passive counterpart of Put. Complements Put.
+    Pick = IRI("Pick", base=MES_NS)  # Destination-active taking. Complements Release.
+    Release = IRI("Release", base=MES_NS)  # Passive counterpart of Pick. Complements Pick.
+    Pass = IRI("Pass", base=MES_NS)  # Both-active giving. Complements Retrieve.
+    Retrieve = IRI("Retrieve", base=MES_NS)  # Both-active taking. Complements Pass.
 
 
 class INF:
     """Terms from the interface vocabulary (`inf:`).
 
-    A **parameter** is one node hanging off a domain property, carrying the value together
-    with everything needed to reach it over a protocol (ADR 0015). The terms split into two
-    layers, and the split is load-bearing:
+    A **parameter** is one node hanging off a domain property. It carries the value together with
+    everything needed to reach it over a protocol (ADR 0015). The terms split into two layers.
+    The split is load-bearing:
 
-    - **Northbound-safe** — declared by the generic marker
-      ``isInterfaceAccessibleParameter``: ``accessMode``, and the parameter's own domain
-      content. Safe to serve to a peer.
+    - **Northbound-safe** — declared by the generic marker ``isInterfaceAccessibleParameter``:
+      ``accessMode``, and the parameter own domain content. Safe to serve to a peer.
     - **Southbound only** — declared by a protocol marker such as
-      ``isInterfaceAccessibleMQTTParameter``: the connection metadata. A peer that learned
-      the broker address and topics could drive the device directly and bypass the
-      middleware, so this must never reach a northbound payload (ADR 0028).
+      ``isInterfaceAccessibleMQTTParameter``: the connection metadata. A peer that learned the
+      broker address and topics could drive the device directly. It would bypass the middleware.
+      This must never reach a northbound payload (ADR 0028).
 
-    The core never decides which terms are southbound by name. A binding descriptor declares
-    its own ``connection_metadata`` and the registry takes the union (ADR 0021, ADR 0028).
+    The core never decides which terms are southbound by name. A binding descriptor declares its
+    own ``connection_metadata``. The registry takes the union (ADR 0021, ADR 0028).
     """
 
     # Interface marker properties. A domain property becomes interface-accessible by being
-    # rdfs:subPropertyOf one of these; the protocol marker is a subproperty of the generic
-    # one, which is what makes the two range restrictions merge into one effective shape.
+    # rdfs:subPropertyOf one of these. The protocol marker is a subproperty of the generic one.
+    # This is what makes the two range restrictions merge into one effective shape.
     isInterfaceAccessibleParameter = IRI("isInterfaceAccessibleParameter", base=INF_NS)
     isInterfaceAccessibleMQTTParameter = IRI(
         "isInterfaceAccessibleMQTTParameter", base=INF_NS
@@ -163,8 +165,8 @@ class INF:
 class AccessMode:
     """String values for `inf:accessMode` (ADR 0015). Not IRIs / individuals.
 
-    Absent or unrecognised means read-only: a parameter is never writable by accident of
-    omission (ADR 0023).
+    Absent or unrecognised means read-only. A parameter is never writable by accident of omission
+    (ADR 0023).
     """
 
     READ = "read"

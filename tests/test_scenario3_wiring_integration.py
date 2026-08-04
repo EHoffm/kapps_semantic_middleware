@@ -1,10 +1,10 @@
 """Scenario 3 wiring: graph -> recognition -> connectors -> served payload (#40).
 
-Live GraphDB plus a live in-process MQTT broker. This is the ticket's real acceptance surface:
-the middleware reads the seeded TransferUnit out of the graph, recognises which of its
-properties are interface-accessible parameters, builds the right number of connectors in the
-right directions, and — the regression that matters — serves a payload that carries no
-connection metadata whatever the flavour.
+Live GraphDB, plus a live MQTT broker that runs in-process. This is the ticket real acceptance
+surface. The middleware reads the seeded TransferUnit out of the graph. Recognize
+which properties are interface-accessible parameters. Build the right number of
+connectors in the right directions. The regression matters. Serve a payload that
+carries no connection metadata, regardless of the connector wiring.
 """
 
 from __future__ import annotations
@@ -36,17 +36,17 @@ import seed  # noqa: E402
 def scenario3(graphdb):
     """A seeded scenario 3 and an OGM over it.
 
-    Function-scoped, and that is load-bearing however tempting the ~80 round trips a seed
-    costs are: several tests here add interface metadata with a raw SPARQL INSERT
-    (`hasMQTTValuePath`, an OPC-UA endpoint) to prove a declared term survives the read.
-    Sharing one seed across the module lets those writes leak forward — an envelope path
-    inserted by one test puts a later test's formatter into envelope mode, and it then
-    reads a raw scalar as an unobserved payload.
+    Function-scoped. Load-bearing. Tempt the ~80 round trips a seed costs. Several
+    tests here add interface metadata with a raw SPARQL INSERT (`hasMQTTValuePath`,
+    an OPC-UA endpoint). Prove a declared term survives the read. Share one seed
+    across the module. Writes leak forward. An envelope path inserted by one test
+    puts a later test formatter into envelope mode. It reads a raw scalar as an
+    unobserved payload.
     """
     seed.seed_scenario3(graphdb, OGM(db=graphdb))
-    # A *fresh* OGM, deliberately not the one that seeded: the seeding client carries state
-    # from its own writes, and a test that plans a wiring must read the graph the way a
-    # cold middleware would.
+    # A *fresh* OGM. Deliberately not the one that seeded. The seeding client carries
+    # state from its own writes. A test plans a wiring. Read the graph the way a
+    # cold middleware reads it.
     return graphdb, OGM(db=graphdb)
 
 
@@ -62,7 +62,7 @@ def _plan(ogm, unit_scope, **kwargs):
 
 @requires_graphdb
 class TestRecognition:
-    """Four parameters, recognised from the graph by their interface property."""
+    """Four parameters. Recognised from the graph by their interface property."""
 
     def test_recognises_all_four_parameters(self, scenario3, unit_scope):
         _, ogm = scenario3
@@ -78,7 +78,7 @@ class TestRecognition:
         }
 
     def test_reads_each_parameter_access_mode_from_the_graph(self, scenario3, unit_scope):
-        """Belts are settable control variables; barriers are read-only sensors."""
+        """Belts are settable control variables. Barriers are read-only sensors."""
         _, ogm = scenario3
 
         plan = _plan(ogm, unit_scope)
@@ -106,10 +106,10 @@ class TestRecognition:
     ):
         """inf:hasMQTTValuePath must be *declared* to survive the write and the read.
 
-        `_parameter_metadata` keeps only properties the effective shape declares, so a term
-        missing from the range restriction is filtered out and envelope mode could never
-        activate from real data — the formatter would be correct and unreachable. This pins
-        the declaration, not just the formatter logic.
+        `_parameter_metadata` keeps only properties the effective shape declares. A term
+        missing from the range restriction is filtered out. Envelope mode could never
+        activate from real data. The formatter is correct and unreachable. Pin the
+        declaration. Not the formatter logic.
         """
         graphdb, ogm = scenario3
         graphdb.query(
@@ -126,13 +126,14 @@ class TestRecognition:
         assert left.get(INF.hasMQTTValuePath) == "payload.speed"
 
     def test_the_value_is_parsed_per_the_ontology_datatype(self, scenario3, unit_scope):
-        """"Raw scalar, parsed per the parameter's ontology datatype" (#40).
+        """"Raw scalar. Parsed per the parameter ontology datatype" (#40).
 
-        The parsing is not done by hand and is not what ``Registration.model_type`` is for —
-        that is the persistence type of the bound field, which is a list. It falls out of the
-        node model generated from the effective shape: `tu:hasConveyorSpeed` restricts
-        `inf:hasValue` to `xsd:float` and `tu:isOccupied` to `xsd:boolean`, so pydantic
-        coerces on construction. A device publishing a quoted number still lands as a number.
+        The parsing is not done by hand. Not what ``Registration.model_type`` is for.
+        That is the persistence type of the bound field. It is a list. It falls out
+        of the node model generated from the effective shape. `tu:hasConveyorSpeed`
+        restricts `inf:hasValue` to `xsd:float`. `tu:isOccupied` to `xsd:boolean`.
+        Pydantic coerces on construction. A device publishes a quoted number. It
+        lands as a number.
         """
         _, ogm = scenario3
         plan = _plan(ogm, unit_scope)
@@ -151,7 +152,7 @@ class TestRecognition:
         assert getattr(occupied_node, INF.hasValue.lined) == [True]
 
     def test_an_envelope_path_is_still_southbound(self, scenario3, unit_scope):
-        """Declaring it must not let it reach a peer."""
+        """Declare it. Must not let it reach a peer."""
         _, ogm = scenario3
 
         plan = _plan(ogm, unit_scope)
@@ -159,7 +160,7 @@ class TestRecognition:
         assert str(INF.hasMQTTValuePath) in plan.southbound_properties
 
     def test_binds_to_the_complex_property_not_hasvalue(self, scenario3, unit_scope):
-        """ConnectionInfo has three levels and field_id is a plain getattr, so the parameter
+        """ConnectionInfo has three levels. field_id is a plain getattr. The parameter
         node is the deepest addressable thing (ADR 0017 / ADR 0023)."""
         _, ogm = scenario3
 
@@ -193,7 +194,7 @@ class TestRegistrationCount:
         }
 
     def test_a_monitor_builds_four_and_can_drive_nothing(self, scenario3, unit_scope):
-        """TO_PERSISTENCE: live values, structurally unable to write (ADR 0022)."""
+        """TO_PERSISTENCE: live values. Structurally unable to write (ADR 0022)."""
         _, ogm = scenario3
 
         plan = _plan(ogm, unit_scope, flavour=SyncDirection.TO_PERSISTENCE)
@@ -212,9 +213,9 @@ class TestRegistrationCount:
         assert plan.registrations == []
 
     def test_an_inspector_still_recognises_every_parameter(self, scenario3, unit_scope):
-        """The flag gates wiring, never recognition. Skipping recognition would make every
-        parameter node ordinary data, and an inspector would serve broker addresses
-        northbound (ADR 0020 / ADR 0028)."""
+        """The flag gates wiring. Never recognition. Skipping recognition makes every
+        parameter node ordinary data. An inspector serves broker addresses northbound
+        (ADR 0020 / ADR 0028)."""
         _, ogm = scenario3
 
         plan = _plan(ogm, unit_scope, autoregister=False)
@@ -224,7 +225,7 @@ class TestRegistrationCount:
 
 @requires_graphdb
 class TestNorthboundProjection:
-    """The regression that matters: no flavour ever serves connection metadata."""
+    """The regression matters. No flavour ever serves connection metadata."""
 
     def _served(self, ogm, plan):
         node = ogm.fetch(
@@ -235,15 +236,15 @@ class TestNorthboundProjection:
     def test_a_protocol_with_no_registered_binding_is_still_hidden(
         self, scenario3, unit_scope
     ):
-        """The regression the ontology-derived projection exists for (ADR 0028).
+        """The regression the ontology-derived projection prevents (ADR 0028).
 
-        A belt made reachable over MQTT *and* OPC-UA, with no OPC-UA binding registered
-        anywhere. The earlier registry-derived prune set removed the MQTT metadata and served
-        `inf:hasOPCUAEndpoint` with its address, because a set built from registered
-        descriptors only knows the protocols this middleware happens to have code for.
+        A belt made reachable over MQTT *and* OPC-UA. No OPC-UA binding registered
+        anywhere. The earlier registry-derived prune set removed the MQTT metadata.
+        Served `inf:hasOPCUAEndpoint` with its address. A set built from registered
+        descriptors knows only the protocols this middleware code has.
 
-        Two protocols on one parameter is not hypothetical: ADR 0026 names it as own-built
-        hardware whose protocol is not known when the ontology is authored.
+        Two protocols on one parameter is not hypothetical. ADR 0026 names it as
+        own-built hardware. Protocol is not known when the ontology is authored.
         """
         graphdb, ogm = scenario3
         opcua_marker = IRI(f"{seed.INF_NS}isInterfaceAccessibleOPCUAParameter")
@@ -279,13 +280,13 @@ class TestNorthboundProjection:
 
         assert "opc.tcp://10.0.0.5:4840/belt" not in served
         assert opcua_endpoint.lined not in served
-        # And the northbound content still survives, so this is not passing by serving nothing.
+        # And the northbound content still survives. This is not passing by serving nothing.
         assert INF.accessMode.lined in served
         assert seed.TU_HAS_UNIT.lined in served
 
     def test_the_unpruned_spec_would_have_leaked(self, scenario3, unit_scope):
-        """Guards the premise. If this ever stops leaking, the OGM gained a merge-depth
-        knob and ADR 0028's prune can retire."""
+        """Guards the premise. Stop the leak. The OGM gained a merge-depth knob. ADR
+        0028 prune can retire."""
         _, ogm = scenario3
         full = ogm.get_class_spec(
             class_iri=seed.TRANSFER_UNIT_CLASS, class_scope=unit_scope
@@ -323,7 +324,7 @@ class TestNorthboundProjection:
         assert "127.0.0.1" not in str(served)
 
     def test_all_three_flavours_serve_identical_payloads(self, scenario3, unit_scope):
-        """#40's stated regression test."""
+        """#40 stated regression test."""
         _, ogm = scenario3
 
         controller = self._served(ogm, _plan(ogm, unit_scope))
@@ -335,7 +336,7 @@ class TestNorthboundProjection:
         assert controller == monitor == inspector
 
     def test_the_projection_keeps_northbound_content(self, scenario3, unit_scope):
-        """An empty projection would technically pass the leak test and be useless."""
+        """An empty projection passes the leak test. Be useless."""
         _, ogm = scenario3
         plan = _plan(ogm, unit_scope)
 

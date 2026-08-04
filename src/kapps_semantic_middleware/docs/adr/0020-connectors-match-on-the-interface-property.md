@@ -37,14 +37,20 @@ SemanticMiddleware(mode="resource", resource_iri=tui.TransferUnit1, …,
                    connector_sync_direction=SyncDirection.TO_PERSISTENCE)
 ```
 
-| flavour | setting | behaviour |
+| connector wiring | setting | behavior |
 |---|---|---|
-| controller | `True`, `BIDIRECTIONAL` (default) | reads live values and drives the device |
-| monitor | `True`, `TO_PERSISTENCE` | reads live values, can never drive the device |
-| inspector | `False` | nothing connected; structure and graph content only |
+| driving | `True`, `BIDIRECTIONAL` (default) | reads live values and drives the device |
+| observing | `True`, `TO_PERSISTENCE` | reads live values, and never drives the device |
+| inspecting | `False` | nothing connected, structure and graph content only |
 
 **Recognition and the projection run in all three.** The flag gates wiring, never recognition — see
 below.
+
+**These rows carried the names `controller`, `monitor` and `inspector` until ADR 0032.** Those names
+describe products, and the columns beside them describe settings. The two are different axes, and the
+code shows it. `Controller.__init__` passes `autoregister_connectors=False`, so the controller sits in
+the third row, and so does the monitor. ADR 0032 adds **role** as the second axis, and it retires the
+word "flavour".
 
 ## Why
 
@@ -112,9 +118,14 @@ declares, so strict validation fails on ground truth.
 
 ### The wiring flag must not gate recognition
 
-Two middleware instances may be bound to the same graph entity — a controller that drives it and a
-read-only monitor beside it. The monitor must not open a write path to the device, hence
-`autoregister_connectors` / `connector_sync_direction`.
+An instance may wrap a device and never write to it. A second instance may bind the same graph
+entity, such as a redundant pair. Neither must open a write path it does not need. That is the job of
+`autoregister_connectors` and `connector_sync_direction`.
+
+**ADR 0032 removes the original example from this demo.** The controller and the monitor are
+consumers, and each roots at its own station resource. No two instances share a resource in scenario
+3. The argument below needs no second instance. A single device-facing instance with
+`autoregister_connectors=False` leaks on its own.
 
 It is tempting to implement "no connectors" as "no registry". That would be a **security hole**: with
 nothing registered, no property is recognised as a parameter, so by the rule above the blanknode
@@ -147,8 +158,9 @@ Core paradigms change only where the semantic layer genuinely needs something th
   whether it is possible.
 - `autoregister_connectors` and `connector_sync_direction` are constructor parameters of resource
   mode, defaulting to `True` / `BIDIRECTIONAL` so existing scenarios are unaffected.
-- Controller, monitor and inspector are **configurations of one library**, not three classes. Running
-  two instances against one resource also needs distinct service identities — ADR 0022.
+- The three wirings are **configurations of one library**, not three classes. Two instances against
+  one resource also need distinct service identities — ADR 0022. ADR 0032 adds **role** as the second
+  axis, and a consumer holds no connector wiring at all.
 - The consolidation (#39) must keep the interface-property hierarchy under the `inf:` name and must
   declare every connection-metadata property in the parameter property's range restriction, or the
   metadata is dropped before any connector sees it.

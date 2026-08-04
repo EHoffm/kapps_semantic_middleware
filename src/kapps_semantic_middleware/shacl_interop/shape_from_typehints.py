@@ -1,15 +1,14 @@
-"""Generate SHACL NodeShapes from Python function type hints.
+"""Generate SHACL NodeShapes, from the type hints of a Python function.
 
-Temporary scaffolding for workflow signature representation; see
+This is temporary scaffolding for workflow signature representation. See
 docs/adr/0001-shacl-for-workflow-signatures.md for context. This logic properly
-belongs in kapps_ogm (see docs/prd/kapps-ogm-shacl-support.md at the repo root)
-and should be deleted from here once that support lands.
+belongs in kapps_ogm. See docs/prd/kapps-ogm-shacl-support.md at the repo root.
+Delete this logic from here once that support lands.
 
-The shape targets the Workflow *class* (sh:targetClass), not instances. Argument
-property IRIs are minted as ``{workflow_class_iri}#param_{name}`` and the return
-property IRI as ``{workflow_class_iri}#return``. A zero-argument function with no
-(or ``None``) return annotation produces a minimal shape: the NodeShape and its
-sh:targetClass only.
+The shape targets the Workflow *class* (sh:targetClass). It does not target instances. Mint argument
+property IRIs as ``{workflow_class_iri}#param_{name}``. Mint the return property IRI as
+``{workflow_class_iri}#return``. A zero-argument function has no return annotation or ``None`` return
+annotation. It produces a minimal shape. The shape is the NodeShape and its sh:targetClass only.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from kapps_semantic_middleware.vocabulary import SVC, SVC_NS
 # SHACL namespace
 SH = Namespace("http://www.w3.org/ns/shacl#")
 
-# Python type → XSD datatype mapping
+# Python-to-XSD datatype mapping
 PYTHON_TO_XSD: dict[type, URIRef] = {
     str: XSD.string,
     bool: XSD.boolean,
@@ -37,15 +36,15 @@ PYTHON_TO_XSD: dict[type, URIRef] = {
     bytes: XSD.base64Binary,
 }
 
-# Union origins covering both typing.Optional[T]/typing.Union[...] and PEP 604 (T | None).
+# Union origins cover both typing.Optional[T]/typing.Union[...] and PEP 604 (T | None).
 _UNION_ORIGINS: tuple[Any, ...] = (Union, getattr(types, "UnionType", Union))
 
 
 def _unwrap_optional(type_hint: Any) -> tuple[Any, bool]:
-    """Unwrap ``Optional[T]`` / ``T | None`` into ``(inner_type, is_optional)``.
+    """Unwrap ``Optional[T]`` or ``T | None`` into ``(inner_type, is_optional)``.
 
-    For a two-member union with ``NoneType``, returns the non-None member and
-    ``True``. For any other type hint, returns it unchanged with ``False``.
+    For a two-member union with ``NoneType``, return the non-None member and
+    ``True``. For any other type hint, return it unchanged with ``False``.
     """
     origin = get_origin(type_hint)
     if origin in _UNION_ORIGINS:
@@ -53,7 +52,7 @@ def _unwrap_optional(type_hint: Any) -> tuple[Any, bool]:
         non_none = [a for a in args if a is not type(None)]
         if len(args) == 2 and len(non_none) == 1:
             return non_none[0], True
-        # Wider unions cannot be mapped to a single datatype; report optionality only.
+        # Wider unions cannot map to a single datatype. Report optionality only.
         return (non_none[0] if non_none else Any), (type(None) in args)
     return type_hint, False
 
@@ -64,16 +63,16 @@ def build_workflow_shape(
     *,
     shape_iri: str | URIRef | None = None,
 ) -> Graph:
-    """Build a SHACL NodeShape describing a Workflow's precondition and outcome.
+    """Build a SHACL NodeShape. Describe a Workflow precondition and outcome.
 
     Args:
-        func: The Python function whose type hints define the shape.
-        workflow_class_iri: The IRI of the Workflow class this shape targets.
-        shape_iri: Optional explicit IRI for the shape node. If omitted, derived
-            by appending ``"Shape"`` to ``workflow_class_iri``.
+        func: The Python function. Its type hints define the shape.
+        workflow_class_iri: The IRI of the Workflow class. This shape targets it.
+        shape_iri: Optional explicit IRI for the shape node. Omit it. Derive it
+            by append ``"Shape"`` to ``workflow_class_iri``.
 
     Returns:
-        An rdflib Graph containing the NodeShape with bound prefixes.
+        An rdflib Graph. It contains the NodeShape with bound prefixes.
     """
     g = Graph()
 
@@ -98,7 +97,7 @@ def build_workflow_shape(
     try:
         type_hints = typing.get_type_hints(func)
     except Exception:
-        # If get_type_hints fails (e.g. unresolved forward references), degrade gracefully.
+        # If get_type_hints fails, degrade gracefully. Example: unresolved forward references.
         type_hints = {}
 
     # Filter out self/cls parameters (for methods)
@@ -121,7 +120,7 @@ def build_workflow_shape(
             type_hint = type_hints.get(param.name, Any)
             unwrapped_type, is_optional = _unwrap_optional(type_hint)
 
-            # Map to XSD datatype if known (skip silently if unknown)
+            # Map to XSD datatype if known. Skip if unknown.
             if unwrapped_type in PYTHON_TO_XSD:
                 g.add((prop_node, SH.datatype, PYTHON_TO_XSD[unwrapped_type]))
 
@@ -133,8 +132,8 @@ def build_workflow_shape(
 
     # Build OUTCOME shape if there is a meaningful (non-None) return annotation.
     # Note: typing.get_type_hints() normalizes a ``-> None`` annotation to
-    # ``type(None)`` (NoneType), so both the bare ``None`` and ``NoneType`` must
-    # count as "no outcome", alongside a completely absent annotation.
+    # ``type(None)`` (NoneType). Both the bare ``None`` and ``NoneType`` must
+    # count as "no outcome". An absent annotation also counts.
     return_annotation = type_hints.get("return", inspect.Signature.empty)
     if return_annotation not in (None, type(None), inspect.Signature.empty):
         outcome_node = BNode()
@@ -153,7 +152,7 @@ def build_workflow_shape(
 
         g.add((return_prop, SH.maxCount, Literal(1, datatype=XSD.integer)))
 
-    # Bind prefixes for readable serialization
+    # Bind prefixes for serialization
     g.bind("sh", SH)
     g.bind("svc", Namespace(SVC_NS))
     g.bind("xsd", XSD)

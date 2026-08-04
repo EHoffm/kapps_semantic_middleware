@@ -112,3 +112,42 @@ exercises that read path across N processes. Milestone 1 exists to make the demo
 - **The MQTT broker address gains a port.** ADR 0031 records that decision and its cost.
 
 Decided on wayfinder ticket #60, under map #57. Amends ADR 0029 on the directory name.
+
+## Amendment, 2026-08-03, ticket #33 — the broker port derives from the index too
+
+ADR 0029 as amended gives each unit its own MQTT broker, brought up by that unit's own middleware.
+**Its port derives from the unit index, and the seed writes it**, exactly as every IRI and every
+topic already do.
+
+Dynamic allocation cannot serve this. Two readers need the port and they read it by different routes:
+the middleware finds it in the graph on the parameter binding (`inf:hasMQTTBrokerPort`, #69), and the
+PLC receives it as a `--broker-port` flag from the launcher, because a PLC holds no graph credentials
+and cannot look anything up. A port that is not a function of the index cannot be known by both
+before either starts.
+
+This is the same argument this ADR already makes for IRIs and topics, applied to one more property:
+the index is the identity, and a registry file that could be lost would orphan a factory.
+
+### The function, fixed 2026-08-03 on ticket #69
+
+```
+broker_port(n) = 18830 + n        # unit 1 -> 18831, unit 2 -> 18832
+```
+
+`BROKER_PORT_BASE = 18830` sits in `demo/transferunits/seed.py` beside the IRI minters, and the
+seed, the launcher's `--broker-port` flag and the index page's teaching panel all read it from
+there. One constant, one place.
+
+**Why not `1883 + n`.** It is the most legible mapping anyone could pick — the MQTT default plus the
+index — and it walks straight into occupied territory. 1900 is SSDP/UPnP and is live on most Linux
+desktops, so `--units 17` would break on a machine-specific collision that presents as a broker
+fault. 18830 is a quiet, unassigned stretch of the registered range, and it never touches 1883
+itself, so a stray system `mosquitto` is irrelevant to the factory.
+
+**Why not an ephemeral port written back to the graph.** It would never collide with anything, and
+it breaks this ADR's rule. The PLC receives its port as a launcher flag and holds no graph
+credentials, so it cannot read a port that exists only after the middleware started. Both readers
+must know the port before either process starts, and only a function of the index gives them that.
+
+**The port is `xsd:integer`** (ADR 0031 as amended), which makes it the first non-string literal any
+seed in this repo writes.
