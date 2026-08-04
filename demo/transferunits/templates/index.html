@@ -88,17 +88,35 @@ const TEACH = __TEACH__;
 const SOURCES = __SOURCES__;
 let frozen = false;
 
+// A loopback address is this launcher's own dynamically-allocated child port (#85) — swap
+// its host for the browsing host, so a page reached through a tunnel links through the
+// same tunnel. A non-loopback address (e.g. a remote knowledge graph) is left alone.
+function hrefFor(address) {
+  try {
+    const src = new URL(address);
+    if (src.hostname !== '127.0.0.1' && src.hostname !== 'localhost') return address;
+    const dst = new URL(location.href);
+    dst.pathname = src.pathname;
+    dst.search = src.search;
+    dst.hash = '';
+    dst.port = src.port;
+    return dst.toString();
+  } catch {
+    return address;
+  }
+}
+
 function box(key, id, title, node, wide) {
   const isLink = node.address && node.address.startsWith('http');
   // Only middleware and the control station hold an activity feed (ADR 0029) — a PLC
   // holds no middleware, so it gets no link, and that asymmetry is the demonstration.
   const hasActivityFeed = key === 'middleware' || key === 'controller';
   const activityLink = (isLink && hasActivityFeed)
-    ? `<a class="activity" href="${node.address}/activity" target="_blank">activity</a>`
+    ? `<a class="activity" href="${hrefFor(node.address + '/activity')}" target="_blank">activity</a>`
     : '';
   const addr = node.address
     ? (isLink
-        ? `<a href="${node.address}" target="_blank">${node.address}</a>`
+        ? `<a href="${hrefFor(node.address)}" target="_blank">${node.address}</a>`
         : `<span>${node.address}</span>`) +
       (node.source ? `<span class="src" data-src="${node.source}">${node.source}</span>` : '') +
       activityLink
@@ -170,7 +188,7 @@ function render(s) {
       ${box('controller', 'controller', 'control station', s.controller, true)}</div>`;
 
   document.getElementById('launcher-addr').innerHTML =
-    `<a href="${s.launcher.address}">${s.launcher.address}</a>`;
+    `<a href="${hrefFor(s.launcher.address)}">${s.launcher.address}</a>`;
 
   wires(s);
   bind();

@@ -47,6 +47,27 @@ python -m demo.transferunits.control_station --port 0
 Press Ctrl+C to stop. Teardown is ordered: every middleware and the control station are SIGTERMed
 first, so each deregisters (`svc:Service` removed) while its PLC is still answering; then the PLCs.
 
+## Running it over SSH
+
+Only the Launcher's fixed port (`8080`) is dependable — every other port is self-allocated at
+random (ADR 0029), so it never reaches an IDE's own port auto-forwarding. To make it work over an
+SSH connection (e.g. VS Code / Cursor Remote-SSH):
+
+- Forward the Launcher's port (`127.0.0.1:8080`).
+- Set `remote.autoForwardPortsSource` to `output` or `hybrid`. Every child's address line is
+  echoed to the Launcher's own stdout as it's spawned, prefixed with the child's identity (e.g.
+  `middleware-1 The middleware runs on http://127.0.0.1:41288/`) — with that setting, the IDE
+  matches those lines and forwards each port they name.
+- Open the index page through the forwarded Launcher port. Its links are built from the browsing
+  host and the child's real port, not from the hardcoded `127.0.0.1` the child itself reports, so
+  they follow the same tunnel.
+
+**Known limitation**: if a child's port is already taken on your machine, the IDE forwards it to a
+*different* local port than the one named in the echoed line, but the index page's link is still
+built from the remote port — that one link points at the wrong local port. The robust fix is to
+reverse-proxy every child UI under the Launcher's single fixed port; that was considered and not
+chosen. Forward the mismatched port by hand if this bites, or free up the local port and restart.
+
 ## Layout
 
 - `__main__.py` — the entry point: builds the Factory, wires it into the index page, runs uvicorn

@@ -127,6 +127,25 @@ class TestEnvironmentHandling:
         assert "GRAPHDB_REPOSITORY" not in captured_env
         assert handle.address == "http://127.0.0.1:54321/"
 
+    def test_spawn_plc_echoes_its_panel_line_to_launcher_stdout(self, monkeypatch, capsys):
+        """The panel address is announced synchronously (blocking read in _spawn_plc), so it
+        needs its own echo point, distinct from the background-thread drain used by
+        middleware/controller (#85)."""
+
+        def fake_popen(cmdline, *, stdout, stderr, env, text, bufsize):
+            proc = MagicMock()
+            proc.pid = 12345
+            proc.stdout = iter(["Panel running on http://127.0.0.1:54321/\n"])
+            return proc
+
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+        _spawn_plc(1)
+
+        out = capsys.readouterr().out
+        assert "plc-1" in out
+        assert "http://127.0.0.1:54321/" in out
+
 
 @requires_graphdb
 class TestLiveSeeding:

@@ -188,3 +188,66 @@ class TestOutput:
         factory.children = [ctrl]
 
         assert factory.output(0, "controller") == ["controller booted"]
+
+
+class TestEchoAddressLines:
+    """This class tests that _drain_output echoes a child's address lines to stdout (#85)."""
+
+    def test_address_line_reaches_stdout_prefixed_with_identity(self, capsys):
+        factory = make_factory()
+        child = make_child("middleware", 1)
+        child.proc.stdout = iter(["The middleware runs on http://127.0.0.1:41288/\n"])
+        factory.children = [child]
+
+        factory._drain_output(child)
+
+        out = capsys.readouterr().out
+        assert "middleware-1" in out
+        assert "http://127.0.0.1:41288/" in out
+
+    def test_non_address_line_does_not_reach_stdout(self, capsys):
+        factory = make_factory()
+        child = make_child("middleware", 1)
+        child.proc.stdout = iter(["some ordinary log line, no address here\n"])
+        factory.children = [child]
+
+        factory._drain_output(child)
+
+        out = capsys.readouterr().out
+        assert out == ""
+
+    def test_address_line_still_lands_in_the_ring_buffer(self, capsys):
+        """Echoing to stdout must not replace the existing ring-buffer capture."""
+        factory = make_factory()
+        child = make_child("middleware", 1)
+        child.proc.stdout = iter(["The middleware runs on http://127.0.0.1:41288/\n"])
+        factory.children = [child]
+
+        factory._drain_output(child)
+
+        assert list(child.output) == ["The middleware runs on http://127.0.0.1:41288/"]
+
+    def test_controller_identity_is_control_not_controller(self, capsys):
+        factory = make_factory()
+        child = make_child("controller", None)
+        child.proc.stdout = iter(["The control station runs on http://127.0.0.1:41295/\n"])
+        factory.children = [child]
+
+        factory._drain_output(child)
+
+        prefix = capsys.readouterr().out.split("http://")[0]
+        assert "control" in prefix
+        assert "controller" not in prefix
+
+    def test_url_is_not_reformatted(self, capsys):
+        """Acceptance: the URL reaches stdout unmodified."""
+        factory = make_factory()
+        child = make_child("plc", 3)
+        line = "Panel running on http://127.0.0.1:54321/\n"
+        child.proc.stdout = iter([line])
+        factory.children = [child]
+
+        factory._drain_output(child)
+
+        out = capsys.readouterr().out
+        assert "http://127.0.0.1:54321/" in out

@@ -109,6 +109,26 @@ def _strip_graphdb_env(env: dict) -> dict:
 
 
 _PANEL_PORT_RE = re.compile(r":(\d+)/?\s*$")
+_ADDRESS_RE = re.compile(r"https?://")
+_IDENTITY_COLUMN_WIDTH = len("middleware-10")  # widest identity at the demo's usual scale
+
+
+def _child_identity(child: ChildHandle) -> str:
+    """The short label an echoed line is prefixed with, e.g. "plc-1", "middleware-2"."""
+    if child.kind == "controller":
+        return "control"
+    return f"{child.kind}-{child.unit_index}"
+
+
+def _echo_address_line(child: ChildHandle, line: str) -> None:
+    """Echo one address line to the launcher's own stdout, prefixed with the child's
+    identity (#85). An IDE forwards ports by scanning terminal output for `http://host:port`
+    -- only lines that carry one are echoed here, unmodified and flushed; everything else
+    stays only in the child's ring buffer.
+    """
+    if not _ADDRESS_RE.search(line):
+        return
+    print(f"  {_child_identity(child):<{_IDENTITY_COLUMN_WIDTH}}{line}", flush=True)
 
 
 def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BROKER_PORT) -> ChildHandle:
@@ -152,7 +172,9 @@ def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BR
     assert proc.stdout is not None
     panel_port = None
     for line in proc.stdout:
-        handle.output.append(line.rstrip("\n"))
+        stripped = line.rstrip("\n")
+        handle.output.append(stripped)
+        _echo_address_line(handle, stripped)
         if "Panel running on http://" in line:
             match = _PANEL_PORT_RE.search(line.strip())
             if match:
@@ -337,10 +359,17 @@ class Factory:
         threading.Thread(target=self._watch, daemon=True).start()
 
     def _drain_output(self, child: ChildHandle) -> None:
-        """Keep reading a child's stdout after spawn, so /api/output stays current."""
+        """Keep reading a child's stdout after spawn, so /api/output stays current.
+
+        Also echoes any address line to the launcher's own stdout (#85) -- this is where
+        the middleware and control station's address arrives, since neither blocks spawn
+        the way a PLC's panel line does in _spawn_plc.
+        """
         assert child.proc.stdout is not None
         for line in child.proc.stdout:
-            child.output.append(line.rstrip("\n"))
+            stripped = line.rstrip("\n")
+            child.output.append(stripped)
+            _echo_address_line(child, stripped)
 
     def _resource_iri(self, child: ChildHandle) -> Optional[str]:
         if child.kind == "middleware" and child.unit_index is not None:
