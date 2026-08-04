@@ -32,9 +32,9 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, Dict, List, Sequence, Set, Tuple
+from typing import Annotated, Any, Dict, List, Sequence, Set, Tuple
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from graph_db_interface import IRI
 from pydantic import BaseModel
 
@@ -174,12 +174,19 @@ def _make_put_handler(
 
     # As above: the body type has to arrive as a real object on the signature. Do not use a string
     # annotation. FastAPI would fail to resolve it.
+    #
+    # `body_annotation` is the owning model's field annotation (#87). For a COMPLEX property that
+    # is not required, that annotation is `Optional[Annotated[conlist(Model, ...), BeforeValidator]]`
+    # -- not the plain `List[Model]` it is for a required one. FastAPI infers body-vs-query from
+    # whether the annotation looks "scalar", and an `Optional` wrapper defeats that inference: it
+    # falls back to a query parameter named "body", which every real PUT then 422s against, since
+    # a list can never arrive on a query string. Mark it explicitly rather than rely on inference.
     put_parameter.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
         parameters=[
             inspect.Parameter(
                 "body",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=body_annotation,
+                annotation=Annotated[body_annotation, Body()],
             )
         ],
         return_annotation=Dict[str, str],
