@@ -12,6 +12,13 @@ implementation makes two mistakes that this guard exists to catch:
    visited ids, a cyclic instance graph hangs forever. The recursion must stop at parameters
    and at already-seen ids.
 
+3. **PUT body misclassified as a query parameter (#87).** FastAPI infers body-vs-query from
+   whether a field's annotation looks scalar. A COMPLEX property that isn't required has an
+   `Optional[Annotated[conlist(...), BeforeValidator]]` annotation, and that `Optional` wrapper
+   defeats the inference -- every real PUT route 422ed. The other fixtures below use a plain
+   `list[Model]` shape that never exercises this; `RealisticBelt`/`RealisticTransferUnit` exist
+   specifically to reproduce the real shape.
+
 This is a **static** check of the generated routes plus **behavioural** checks via `TestClient`.
 No GraphDB, no broker: the middleware is faked, the instance tree is plain pydantic models,
 and the connectors are stubs that record what they consume.
@@ -20,12 +27,12 @@ and the connectors are stubs that record what they consume.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from graph_db_interface import IRI
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator, ConfigDict, conlist, create_model
 
 from kapps_semantic_middleware.connectors.semantic import AccessMode
 from kapps_semantic_middleware.rest_router import generate_recursive_rest_api
@@ -81,6 +88,39 @@ class TransferUnit(BaseModel):
     id: str
     TU_hasConveyorBelt: list[Belt] = []
     TU_hasLightBarrier: list[Barrier] = []
+
+
+def _coerce_speed(value: Any) -> Any:
+    return value
+
+
+# Built with `create_model`, exactly as `kapps_ogm.ClassSpec.to_pydantic_model` builds it,
+# rather than a static class body -- a literal `conlist(...)` call cannot appear in a class-body
+# annotation under strict static typing, but that is exactly the shape a COMPLEX property's
+# field actually has at runtime: `Optional` because the property isn't required, `Annotated`
+# because of the coercion validator, `conlist` rather than plain `list` for the min/max bound.
+# Every fixture above this point uses the simpler `list[Speed]` shape instead, which FastAPI's
+# scalar check always classifies as a body regardless of how the route wires the parameter --
+# that shape would not have caught issue #87.
+_realistic_speed_field: Any = Optional[
+    Annotated[conlist(Speed, min_length=0), BeforeValidator(_coerce_speed)]
+]
+
+
+RealisticBelt: Any = create_model(
+    "RealisticBelt",
+    __config__=ConfigDict(extra="forbid"),
+    id=(str, ...),
+    TU_hasConveyorSpeed=(_realistic_speed_field, None),
+)
+
+
+RealisticTransferUnit: Any = create_model(
+    "RealisticTransferUnit",
+    __config__=ConfigDict(extra="forbid"),
+    id=(str, ...),
+    TU_hasConveyorBelt=(list[RealisticBelt], []),
+)
 
 
 @dataclass(frozen=True)
@@ -409,6 +449,58 @@ def test_get_and_put_are_symmetric():
 
     put_response = client.put(path, json=payload)
     assert put_response.status_code == 200
+
+
+def test_put_body_is_bound_as_a_json_body_not_a_query_parameter():
+    """A PUT whose field type has the shape the OGM actually produces is accepted as JSON.
+
+    ``Belt.TU_hasConveyorSpeed`` above is typed ``list[Speed]`` -- a plain list, which FastAPI's
+    scalar check always classifies as a body regardless of how the route wires the parameter.
+    That shape is not what ``ClassSpec.to_pydantic_field`` (kapps_ogm) actually emits for a
+    COMPLEX property: a real field is ``Optional[Annotated[conlist(Model, ...), BeforeValidator]]``
+    -- optional because the property isn't required, `Annotated` because of the coercion
+    validator, `conlist` rather than `list` for the min/max bound. FastAPI's implicit body-vs-query
+    inference (`field_annotation_is_scalar`) does not see through that `Optional` wrapper the same
+    way, and silently classifies the parameter as a query param instead -- issue #87, reproduced
+    against the real installed FastAPI in isolation before this test was written. Every other test
+    in this file uses the simpler shape and would not have caught this.
+    """
+    mw = _FakeMiddleware()
+    unit = RealisticTransferUnit(
+        id="https://example.org/tui#TransferUnit1",
+        TU_hasConveyorBelt=[
+            RealisticBelt(
+                id="https://example.org/tui#ConveyorBelt1_left",
+                TU_hasConveyorSpeed=[Speed(hasValue=[1.5], hasUnit=["m/s"])],
+            )
+        ],
+    )
+    bindings = [
+        _BindingStub(
+            resource_iri=IRI("https://example.org/tui#ConveyorBelt1_left"),
+            field_id="TU_hasConveyorSpeed",
+            access_mode=AccessMode.READWRITE,
+        )
+    ]
+    _prime_connector(mw, unit)
+
+    # `type(instance).__name__` becomes the route's leading segment, so it is
+    # "RealisticTransferUnit" here rather than the "TransferUnit" `_path()` assumes.
+    generated_paths = generate_recursive_rest_api(
+        middleware=mw,
+        data_model_name="TransferUnit",
+        root_id=unit.id,
+        instance=unit,
+        bindings=bindings,
+    )
+    assert len(generated_paths) == 1
+    path = generated_paths[0]
+
+    client = TestClient(mw.app)
+    payload = [{"hasValue": [9.9], "hasUnit": ["m/s"]}]
+    response = client.put(path, json=payload)
+
+    assert response.status_code == 200, response.json()
 
 
 def test_closure_capture_is_correct():
