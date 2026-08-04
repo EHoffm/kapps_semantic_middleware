@@ -43,6 +43,23 @@ def pytest_collection_modifyitems(items):
             item.add_marker("live")
 
 
+def methods_at(app, path: str) -> set:
+    """Every HTTP method served at `path`, unioned across routes.
+
+    A parameter route's GET and PUT are two separate `APIRoute` objects that happen to share a
+    path, so picking the first match and reading its `.methods` sees only whichever verb was
+    mounted first. That makes a "no PUT here" assertion pass whether or not a PUT exists --
+    exactly what the read-only tests are meant to prove. It has already caught one false pass;
+    it lives here so the offline and live router tests cannot drift apart on it.
+    """
+    return {
+        method
+        for route in app.routes
+        if getattr(route, "path", None) == path
+        for method in route.methods
+    }
+
+
 @pytest.fixture(scope="session")
 def graphdb():
     """A live GraphDB client from the environment, or skip the test.

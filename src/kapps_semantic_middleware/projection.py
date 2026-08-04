@@ -1,40 +1,36 @@
-"""The northbound projection: hiding protocol metadata the ontology declares (ADR 0028).
+"""The northbound projection: hide protocol metadata the ontology declares (ADR 0028).
 
-A parameter node bundles two kinds of fact. What the value *means* — its magnitude, its unit,
-whether a peer may write it — is northbound content. How the middleware *physically reaches the
-device* — a broker address, a topic, an OPC-UA endpoint — is southbound only: a peer holding it
-could drive the machine directly and bypass every check the middleware performs.
+A parameter node bundles two kinds of fact. What the value *means* is northbound content. This
+includes its magnitude, its unit, whether a peer may write it. How the middleware *physically
+reaches the device* is southbound only. This includes a broker address, a topic, an OPC-UA
+endpoint. A peer that holds it could drive the machine directly. It would bypass every check the
+middleware performs.
 
-They are not separable by asking for less. ``PropertySpec._resolve_effective_ranges`` merges the
-whole ``rdfs:subPropertyOf*`` chain and there is no merge-depth parameter anywhere in the OGM's
-API, so the shape a consumer gets always contains everything every level declares. The middleware
-must therefore cut the bundle itself, and it does so on the **shape**, before any data is read.
+Separation by request for less is not possible. ``PropertySpec._resolve_effective_ranges`` merges
+the whole ``rdfs:subPropertyOf*`` chain. There is no merge-depth parameter anywhere in the OGM
+API. The shape a consumer gets always contains everything every level declares. The middleware
+must therefore cut the bundle itself. It cuts on the **shape**, before any data receives read.
 
-**What gets cut is decided by the ontology, not by the code.** Walking upward from one parameter
-property:
+The ontology decides what gets cut, not the code. Walk upward from one parameter property
+through three levels. The parameter property own range contributes value and unit. The
+projection keeps both. Protocol markers between it and the root contribute broker and topic
+data. The projection deletes all of it. The interface root own range contributes
+``inf:accessMode``. The projection keeps it.
 
-===========================================  =====================  ==========
-level                                        contributes            verdict
-===========================================  =====================  ==========
-the parameter property's own range           value, unit            **keep**
-protocol markers between it and the root     broker, topic, …       **delete**
-the interface root's own range               ``inf:accessMode``     **keep**
-===========================================  =====================  ==========
+Derivation of the delete set from the **registry** instead received attempt. It is wrong. It
+only knows the protocols this middleware happens to have code for. Measurement occurred on a
+belt made reachable over both MQTT and OPC-UA with no OPC-UA binding registered. The registry-
+derived set removed the MQTT metadata. It served ``inf:hasOPCUAEndpoint`` with its address. A
+query to the ontology finds it. The ontology is authoritative about what a protocol parameter
+*is* whether or not anyone wrote a connector.
 
-Deriving the delete set from the **registry** instead — the union of what the registered binding
-descriptors declare — was tried and is wrong: it only knows the protocols this middleware happens
-to have code for. Measured, on a belt made reachable over both MQTT and OPC-UA with no OPC-UA
-binding registered, the registry-derived set removed the MQTT metadata and served
-``inf:hasOPCUAEndpoint`` with its address. Asking the ontology finds it, because the ontology is
-authoritative about what a protocol parameter *is* whether or not anyone wrote a connector.
+Recomputation occurs **at every startup**. Consuming middlewares are decentralized. They live in
+domain expert packages. The ontology may gain a protocol after one of them last looked.
 
-Recomputed **at every startup**. Consuming middlewares are decentralized and live in domain
-experts' packages; the ontology may have grown a protocol since one of them last looked.
-
-A keep-list — naming what is safe and dropping the rest — was considered and rejected. It reads
-as the safer construction, but it is a closed-world assertion in the serving path, and the
+A keep-list received consideration and rejection. It names what is safe. It drops the rest. It
+reads as the safer construction. But it is a closed-world assertion in the serving path. The
 architecture has exactly one closed-world moment by design (ADR 0025: SHACL at admission). It
-would also hide new legitimate domain content by default, taxing twenty domain engineers to guard
+would also hide new legitimate domain content by default. Twenty domain engineers would guard
 something the OGM write path already governs.
 """
 
@@ -59,11 +55,11 @@ RDF_FIRST = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first"
 
 
 class ProjectionError(RuntimeError):
-    """The projection could not prove a payload safe, so nothing is served.
+    """The projection could not prove a payload safe. Nothing is served.
 
-    Raised rather than logged. A projection that cannot determine what to hide has exactly one
-    safe behaviour, and continuing is not it: the failure would surface as a broker address on
-    a public REST route.
+    Raise rather than log. A projection that cannot determine what to hide has exactly one safe
+    behavior. Continue is not it. The failure would surface as a broker address on a public REST
+    route.
     """
 
 
@@ -73,10 +69,10 @@ def southbound_properties(
     *,
     interface_root: Any = INF.isInterfaceAccessibleParameter,
 ) -> frozenset:
-    """The properties a protocol marker contributes to one parameter's shape.
+    """The properties a protocol marker contributes to one parameter shape.
 
-    Empty for a property that is not interface-accessible at all, which is the ordinary answer
-    for a plain object property like ``tu:hasConveyorBelt``.
+    Empty for a property that is not interface-accessible at all. This is the ordinary answer for
+    a plain object property like ``tu:hasConveyorBelt``.
     """
     markers = _protocol_markers(ogm, parameter_property, interface_root)
     if not markers:
@@ -85,8 +81,8 @@ def southbound_properties(
     declared = _declared_by(ogm, markers)
 
     if not declared:
-        # The ontology says this parameter is reached over some protocol, and we cannot read
-        # what that protocol's contract is. Serving it would mean serving fields we have not
+        # The ontology says this parameter is reached over some protocol. We cannot read what
+        # that protocol contract is. Serve it. This would mean serve of fields we have not
         # classified. Refuse.
         raise ProjectionError(
             f"{parameter_property} is declared interface-accessible through "
@@ -105,14 +101,14 @@ def _protocol_markers(ogm: Any, parameter_property: Any, interface_root: Any) ->
     Two exclusions, both load-bearing and neither obvious:
 
     - **The parameter property itself** matches ``subPropertyOf+ <root>``. Its own range is
-      *domain* content — the value and its unit — and deleting that would leave a payload with
-      nothing in it.
-    - **The interface root** matches too, because GraphDB materialises *reflexive*
-      ``rdfs:subPropertyOf`` (RDFS rule rdfs6), so ``+`` behaves like ``*``. Without excluding
-      it, the root's own range is treated as protocol metadata and ``inf:accessMode`` — the one
-      interface fact a peer legitimately needs — is deleted.
+      *domain* content. The value and its unit receive inclusion. Deletion of that would leave a
+      payload with nothing in it.
+    - **The interface root** matches too. GraphDB materialises *reflexive* ``rdfs:subPropertyOf``
+      (RDFS rule rdfs6). ``+`` behaves like ``*``. Exclude it. The root own range receives
+      treatment as protocol metadata. ``inf:accessMode`` receives deletion. This is the one
+      interface fact a peer legitimately needs.
 
-    Both were found by testing, not by reading the query.
+    Both were found by testing, not by read of the query.
     """
     rows = ogm.db.query(
         f"""
@@ -128,11 +124,11 @@ def _protocol_markers(ogm: Any, parameter_property: Any, interface_root: Any) ->
 
 
 def _declared_by(ogm: Any, markers: Set[str]) -> Set[str]:
-    """Every property named by an ``owl:onProperty`` inside these properties' ranges.
+    """Every property named by an ``owl:onProperty`` inside these properties ranges.
 
-    Handles both range shapes the OGM itself accepts: an ``owl:intersectionOf`` list of
-    restrictions, and a single bare ``owl:Restriction``. Reading only the first would silently
-    miss a protocol whose contract happens to have one term — and a missed term is a leak.
+    Handle both range shapes the OGM itself accepts: an ``owl:intersectionOf`` list of
+    restrictions, and a single bare ``owl:Restriction``. Read only the first. This would silently
+    miss a protocol whose contract happens to have one term. A missed term is a leak.
     """
     values = " ".join(f"<{m}>" for m in markers)
     rows = ogm.db.query(
@@ -158,24 +154,24 @@ def prune_southbound(
     interface_root: Any = INF.isInterfaceAccessibleParameter,
     cache: Optional[Dict[str, frozenset]] = None,
 ) -> Any:
-    """Return a copy of ``class_spec`` with each parameter's protocol metadata removed.
+    """Return a copy of ``class_spec`` with each parameter protocol metadata removed.
 
-    Recurses, because a resource's parameters hang off its components. Every nested spec is
-    asked the ontology what its own property contributes southbound, so two parameters reached
-    over different protocols are each pruned correctly.
+    Recurse. A resource parameters hang off its components. Ask every nested spec the ontology
+    what its own property contributes southbound. Two parameters reached over different protocols
+    are each pruned correctly.
 
-    The input is left untouched: the caller needs both shapes at once — the full one for the
-    bindings to read broker addresses out of, the pruned one to serve.
+    The input is left untouched. The caller needs both shapes at once. The full one is for the
+    bindings to read broker addresses out of. The pruned one is to serve.
 
-    Copying is deliberately **shallow, per spec node**, never ``copy.deepcopy``. A spec's
-    property keys are ``IRI``, which subclasses ``rdflib.URIRef``, which subclasses ``str`` —
-    deep-copying one reconstructs it through ``str.__reduce_ex__`` and yields a plain
-    ``URIRef``, which still compares equal but has silently lost the ``lined`` accessor
-    ``ClassSpec.to_pydantic_model`` needs.
+    Copying is deliberately **shallow, per spec node**. Never use ``copy.deepcopy``. A spec
+    property keys are ``IRI``. This subclasses ``rdflib.URIRef``. This subclasses ``str``. Deep-
+    copy of one reconstructs it through ``str.__reduce_ex__``. It yields a plain ``URIRef``. It
+    still compares equal. It has silently lost the ``lined`` accessor ``ClassSpec.to_pydantic_model``
+    needs.
 
-    ``cache`` maps property IRI to its southbound set. Pass one in to have it filled and reused
-    — every entry is a live SPARQL round trip, and the caller usually needs the same answers
-    again for the binding cross-check.
+    ``cache`` maps property IRI to its southbound set. Pass one in to have it filled and reused.
+    Every entry is a live SPARQL round trip. The caller usually needs the same answers again for
+    the binding cross-check.
     """
     cache = {} if cache is None else cache
     removed: Set[str] = set()
@@ -197,7 +193,7 @@ def _pruned_copy(
     cache: Dict[str, frozenset],
     removed: Set[str],
 ) -> Any:
-    """One spec node, copied with each nested parameter's protocol metadata gone."""
+    """One spec node, copied with each nested parameter protocol metadata gone."""
     properties = getattr(class_spec, "properties", None)
     if not properties:
         return class_spec
@@ -243,14 +239,14 @@ def _without(class_spec: Any, southbound: Collection[str], removed: Set[str]) ->
 def carries_southbound(value: Any, southbound: Collection[str]) -> Set[str]:
     """Which of the given protocol properties appear anywhere in a materialized payload.
 
-    The projection's assertion, usable as a guard or in a test: a northbound payload must
-    contain none of them. A generated model's field names are IRI-mangled, so this matches the
-    mangled form as well as the raw IRI — the former is what a served JSON body carries, the
-    latter what a spec or a graph dump does.
+    The projection assertion, usable as a guard or in a test. A northbound payload must contain
+    none of them. A generated model field names are IRI-mangled. This matches the mangled form
+    as well as the raw IRI. The former is what a served JSON body carries. The latter is what a
+    spec or a graph dump does.
 
-    Mangling goes through ``IRI.lined``, the OGM's own field-name derivation, rather than a
-    local copy of the rule: a detector that mirrored it could drift and start reporting "clean"
-    for a payload that leaks.
+    Mangling goes through ``IRI.lined``. This is the OGM own field-name derivation. Do not use a
+    local copy of the rule. A detector that mirrored it could drift. It would start report
+    "clean" for a payload that leaks.
     """
     haystack = str(value)
     return {
@@ -265,19 +261,21 @@ def cross_check(
     ontology_declared: Collection[str],
     descriptor_declared: Optional[Collection[Any]],
 ) -> None:
-    """Warn when a binding's declared metadata and the ontology's disagree.
+    """Warn when a binding declared metadata and the ontology disagree.
 
-    The ontology decides what is hidden; a descriptor's ``connection_metadata`` says what that
-    binding *reads*. They should coincide, and where they do not, one of the two has drifted:
+    The ontology decides what is hidden. A descriptor ``connection_metadata`` says what that
+    binding *reads*. They should coincide. Where they do not, one of the two drifted out of step.
 
-    - **In the ontology only** — the protocol contract grew a term this binding ignores. Safe
-      northbound (it is hidden either way), but the connector may be missing configuration.
-    - **In the descriptor only** — the code expects a term the ontology does not declare. That
-      term will not survive a write and will not reach the connector, so the parameter may come
-      up silently dead. This is the direction that costs debugging time.
+    In the ontology only, the protocol contract grew a term this binding ignores. This case is
+    safe northbound, since the projection hides the term either way. The connector may lack
+    configuration.
 
-    Warned, never raised: a drift in either direction is a real deployment state, and the
-    projection is already safe because it follows the ontology.
+    In the descriptor only, the code expects a term the ontology does not declare. That term
+    will not survive a write, and it will not reach the connector. The parameter may come up
+    silently dead. This is the direction that costs debugging time.
+
+    Warned, never raised. A drift in either direction is a real deployment state. The projection
+    is already safe because it follows the ontology.
     """
     if descriptor_declared is None:
         return

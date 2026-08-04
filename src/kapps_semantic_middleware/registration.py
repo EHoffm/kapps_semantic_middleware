@@ -1,21 +1,19 @@
 """Graph-write core of the KAPPS Semantic Middleware.
 
-Every knowledge-graph **write** goes through the OGM (`OGM.create` / `OGM.commit`),
-which is the architecture's single validated write path (paper §4.4.2). No write
-issues raw SPARQL UPDATE. **Reads** may use the triple-store access module
-(`ogm.db`) directly, which the architecture permits.
+Every knowledge-graph **write** goes through the OGM (`OGM.create` / `OGM.commit`). This is the
+architecture single validated write path (paper §4.4.2). No write issues raw SPARQL UPDATE.
+**Reads** may use the triple-store access module (`ogm.db`) directly. The architecture permits
+this.
 
-Only one direction of each inverse relation is materialized — the direction owned
-by the newly-created instance (e.g. a workflow's ``svc:isWorkflowOf``, a
-capability's ``svc:realizedByWorkflow``). The container-side inverses
-(``svc:hasWorkflow`` etc.) are OWL-inferable and are intentionally not written, so
-that each registration is a clean single-instance ``OGM.create`` rather than a
-read-modify-write append onto a growing multi-valued property. Queries in this
+Only one direction of each inverse relation receives materialization. The direction belongs to
+the newly-created instance (e.g. a workflow ``svc:isWorkflowOf``, a capability
+``svc:realizedByWorkflow``). The container-side inverses (``svc:hasWorkflow`` etc.) are
+OWL-inferable. They receive no write. Each registration is a clean single-instance ``OGM.create``
+rather than a read-modify-write append onto a growing multi-valued property. Queries in this
 module therefore use the materialized (instance-owned) direction.
 
-See ADR 0002 (Operation resolves via Capability), ADR 0003 (ontology-as-ground-
-truth), ADR 0004 (endpoint on Service and Workflow), ADR 0006 (OGM write path),
-ADR 0007 (liveness).
+See ADR 0002 (Operation resolves via Capability), ADR 0003 (ontology-as-ground-truth), ADR 0004
+(endpoint on Service and Workflow), ADR 0006 (OGM write path), ADR 0007 (liveness).
 """
 
 from __future__ import annotations
@@ -23,8 +21,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 from graph_db_interface import IRI
+from graph_db_interface.exceptions import InvalidIRIError
 from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware.vocabulary import CFC, MES, OperationStatus, SVC
@@ -38,7 +38,7 @@ class OntologyGroundTruthError(Exception):
 
 
 class OperationResolutionError(Exception):
-    """An Operation cannot be resolved to a reachable Workflow endpoint (ADR 0002)."""
+    """An Operation cannot resolve to a reachable Workflow endpoint (ADR 0002)."""
 
 
 RDF_TYPE = IRI("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
@@ -49,9 +49,48 @@ RDF_TYPE = IRI("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
 # --------------------------------------------------------------------------- #
 
 
-def mint_service_iri(resource_iri: IRI) -> IRI:
-    """Mint the deterministic Service IRI for a resource: ``{resource_iri}_service``."""
-    return IRI(f"{resource_iri}_service")
+def normalize_address(address: str) -> str:
+    """Normalize an instance address. Trivially different spellings become one deployment.
+
+    Lowercase the scheme and the netloc (host names are case-insensitive, paths are not). Strip
+    a trailing ``/``. Without this, ``http://Host:8000/`` and ``http://host:8000`` would mint
+    two Service nodes for one process. This discriminator prevents exactly that orphaning.
+    """
+    parts = urlsplit(address)
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path.rstrip("/"),
+            parts.query,
+            parts.fragment,
+        )
+    )
+
+
+def mint_service_iri(resource_iri: IRI, address: str) -> IRI:
+    """Mint the Service IRI for one middleware *instance*: ``{resource_iri}_service_{address}``.
+
+    The discriminator is the instance normalized address mangled with ``IRI.lined``. This
+    satisfies ADR 0022 two requirements at once. It is stable across restarts of the same
+    deployment (a returning instance re-adopts its node). It is distinct between concurrent
+    instances (a controller and a monitor on one resource do not overwrite each other
+    ``svc:address`` and heartbeat). ``lined`` rather than a hash. ADR 0021 keeps production IRIs
+    back-resolvable. ``IRI.from_lined`` reads the address off the node IRI.
+
+    ``address`` is required. A default would silently reinstate the shared node.
+
+    Raises:
+        ValueError: If ``address`` is not an absolute http(s) URL.
+    """
+    try:
+        discriminator = IRI(normalize_address(address)).lined
+    except InvalidIRIError as exc:
+        raise ValueError(
+            "The Service discriminator is derived from the instance address, which must be an "
+            f"absolute http(s) URL; got {address!r}"
+        ) from exc
+    return IRI(f"{resource_iri}_service_{discriminator}")
 
 
 def mint_workflow_iri(service_iri: IRI, name: str) -> IRI:
@@ -89,9 +128,9 @@ def assert_class_registered(
 ) -> None:
     """Assert a class pre-exists as the required kind (ADR 0003).
 
-    Valid iff ``class_iri == base_iri`` or ``class_iri`` is a subclass of
-    ``base_iri``. A read against the access module; a non-existent class makes the
-    subclass check False, so this also catches a missing class.
+    Valid iff ``class_iri == base_iri`` or ``class_iri`` is a subclass of ``base_iri``. A read
+    against the access module. A non-existent class makes the subclass check False. This also
+    catches a missing class.
 
     Raises:
         OntologyGroundTruthError: If the class is missing or not the required subclass.
@@ -109,9 +148,9 @@ def assert_class_registered(
 def _ref(iri: IRI) -> dict:
     """Wrap an IRI as an object-property reference for OGM write data.
 
-    Object-property values must be node references (the OGM materializes them as
-    nested nodes), not literals; a ``{"id": iri}`` dict is turned into a reference
-    node by the OGM's data formatter. Literals are passed as plain values.
+    Object-property values must be node references (the OGM materializes them as nested nodes),
+    not literals. A ``{"id": iri}`` dict becomes a reference node by the OGM data formatter.
+    Literals pass as plain values.
     """
     return {"id": str(iri)}
 
@@ -125,9 +164,9 @@ def _create(
 ) -> None:
     """Create a typed individual with its instance-owned properties via the OGM.
 
-    ``data`` maps property-IRI strings to lists of values (object references as
-    IRI strings, literals as their Python/str value). Idempotent for unchanged
-    structure (RDF set semantics on the OGM's underlying add).
+    ``data`` maps property-IRI strings to lists of values (object references as IRI strings,
+    literals as their Python/str value). Idempotent for unchanged structure (RDF set semantics
+    on the OGM underlying add).
     """
     scope = ClassScope.from_property_chains([[IRI(prop)] for prop in data])
     ogm.create(
@@ -148,9 +187,8 @@ def _set(
 ) -> None:
     """Set/replace/remove mutable properties on an existing individual via OGM.commit.
 
-    A value of ``[]`` removes the property. The commit is a single atomic
-    DELETE/INSERT transaction, so cardinality-constrained properties are never
-    transiently absent (SHACL-safe).
+    A value of ``[]`` removes the property. The commit is a single atomic DELETE/INSERT
+    transaction. Cardinality-constrained properties are never transiently absent (SHACL-safe).
     """
     ogm.commit(instance_iri=instance_iri, data=data, named_graph=named_graph)
 
@@ -169,10 +207,9 @@ def register_service(
     address: str,
     named_graph: Optional[IRI] = None,
 ) -> None:
-    """Register a Service instance for a resource and set its base address.
+    """Register a Service instance for a resource. Set its base address.
 
-    Raises OntologyGroundTruthError if ``service_class`` is not ``svc:Service`` or a
-    subclass.
+    Raises OntologyGroundTruthError if ``service_class`` is not ``svc:Service`` or a subclass.
     """
     assert_class_registered(ogm, service_class, SVC.Service, named_graph)
     _create(
@@ -195,10 +232,10 @@ def register_workflow(
 ) -> None:
     """Register a Workflow instance, its Capability instance, and their links.
 
-    The Workflow owns ``svc:isWorkflowOf`` (-> service) and ``svc:endpoint``; the Capability
-    owns ``svc:realizedByWorkflow`` (-> workflow); and the resource is linked to the
-    Capability it *provides* (``cfc:hasCapability``, Resource -> Capability). Raises
-    OntologyGroundTruthError if the classes are not the required subclasses.
+    The Workflow owns ``svc:isWorkflowOf`` (-> service) and ``svc:endpoint``. The Capability
+    owns ``svc:realizedByWorkflow`` (-> workflow). The resource links to the Capability it
+    *provides* (``cfc:hasCapability``, Resource -> Capability). Raises OntologyGroundTruthError
+    if the classes are not the required subclasses.
     """
     assert_class_registered(ogm, workflow_class, SVC.Workflow, named_graph)
     assert_class_registered(ogm, capability_class, CFC.Capability, named_graph)
@@ -215,10 +252,10 @@ def register_workflow(
         named_graph,
     )
     # The resource *provides* the Capability (cfc:hasCapability, Resource -> Capability). This
-    # Core link — not declared in the loaded Core subset — is written through the low-level
-    # triple API (as create_operation does for cfc: links). It is what lets a restarting
-    # resource (or the watchdog) find its own Operations by ontology traversal rather than by
-    # matching IRI names, and it persists across a restart.
+    # Core link is not declared in the loaded Core subset. Write through the low-level triple
+    # API (as create_operation does for cfc: links). It lets a restarting resource (or the
+    # watchdog) find its own Operations by ontology traversal rather than by match of IRI names.
+    # It persists across a restart.
     ogm.db.triple_add((resource_iri, CFC.hasCapability, capability_iri), named_graph=named_graph)
 
 
@@ -236,10 +273,10 @@ def register_state_property(
 ) -> None:
     """Register a StateProperty instance, its Capability instance, and their links.
 
-    The StateProperty owns ``svc:isStatePropertyOf`` (-> service) and ``svc:endpoint``; the
-    Capability owns ``svc:providedByStateProperty`` (-> state property); and the resource is
-    linked to the Capability it *provides* (``cfc:hasCapability``). Only the stable endpoint
-    is written — the live value is never persisted.
+    The StateProperty owns ``svc:isStatePropertyOf`` (-> service) and ``svc:endpoint``. The
+    Capability owns ``svc:providedByStateProperty`` (-> state property). The resource links to
+    the Capability it *provides* (``cfc:hasCapability``). Only the stable endpoint receives
+    write. The live value receives no persist.
     """
     assert_class_registered(ogm, state_property_class, SVC.StateProperty, named_graph)
     assert_class_registered(ogm, capability_class, CFC.Capability, named_graph)
@@ -259,24 +296,24 @@ def register_state_property(
         {str(SVC.providedByStateProperty): [_ref(state_property_iri)]},
         named_graph,
     )
-    # The resource provides this Capability too (cfc:hasCapability); see register_workflow.
+    # The resource provides this Capability too (cfc:hasCapability). See register_workflow.
     ogm.db.triple_add((resource_iri, CFC.hasCapability, capability_iri), named_graph=named_graph)
 
 
 # --------------------------------------------------------------------------- #
-# Deregistration (remove reachability via OGM; find targets via reads).
+# Deregistration (remove reachability via OGM, find targets via reads).
 # --------------------------------------------------------------------------- #
 
 
 def deregister_service(
     ogm: "OGM", service_iri: IRI, named_graph: Optional[IRI] = None
 ) -> None:
-    """Remove a Service's reachability (address + all workflow/state endpoints).
+    """Remove a Service reachability (address + all workflow/state endpoints).
 
-    Endpoints are removed via ``OGM.commit`` (the validated write path); the
-    workflows/state-properties to clear are found via a read on the instance-owned
-    inverse (``svc:isWorkflowOf`` / ``svc:isStatePropertyOf``). Structural triples
-    and rdf:type are preserved (paper: availability vs. existence).
+    Endpoints receive removal via ``OGM.commit`` (the validated write path). The workflows/state-
+    properties to clear are found via a read on the instance-owned inverse (``svc:isWorkflowOf``
+    / ``svc:isStatePropertyOf``). Structural triples and rdf:type are preserved (paper:
+    availability vs. existence).
     """
     db = ogm.db
     _set(ogm, service_iri, {str(SVC.address): []}, named_graph)
@@ -303,7 +340,7 @@ def update_heartbeat(
     timestamp: Optional[datetime] = None,
     named_graph: Optional[IRI] = None,
 ) -> None:
-    """Refresh a Service's ``svc:lastHeartbeat`` via OGM.commit (atomic replace)."""
+    """Refresh a Service ``svc:lastHeartbeat`` via OGM.commit (atomic replace)."""
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
     _set(ogm, service_iri, {str(SVC.lastHeartbeat): [timestamp.isoformat()]}, named_graph)
@@ -319,9 +356,9 @@ def find_stale_services(
     """Find reachable-but-silent Services whose heartbeat has gone stale (a read).
 
     A service is stale if it currently has an ``svc:address`` but either has no
-    ``svc:lastHeartbeat`` or its latest heartbeat is older than ``max_age_seconds``.
-    Services are identified by ``svc:address`` presence (real services are subclass-
-    typed, so ``rdf:type svc:Service`` would not match).
+    ``svc:lastHeartbeat`` or its latest heartbeat is older than ``max_age_seconds``. Services
+    are identified by ``svc:address`` presence (real services are subclass-typed, so
+    ``rdf:type svc:Service`` would not match).
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -347,11 +384,18 @@ def sweep_stale_services(
     now: Optional[datetime] = None,
     named_graph: Optional[IRI] = None,
 ) -> list[IRI]:
-    """Deregister every stale Service and fail its resource's stranded Operations (ADR 0007/0009).
+    """Deregister every stale Service. Fail its resource stranded Operations (ADR 0007/0009).
 
-    Alongside removing a dead resource's reachability, the watchdog marks that resource's
-    stranded Operations (``queued``/``running``) ``failed`` so work addressed to a resource
-    that will never return does not hang forever. Returns the swept Service IRIs.
+    Alongside removal of a dead resource reachability, the watchdog marks that resource stranded
+    Operations (``queued``/``running``) ``failed``. Work addressed to a resource that will never
+    return does not hang forever. Returns the swept Service IRIs.
+
+    Since ADR 0022 a resource may carry several Services. This is no longer quite right. A stale
+    monitor drags its live sibling stranded Operations down with it. Fail them only when no
+    sibling survives is *also* wrong. A surviving monitor realizes no Workflow. It would shield
+    a dead controller queue forever. The correct predicate is per-Operation ("does any surviving
+    Service realize this Operation Capability", ADR 0002). ``_reconstruct_queue`` needs the same
+    treatment. Tracked as #63. It is out of scope for #47.
     """
     stale = find_stale_services(ogm, max_age_seconds, now=now, named_graph=named_graph)
     for service_iri in stale:
@@ -379,19 +423,19 @@ def sweep_stale_services(
 
 
 EVENT_TRIGGER_WORKFLOW_NAME = "event_trigger"
-"""Reserved built-in Workflow name for the receiver's event-trigger REST endpoint."""
+"""Reserved built-in Workflow name for the receiver event-trigger REST endpoint."""
 
 
 def build_event_trigger_url(address: str) -> str:
-    """Build the receiver's event-trigger endpoint (``POST /workflows/event_trigger/execute``, ADR 0009)."""
+    """Build the receiver event-trigger endpoint (``POST /workflows/event_trigger/execute``, ADR 0009)."""
     return f"{address.rstrip('/')}/workflows/{EVENT_TRIGGER_WORKFLOW_NAME}/execute"
 
 
 def mint_operation_iri(operation_class: IRI) -> IRI:
     """Mint a unique Operation instance IRI under the operation-class namespace.
 
-    Operations are per-dispatch, so (unlike the deterministic registration IRIs) each
-    dispatch mints a fresh IRI.
+    Operations are per-dispatch. Each dispatch mints a fresh IRI (unlike the deterministic
+    registration IRIs).
     """
     return IRI(f"{operation_class}_op_{uuid.uuid4().hex[:12]}")
 
@@ -406,17 +450,17 @@ def create_operation(
     data: Optional[dict] = None,
     named_graph: Optional[IRI] = None,
 ) -> None:
-    """Create an Operation individual for dispatch, addressed to a target Capability (ADR 0009/0010).
+    """Create an Operation individual for dispatch. Address it to a target Capability (ADR 0009/0010).
 
-    The whole Operation — its ``rdf:type``, the single-valued ``cfc:implementsCapability``
-    link, and ``svc:operationStatus`` (plus any svc:-domain ``data``) — is created in ONE
-    ``OGM.create``, the single validated write path (ADR 0008; paper §4.3/4.4.2 "every write
-    originates as an OGM commit"). This requires the loaded ontology to declare the Core
-    Operation-property domains (``cfc:implementsCapability`` with ``rdfs:domain cfc:Operation``);
-    the scenario/demo ontologies do. The Resource→Capability ``cfc:hasCapability`` link written
-    at *registration* is a separate, multi-valued append that stays on the low-level path until
-    ``kapps_ogm`` grows a validated single-triple append (see ADR 0008 and the ``hasPossessor``
-    parallel in ADR 0011).
+    The whole Operation receives creation in ONE ``OGM.create``. This includes its ``rdf:type``,
+    the single-valued ``cfc:implementsCapability`` link, and ``svc:operationStatus`` (plus any
+    svc:-domain ``data``). This is the single validated write path (ADR 0008 and paper §4.3/4.4.2,
+    "every write originates as an OGM commit"). This requires the loaded ontology to declare the
+    Core Operation-property domains (``cfc:implementsCapability`` with ``rdfs:domain
+    cfc:Operation``). The scenario/demo ontologies do. The Resource->Capability
+    ``cfc:hasCapability`` link written at *registration* is a separate, multi-valued append. It
+    stays on the low-level path until ``kapps_ogm`` grows a validated single-triple append (see
+    ADR 0008 and the ``hasPossessor`` parallel in ADR 0011).
     """
     create_data: dict = {
         str(CFC.implementsCapability): [_ref(capability_iri)],
@@ -435,12 +479,11 @@ def resolve_dispatch_target(
 ) -> Tuple[IRI, IRI, str]:
     """Resolve a reachable receiver for a Capability *class* (ADR 0002 discovery, ADR 0009).
 
-    Binds a Capability *instance* of ``capability_class`` realized by a Workflow whose
-    Service has a live ``svc:address``:
-    ``Capability --realizedByWorkflow--> Workflow --isWorkflowOf--> Service --address``.
-    If ``target_resource`` is given, the Service is pinned to that resource
-    (``svc:isServiceOf``). The bound Capability instance is what the dispatched Operation
-    will ``cfc:implementsCapability``.
+    Bind a Capability *instance* of ``capability_class`` realized by a Workflow whose Service
+    has a live ``svc:address``: ``Capability --realizedByWorkflow--> Workflow --isWorkflowOf-->
+    Service --address``. If ``target_resource`` is given, the Service is pinned to that resource
+    (``svc:isServiceOf``). The bound Capability instance is what the dispatched Operation will
+    ``cfc:implementsCapability``.
 
     Returns:
         Tuple of (capability_instance_iri, service_iri, service_address).
@@ -484,12 +527,12 @@ def revert_operation(
 ) -> None:
     """Remove a just-created Operation whose event trigger failed to deliver (ADR 0010).
 
-    Atomic create-and-notify: a failed notify reverts the created Operation. ``OGM.delete``
-    is not implemented in ``kapps_ogm`` yet, so this removes exactly what
-    ``create_operation`` wrote. Literal properties are cleared through the OGM commit path
-    first (commit needs the ``rdf:type`` triple present to resolve the class); the
-    ``cfc:implementsCapability`` and ``rdf:type`` triples are then removed via the low-level
-    ``ogm.db.triple_delete`` (a sanctioned graph_db_interface write).
+    Atomic create-and-notify: a failed notify reverts the created Operation. ``OGM.delete`` is
+    not implemented in ``kapps_ogm`` yet. This removes exactly what ``create_operation`` wrote.
+    Literal properties receive clear through the OGM commit path first (commit needs the
+    ``rdf:type`` triple present to resolve the class). The ``cfc:implementsCapability`` and
+    ``rdf:type`` triples then receive removal via the low-level ``ogm.db.triple_delete`` (a
+    sanctioned graph_db_interface write).
     """
     clear_literals: dict = {str(SVC.operationStatus): []}
     if data:
@@ -511,13 +554,13 @@ class OperationQueueEmpty(Exception):
 def resolve_operation_workflow(
     ogm: "OGM", operation_iri: IRI, named_graph: Optional[IRI] = None
 ) -> IRI:
-    """Resolve an Operation to the Workflow that realizes its Capability, WITHOUT
-    requiring a live endpoint (ADR 0002 chain, minus reachability). This is the
-    provenance resolver used by pull-and-run so `executedByWorkflow` is recorded even
-    if the workflow's `svc:endpoint` was deregistered mid-run.
+    """Resolve an Operation to the Workflow that realizes its Capability, WITHOUT require of a
+    live endpoint (ADR 0002 chain, minus reachability). This is the provenance resolver used by
+    pull-and-run so `executedByWorkflow` receives record even if the workflow `svc:endpoint` was
+    deregistered mid-run.
 
     Raises:
-        OperationResolutionError: If no Workflow realizes the Operation's Capability.
+        OperationResolutionError: If no Workflow realizes the Operation Capability.
     """
     sparql = f"""
     SELECT ?wf WHERE {{
@@ -547,7 +590,7 @@ def set_operation_status(
 ) -> None:
     """Set `svc:operationStatus` on an Operation via the OGM atomic commit path.
 
-    The queued->running (and any single-status) transition; ADR 0009.
+    This covers the queued->running transition and any other single-status transition (ADR 0009).
     """
     _set(ogm, operation_iri, {str(SVC.operationStatus): [status]}, named_graph)
 
@@ -565,11 +608,11 @@ def record_terminal_status(
 ) -> None:
     """Record terminal status (`done`/`failed`) with execution provenance in ONE commit.
 
-    Writes status + provenance atomically (single commit) so an Operation is never
+    Write status + provenance atomically (single commit). An Operation is never
     terminal-without-provenance (ADR 0009: the status IS the provenance record). On failure,
-    ``failure_state`` (a JSON snapshot of the resource's datamodel) is written into
-    ``svc:failureState`` in the same commit, so the failed status and the state that produced
-    it are never separable.
+    ``failure_state`` (a JSON snapshot of the resource datamodel) receives write into
+    ``svc:failureState`` in the same commit. The failed status and the state that produced it
+    are never separable.
     """
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
@@ -594,12 +637,12 @@ def find_resource_operations(
     statuses: list[str],
     named_graph: Optional[IRI] = None,
 ) -> list[IRI]:
-    """Find a resource's own Operations whose ``svc:operationStatus`` is one of ``statuses``.
+    """Find a resource own Operations whose ``svc:operationStatus`` is one of ``statuses``.
 
     Ontology-backed traversal (ADR 0009): an Operation implements a Capability
-    (``cfc:implementsCapability``), and the resource provides that Capability
-    (``cfc:hasCapability``). Both links persist across a restart, so this works at early
-    startup before re-registration. Explicitly does NOT match on IRI names.
+    (``cfc:implementsCapability``). The resource provides that Capability (``cfc:hasCapability``).
+    Both links persist across a restart. This works at early startup before re-registration.
+    Explicitly does NOT match on IRI names.
 
     Args:
         ogm: The OGM instance.
@@ -626,6 +669,44 @@ def find_resource_operations(
     return [IRI(str(b["op"])) for b in bindings]
 
 
+def services_of_resource(
+    ogm: "OGM",
+    resource_iri: IRI,
+    *,
+    reachable_only: bool = False,
+    named_graph: Optional[IRI] = None,
+) -> list[IRI]:
+    """Every Service bound to a resource, via the instance-owned ``svc:isServiceOf`` (ADR 0022).
+
+    A Service IRI carries an instance discriminator. It can no longer receive reconstruction from
+    a resource IRI alone. This read replaces that reconstruction. ``svc:isServiceOf`` has always
+    been many-to-one. Consumers must no longer assume the answer has exactly one element. A
+    controller and a read-only monitor on one resource are two Services.
+
+    Args:
+        ogm: The OGM instance.
+        resource_iri: The resource whose services to find.
+        reachable_only: Keep only Services that currently carry an ``svc:address``. A
+            deregistered instance keeps its individual but loses its address (ADR 0007). This is
+            the reachable-now set rather than the ever-registered set.
+        named_graph: Optional named graph for the read.
+
+    Returns:
+        List of Service IRIs.
+    """
+    reachability = f"\n        ?svc <{SVC.address}> ?addr ." if reachable_only else ""
+    sparql = f"""
+    SELECT DISTINCT ?svc WHERE {{
+        ?svc <{SVC.isServiceOf}> <{resource_iri}> .{reachability}
+    }}
+    """
+    result = ogm.db.query(sparql, convert_bindings=True)
+    bindings = (
+        result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
+    )
+    return [IRI(str(b["svc"])) for b in bindings]
+
+
 def _resource_of_service(
     ogm: "OGM", service_iri: IRI, named_graph: Optional[IRI] = None
 ) -> Optional[IRI]:
@@ -646,10 +727,9 @@ def mark_operation_failed(
 ) -> None:
     """Transition an Operation to ``failed`` with a reason via the OGM atomic commit path.
 
-    Used to reclaim an orphaned ``running`` Operation (a resource crashed mid-execution) or
-    to sweep a dead resource's stranded Operations. Recovery is never a silent physical
-    replay (ADR 0009) — the Operation goes to ``failed`` and a planner decides whether to
-    re-dispatch.
+    Use to reclaim an orphaned ``running`` Operation (a resource crashed mid-execution) or to
+    sweep a dead resource stranded Operations. Recovery is never a silent physical replay (ADR
+    0009). The Operation goes to ``failed``. A planner decides whether to re-dispatch.
     """
     _set(
         ogm,
@@ -667,12 +747,12 @@ def mark_operation_failed(
 
 class HandoverPreconditionError(Exception):
     """A handover precondition failed (caller lacks possession, or counterpart lacks the
-    complementary handover ability) — rejected before any physical work begins (ADR 0011)."""
+    complementary handover ability). Rejection occurs before any physical work begins (ADR 0011)."""
 
 
 def mint_possession_state_iri(workpiece_iri: IRI) -> IRI:
-    """Mint a fresh PossessionState IRI (each change of possession makes a new state; the
-    previous one is kept as implicit history)."""
+    """Mint a fresh PossessionState IRI. Each change of possession makes a new state.
+    The previous one is kept as implicit history."""
     return IRI(f"{workpiece_iri}_possession_{uuid.uuid4().hex[:12]}")
 
 
@@ -683,12 +763,12 @@ def create_possession(
     possessor_iri: IRI,
     named_graph: Optional[IRI] = None,
 ) -> IRI:
-    """Establish an initial possession over Core's reified model (verified vs Core 0.9.0).
+    """Establish an initial possession over Core reified model (verified vs Core 0.9.0).
 
     A ``cfc:PossessionState`` the possessor holds (``cfc:hasPossessor``, appended as an atomic
-    insertion since a resource may possess several workpieces) and the workpiece is possessed
-    by (``cfc:hasPossessedWorkpiece``, set through the OGM commit/update path — ADR 0008). The
-    scenario ontology must declare these Core terms' domains so the OGM commit validates.
+    insertion since a resource may possess several workpieces) and the workpiece is possessed by
+    (``cfc:hasPossessedWorkpiece``, set through the OGM commit/update path — ADR 0008). The
+    scenario ontology must declare these Core terms domains so the OGM commit validates.
 
     Returns:
         The minted PossessionState IRI.
@@ -696,7 +776,7 @@ def create_possession(
     ps_iri = mint_possession_state_iri(workpiece_iri)
     # A resource may possess several workpieces at once (ADR 0011 — possession is not
     # universally maxCount 1), so `cfc:hasPossessor` is APPENDED via the graph_db_interface
-    # atomic insertion; a workpiece has exactly one possession, so `cfc:hasPossessedWorkpiece`
+    # atomic insertion. A workpiece has exactly one possession, so `cfc:hasPossessedWorkpiece`
     # is SET through the OGM commit path (an atomic replace). The PossessionState node comes
     # into being as their shared object (inferably a cfc:PossessionState via rdfs:range).
     ogm.db.triple_add((possessor_iri, CFC.hasPossessor, ps_iri), named_graph=named_graph)
@@ -713,7 +793,7 @@ def find_possession_state(
     """The current PossessionState in which ``possessor_iri`` holds ``workpiece_iri``, or None.
 
     An ontology-backed read (``workpiece cfc:hasPossessedWorkpiece ?ps . possessor
-    cfc:hasPossessor ?ps``) — never matches on IRI names.
+    cfc:hasPossessor ?ps``). Never match on IRI names.
     """
     sparql = f"""
     SELECT ?ps WHERE {{
@@ -736,7 +816,7 @@ def counterpart_has_complementary_ability(
 ) -> bool:
     """True iff the counterpart carries the handover ability COMPLEMENTARY to ``mode_ability_iri``.
 
-    ``mes:complements`` is symmetric; a read (``mode_ability mes:complements ?a . counterpart
+    ``mes:complements`` is symmetric. This is a read (``mode_ability mes:complements ?a . counterpart
     mes:hasHandoverAbility ?a``).
     """
     sparql = f"""
@@ -761,16 +841,15 @@ def switch_possession(
 ) -> IRI:
     """Atomically change possession of a workpiece to a new possessor (ADR 0011).
 
-    A fresh ``cfc:PossessionState`` is minted for the new possessor. The new possessor's
-    ``cfc:hasPossessor`` is APPENDED as an atomic insertion (graph_db_interface) — a resource
-    may possess several workpieces, so this must not disturb its existing possessions (ADR
-    0011 — possession is not universally maxCount 1). The workpiece's
-    ``cfc:hasPossessedWorkpiece`` is then re-pointed via a single ``OGM.commit`` — the update
-    path (ADR 0008), an atomic DELETE/INSERT that keeps the workpiece pointing to exactly one
-    PossessionState throughout, so Core's Workpiece cardinality-1 (the commit-time SHACL
-    backstop) is never transiently violated. Appending the possessor link BEFORE the re-point
-    means a failed re-point leaves the prior possession fully intact. The previous
-    PossessionState is kept as implicit history.
+    A fresh ``cfc:PossessionState`` receives mint for the new possessor. The new possessor
+    ``cfc:hasPossessor`` receives APPEND as an atomic insertion (graph_db_interface). A resource
+    may possess several workpieces. This must not disturb its existing possessions (ADR 0011 —
+    possession is not universally maxCount 1). The workpiece ``cfc:hasPossessedWorkpiece`` then
+    receives re-point via a single ``OGM.commit``. This is the update path (ADR 0008), an atomic
+    DELETE/INSERT. It keeps the workpiece pointed to exactly one PossessionState throughout.
+    Core Workpiece cardinality-1 (the commit-time SHACL backstop) is never transiently violated.
+    Append the possessor link BEFORE the re-point. A failed re-point leaves the prior possession
+    fully intact. The previous PossessionState is kept as implicit history.
 
     Returns:
         The new PossessionState IRI.

@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues (`EHoffm/kapps_semantic_middleware`, via the `gh` CLI); external PRs are also pulled into the triage queue. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (`EHoffm/kapps_semantic_middleware`, via the `gh` CLI). External PRs are also pulled into the triage queue. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

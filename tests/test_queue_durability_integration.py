@@ -24,6 +24,7 @@ from kapps_semantic_middleware.registration import (
     find_resource_operations,
     mint_capability_iri,
     mint_operation_iri,
+    mint_service_iri,
     mint_workflow_iri,
     register_service,
     register_workflow,
@@ -47,7 +48,9 @@ def _register_hello_resource(ogm) -> tuple[str, str]:
 
     Returns (service_iri, capability_iri). Simulates a resource that existed before a crash.
     """
-    service_iri = seed.HELLO_RESOURCE + "_service"
+    # The address is the middleware's own (port 8993 below), so the restarting instance
+    # re-adopts this node rather than minting a second one (ADR 0022).
+    service_iri = mint_service_iri(seed.HELLO_RESOURCE, "http://127.0.0.1:8993")
     cap_iri = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
     wf_iri = mint_workflow_iri(service_iri, "hello_world")
     register_service(

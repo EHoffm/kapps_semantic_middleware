@@ -5,7 +5,7 @@ and execution capabilities. Supports three modes per ADR 0005 -- see `modes.Mode
 for what each one means and which are implemented.
 
 Operation execution follows ADR 0002: an Operation resolves via its implemented
-Capability to a Workflow endpoint, which is then invoked over HTTP.
+Capability to a Workflow endpoint, which the system then invokes over HTTP.
 """
 
 from __future__ import annotations
@@ -34,6 +34,8 @@ from kapps_semantic_middleware.connectors.semantic import (
 from kapps_semantic_middleware.connectors.wiring import WiringPlan, plan_wiring
 from kapps_semantic_middleware import modes
 from kapps_semantic_middleware.modes import Mode
+from kapps_semantic_middleware.activity import ActivityFeed, enable_activity_feed
+from kapps_semantic_middleware.rest_router import generate_recursive_rest_api
 from kapps_semantic_middleware.registration import (
     HandoverPreconditionError,
     OperationQueueEmpty,
@@ -100,8 +102,8 @@ class _ClaimedOperation:
     """Handle yielded by ``claim_next(...)`` (ADR 0010 pull-and-run).
 
     ``operation`` is the re-fetched Operation (a `kapps_ogm` Node — hydrated under the
-    domain-supplied ClassScope, or a bare reference when no scope was given); the body reads
-    it to decide what work to do and sets ``result`` to the outcome, which is recorded as
+    domain-supplied ClassScope, or a bare reference when no scope was given). The body reads
+    it to decide what work to do. It sets ``result`` to the outcome, which is recorded as
     ``svc:executionResult`` in the terminal transition.
     """
 
@@ -114,10 +116,10 @@ class _ClaimedOperation:
 class SemanticMiddleware(Middleware):
     """KAPPS Semantic Middleware extending aas_middleware.Middleware.
 
-    Adds knowledge-graph registration, discovery, and execution. Supports the three
-    modes of :class:`~kapps_semantic_middleware.modes.Mode`; resource mode registers
-    the Service/Workflow/Capability instances on startup and deregisters them on
-    shutdown, and is the only one with runtime consequence today.
+    Adds knowledge-graph registration, discovery, and execution. It supports the
+    three modes of :class:`~kapps_semantic_middleware.modes.Mode`. Resource mode
+    registers the Service/Workflow/Capability instances on startup, and deregisters
+    them on shutdown. It is the only mode with runtime consequence today.
 
     ``mode`` accepts a ``Mode`` constant or the equivalent bare string -- ``Mode`` is a
     ``str`` subclass, so existing ``mode="resource"`` callers are unaffected.
@@ -125,6 +127,83 @@ class SemanticMiddleware(Middleware):
     Operation execution: an Operation resolves via its implemented
     Capability to a Workflow endpoint, which is then invoked over HTTP.
     """
+
+    #: What this product calls itself. The base class names the framework it is built on,
+    #: which is accurate for the framework and wrong for anything hitting *our* address --
+    #: a visitor landing on a middleware instance should be told what it reached. Root
+    #: ADR 0001 allows only bugfixes in sibling repos, so the name is corrected here rather
+    #: than there: the base class stays as it is, and every override lives on this side.
+    APP_TITLE = "semantic-middleware"
+    APP_DESCRIPTION = (
+        "The KAPPS Semantic Middleware. It reads a resource out of a knowledge graph, "
+        "wires its connectors from what it finds there, and serves the resulting datamodel."
+    )
+    APP_WELCOME = "Welcome to semantic middleware!"
+    APP_CONTACT = {"name": "Etienne Hoffmann", "email": "etienne.hoffmann@kit.edu"}
+
+    @staticmethod
+    def _app_version() -> str:
+        """This package's version, not the framework's.
+
+        The base class defaults to ``aas_middleware.VERSION``, so an unmodified header
+        advertises the framework release as though it were this product's. Read from
+        installed metadata rather than hardcoded, so it tracks ``pyproject.toml`` and
+        cannot drift. Falls back when the package is run from a tree that was never
+        installed.
+        """
+        try:
+            from importlib.metadata import version
+
+            return version("kapps-semantic-middleware")
+        except Exception:  # pragma: no cover - only when run uninstalled
+            return "0+unknown"
+
+    def _rebrand(self) -> None:
+        """Name this product rather than the framework, in the OpenAPI metadata.
+
+        Every field the ``/docs`` header renders comes from here: the title (which is also
+        the browser-tab name), the description, the version badge and the contact link. The
+        base class fills all four in for the framework it ships, which is accurate for the
+        framework and wrong on *our* address.
+
+        It has to run before anything touches ``self.app``, because the base class builds
+        the FastAPI object once and caches it, reading the metadata at that moment.
+        """
+        self.set_meta_data(
+            title=self.APP_TITLE,
+            description=self.APP_DESCRIPTION,
+            version=self._app_version(),
+            contact=self.APP_CONTACT,
+        )
+
+    @property
+    def app(self):
+        """The FastAPI app, with its root route renamed.
+
+        The base class registers ``GET /`` inside its own ``app`` property, so the route
+        exists the moment the app does. Starlette matches routes in order and a second
+        registration would never be reached, so the original is removed rather than
+        shadowed. Guarded by a flag: the base property caches, but this one is consulted
+        on every access.
+        """
+        app = Middleware.app.fget(self)  # type: ignore[attr-defined]
+        if not getattr(app, "_kapps_root_replaced", False):
+            app._kapps_root_replaced = True
+            for route in list(app.routes):
+                methods = getattr(route, "methods", None) or set()
+                if getattr(route, "path", None) == "/" and "GET" in methods:
+                    app.routes.remove(route)
+
+            welcome = self.APP_WELCOME
+
+            @app.get("/", response_model=str)
+            async def root() -> str:
+                return welcome
+
+            # The schema is generated lazily and cached. Drop any copy built before the
+            # swap, so /docs and /openapi.json describe the routes that actually exist.
+            app.openapi_schema = None
+        return app
 
     def __init__(
         self,
@@ -144,8 +223,11 @@ class SemanticMiddleware(Middleware):
         autoregister_connectors: bool = True,
         connector_sync_direction: SyncDirection = SyncDirection.BIDIRECTIONAL,
         connector_registry: Optional[SemanticConnectorRegistry] = None,
+        activity_feed: bool = False,
+        activity_capacity: int = 200,
     ) -> None:
         super().__init__()
+        self._rebrand()
 
         if mode not in modes.ALL:
             raise ValueError(
@@ -180,7 +262,7 @@ class SemanticMiddleware(Middleware):
 
             self.resource_iri = IRI(resource_iri)
             self.service_class = IRI(service_class)
-            self.service_iri = mint_service_iri(self.resource_iri)
+            self.service_iri = mint_service_iri(self.resource_iri, self.address)
 
             # Connector wiring (ADR 0022/0023/0028). The class_scope is the consumer's view,
             # rooted at this resource and configured in embedding code rather than in the
@@ -190,19 +272,23 @@ class SemanticMiddleware(Middleware):
             self.autoregister_connectors = autoregister_connectors
             self.connector_sync_direction = connector_sync_direction
             self.connector_registry = connector_registry or default_registry
-            # None until a class_scope is given: without a consumer's view there is nothing
-            # to root recognition at, and the datamodel fetch stays unscoped as it is for
-            # scenarios 1 and 2.
+            # None until a class_scope is given. Without a consumer's view, there is no
+            # root for recognition, and the datamodel fetch stays unscoped, the same way
+            # it does for scenarios 1 and 2.
             self._wiring: Optional[WiringPlan] = None
-            if class_scope is not None:
-                self._wire_semantic_connectors()
+            # The parameter routes the recursive router generated, in tree order (ADR 0017).
+            # Populated at startup. Kept because the question "what did I actually expose?"
+            # the user can otherwise answer only by filtering `app.routes` and re-deriving which
+            # of them are parameters. A silently empty list is also the symptom of a tree
+            # walk that missed a branch.
+            self._parameter_routes: List[str] = []
 
             # Event-trigger coordination (ADR 0009/0010): an in-memory operation queue
-            # (the graph is the source of truth; durability/reconstruction is #17) and the
-            # receiver-side event-trigger REST route that other resources ring to dispatch.
+            # (the graph is the source of truth, durability and reconstruction are #17) and
+            # the receiver-side event-trigger REST route that other resources ring to dispatch.
             self._operation_queue: List[IRI] = []
-            # Optional domain callback fired on enqueue (#15); None = leave the Operation
-            # queued for a manual claim_next. Background tasks are tracked so they are not
+            # Optional domain callback fired on enqueue (#15). None means leave the Operation
+            # queued for a manual claim_next. The system tracks background tasks so they are not
             # garbage-collected before they finish.
             self._callback: Optional[Any] = None
             self._callback_scope: Any = None
@@ -213,6 +299,11 @@ class SemanticMiddleware(Middleware):
             self.add_callback("on_shutdown", self._deregister_service)
             # Stand up the resource's REST interface from graph ground truth
             # (generate_rest_interface: OGM-fetch the resource instance -> datamodel -> API).
+            # This registers the "resource" persistence connector that
+            # _wire_semantic_connectors's synced connectors look up at their own startup,
+            # below. That lookup runs from an on_start_up callback too, and callbacks run in
+            # registration order -- so this one must land in the list first, or connector
+            # sync starts against a persistence connector that does not exist yet.
             self.add_callback("on_start_up", self._load_resource_datamodel)
             # Reconstruct the operation queue from the graph (ADR 0009 durability): a one-shot
             # startup query, so no work is lost across a restart and no steady-state polling.
@@ -220,6 +311,9 @@ class SemanticMiddleware(Middleware):
             if heartbeat_interval and heartbeat_interval > 0:
                 self.add_callback("on_start_up", self._start_heartbeat)
                 self.add_callback("on_shutdown", self._stop_heartbeat)
+
+            if class_scope is not None:
+                self._wire_semantic_connectors()
 
         elif mode == Mode.WATCHDOG:
             if ogm is None:
@@ -235,6 +329,17 @@ class SemanticMiddleware(Middleware):
             self.service_class = None
             self.service_iri = None
             raise NotImplementedError("mode 'server' is not implemented yet")
+
+        # Opt-in, and deliberately *outside* the mode branches (#67). A controller and a
+        # monitor this library configures them differently (ADR 0022), so they inherit the feed
+        # from the same code -- no `if mode ==` here, and none in `activity.py` either. That
+        # the flavors compose out of one library is the claim the demo is built to make, and
+        # a mode-specific observability surface would quietly undercut it.
+        #
+        # Off means off: no ring buffer allocated, no handler attached, no route mounted.
+        self.activity_feed: Optional[ActivityFeed] = None
+        if activity_feed:
+            self.activity_feed = enable_activity_feed(self, capacity=activity_capacity)
 
     async def _register_service(self) -> None:
         """Register the Service instance in the knowledge graph on startup."""
@@ -268,7 +373,7 @@ class SemanticMiddleware(Middleware):
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def _heartbeat_loop(self) -> None:
-        """Refresh svc:lastHeartbeat every ``heartbeat_interval`` seconds until cancelled."""
+        """Refresh svc:lastHeartbeat every ``heartbeat_interval`` seconds, until the system cancels it."""
         # The loop is only started when a positive interval was configured.
         interval = self.heartbeat_interval or 30.0
         try:
@@ -301,6 +406,10 @@ class SemanticMiddleware(Middleware):
                 update_heartbeat, self.ogm, self.service_iri, named_graph=self.named_graph
             )
         )
+        # One line per interval (30s by default), so this is a pulse rather than a flood --
+        # and it is the only outward sign that an idle instance is still alive, which is
+        # exactly what someone watching the activity feed wants to see (#67).
+        logger.info("Heartbeat written for %s", self.service_iri)
 
     # --- Liveness: centralized watchdog sweep (watchdog mode), ADR 0007 ---- #
 
@@ -309,7 +418,7 @@ class SemanticMiddleware(Middleware):
         self._sweep_task = asyncio.create_task(self._sweep_loop())
 
     async def _sweep_loop(self) -> None:
-        """Sweep stale services every ``sweep_interval`` seconds until cancelled."""
+        """Sweep stale services every ``sweep_interval`` seconds, until canceled."""
         try:
             while True:
                 await self.sweep()
@@ -327,10 +436,10 @@ class SemanticMiddleware(Middleware):
                 pass
 
     async def sweep(self) -> List[str]:
-        """Deregister every stale service once; returns the swept service IRIs (as str).
+        """Deregister every stale service once. Returns the swept service IRIs (as str).
 
-        A watchdog-mode instance calls this on its ``sweep_interval``; it is also a
-        plain method so a test or operator can trigger a sweep directly.
+        A watchdog-mode instance calls this on its ``sweep_interval``. It is also a
+        plain method, so a test or operator triggers a sweep directly.
         """
         swept = await anyio.to_thread.run_sync(
             functools.partial(
@@ -414,11 +523,11 @@ class SemanticMiddleware(Middleware):
 
         Parallel to :meth:`workflow` but GET-only, for a readable, potentially
         high-frequency-changing value (e.g. a door's status). In resource mode,
-        requires ``capability_class`` and ``state_property_class`` as keyword-only
-        IRIs (both classes must pre-exist per ADR 0003). Registers a GET endpoint at
-        ``/state/{name}`` that calls the decorated getter on demand — the live value
-        is NEVER written to the graph; only the stable endpoint triple is, at
-        registration.
+        it requires ``capability_class`` and ``state_property_class`` as
+        keyword-only IRIs (both classes must pre-exist per ADR 0003). Registers a
+        GET endpoint at ``/state/{name}`` that calls the decorated getter on
+        demand. The live value The system never writes to the graph. Only the stable
+        endpoint triple The system writes it at registration.
 
         Raises:
             RuntimeError: If called outside resource mode.
@@ -482,10 +591,11 @@ class SemanticMiddleware(Middleware):
     def _register_event_trigger(self) -> None:
         """Expose the built-in ``execute`` event trigger on the REST API (ADR 0009).
 
-        Mounted via the base aas_middleware workflow mechanism as a plain REST route
-        (``POST /workflows/event_trigger/execute``) — deliberately NOT a KG-registered
-        ``svc:Workflow``: the event trigger is framework plumbing every resource-mode
-        instance exposes so peers can ring it, not a domain capability (ADR 0005 amended).
+        Mounted via the base aas_middleware workflow mechanism, as a plain REST
+        route (``POST /workflows/event_trigger/execute``). This is deliberately
+        NOT a KG-registered ``svc:Workflow``. The event trigger is framework
+        plumbing every resource-mode instance exposes, so peers can call it. It
+        is not a domain capability (ADR 0005 amended).
         """
         middleware = self
 
@@ -502,18 +612,18 @@ class SemanticMiddleware(Middleware):
         The trigger carries only the Operation IRI — its payload lives in the graph. We
         ``ogm.fetch`` the Operation (confirming it exists) and enqueue it into this
         instance's in-memory queue, leaving it ``queued`` and returning immediately with
-        no business result. A domain callback (#15) / pull-and-run (#14) is what later
-        runs the work; this slice only enqueues.
+        no business result. A domain callback (#15) or pull-and-run (#14) runs the work
+        later. This slice only enqueues.
         """
         await anyio.to_thread.run_sync(
             functools.partial(self.ogm.fetch, instance_iri=operation_iri)
         )
         self._operation_queue.append(operation_iri)
         if self._callback is not None:
-            # Fire the domain callback in the background (#15): the trigger returns
-            # immediately (ADR 0009 — it does not block on the work); the pull-and-run runs
-            # off the event loop so its blocking graph I/O never stalls the server. Keep a
-            # reference so the task is not garbage-collected before it finishes.
+            # Fire the domain callback in the background (#15). The trigger returns
+            # immediately (ADR 0009 — it does not block on the work). The pull-and-run runs
+            # off the event loop, so the blocking graph I/O never stalls the server. Keep a
+            # reference so the system does not garbage-collect the task before it finishes.
             task = asyncio.create_task(self._run_callback())
             self._callback_tasks.add(task)
             task.add_done_callback(self._callback_tasks.discard)
@@ -535,10 +645,10 @@ class SemanticMiddleware(Middleware):
             with mw.request(capability_class=cap, operation_class=op_cls) as op:
                 ...  # populate op.data with the operation's domain fields (if any)
 
-        The body populates the yielded draft; on clean exit the middleware **atomically**
+        The body populates the yielded draft. On clean exit the middleware **atomically**
         creates the Operation (status ``queued``, addressed to a reachable Service via its
-        Capability — ADR 0002 discovery) and triggers that Service's event trigger over
-        REST. If the trigger fails to deliver, the created Operation is reverted (ADR 0010
+        Capability — ADR 0002 discovery), and triggers that Service's event trigger over
+        REST. If the trigger delivery fails, the system reverts the created Operation (ADR 0010
         atomic create-and-notify). A body exception aborts before anything is written.
 
         This is the in-process caller face — not REST-exposed (ADR 0005/0010).
@@ -564,7 +674,7 @@ class SemanticMiddleware(Middleware):
         )
         draft = _OperationDraft(op_iri)
 
-        # Body runs here; an exception propagates and nothing is written.
+        # Body runs here. An exception occurs and the system writes nothing.
         yield draft
 
         # __exit__ (clean): atomically create the Operation and fire the event trigger.
@@ -605,13 +715,14 @@ class SemanticMiddleware(Middleware):
                 claimed.result = do_the_work(claimed.operation)
 
         `__enter__` pops the next `queued` Operation from this instance's in-memory queue
-        (FIFO; raises `OperationQueueEmpty` if none), marks it `running`, and re-fetches it
-        under the domain-supplied `ClassScope` so the body gets exactly the object shape it
-        needs. The body runs the work and may set `claimed.result`. On clean exit the CM
-        **atomically** records `done` + provenance (`executedByWorkflow` / `executionTimestamp`
-        / `executionResult`); on a body exception it records `failed` + the exception message
-        and re-raises. Provenance is folded into the terminal transition (ADR 0009); the
-        resource-datamodel failure dump is deferred to a later slice.
+        (FIFO order, raises `OperationQueueEmpty` if none). It marks the Operation `running`, and
+        re-fetches it under the domain-supplied `ClassScope`, so the body gets exactly the
+        object shape it needs. The body runs the work, and may set `claimed.result`. On
+        clean exit the CM **atomically** records `done` plus provenance
+        (`executedByWorkflow` / `executionTimestamp` / `executionResult`). On a body
+        exception it records `failed` plus the exception message, and re-raises. Provenance
+        is folded into the terminal transition (ADR 0009). The resource-datamodel failure
+        dump The system defers it to a later slice.
 
         This is the in-process receiver face — not REST-exposed (ADR 0005/0010).
         """
@@ -621,11 +732,11 @@ class SemanticMiddleware(Middleware):
             )
         if not self._operation_queue:
             raise OperationQueueEmpty("no queued Operation to pull")
-        op_iri = self._operation_queue[0]  # peek FIFO; only dequeue once preconditions pass
+        op_iri = self._operation_queue[0]  # peek FIFO, dequeue only once preconditions pass
 
         # Precondition, BEFORE any mutation (ADR 0010): resolve the Workflow for provenance
-        # WITHOUT requiring a live endpoint, so `executedByWorkflow` is recorded even if the
-        # workflow's `svc:endpoint` was deregistered mid-run. If this raises, the Operation
+        # without requiring a live endpoint, so `executedByWorkflow` is recorded even if the
+        # workflow's `svc:endpoint` the system deregistered it mid-run. If this raises, the Operation
         # stays queued (in the graph and this in-memory queue) for a later retry.
         workflow_iri = resolve_operation_workflow(
             self.ogm, op_iri, named_graph=self.named_graph
@@ -679,19 +790,20 @@ class SemanticMiddleware(Middleware):
             with mw.handover(mode=MES.Pass, workpiece=wp, counterpart=other):
                 ...  # domain-owned physical transport / counterpart coordination
 
-        `__enter__` runs exactly two precondition checks OUTSIDE the transaction: (1) the caller
-        currently possesses the workpiece (a `cfc:PossessionState` the workpiece points to with
-        this resource as possessor), and (2) the counterpart carries the `mes:hasHandoverAbility`
-        COMPLEMENTARY to `mode`. There is deliberately no destination-free / universal maxCount-1
-        check — possession is not universally single. The body is domain-owned (physical
-        transport and any counterpart coordination, e.g. via a `request(...)` dispatch); the core
-        never references the event trigger. On clean exit `__exit__` switches possession to the
-        counterpart: it appends the counterpart's `cfc:hasPossessor` to a fresh PossessionState
-        (an atomic insertion — a resource may possess several workpieces) and then re-points the
-        workpiece's cardinality-1 `cfc:hasPossessedWorkpiece` in a single OGM DELETE/INSERT
-        (the update path, ADR 0008); the workpiece thus points to exactly one PossessionState
-        throughout. On an exception it aborts with no switch. Possession is Core's reified model
-        (`cfc:PossessionState`); the "possessed by exactly one" cardinality is Core's own
+        `__enter__` runs exactly two precondition checks OUTSIDE the transaction. First, the
+        caller currently possesses the workpiece (a `cfc:PossessionState` the workpiece points
+        to, with this resource as possessor). Second, the counterpart carries the
+        `mes:hasHandoverAbility` COMPLEMENTARY to `mode`. There is deliberately no
+        destination-free, universal maxCount-1 check. Possession is not always single.
+        The body is domain-owned: physical transport, and any counterpart coordination, for
+        example through a `request(...)` dispatch. The Core never references the event
+        trigger. On clean exit, `__exit__` switches possession to the counterpart. The system appends
+        the counterpart's `cfc:hasPossessor` to a fresh PossessionState (an atomic insertion,
+        because a resource can possess several workpieces). The system then re-points the workpiece's
+        cardinality-1 `cfc:hasPossessedWorkpiece`, in a single OGM DELETE/INSERT (the update
+        path, ADR 0008). The workpiece thus points to exactly one PossessionState throughout the process.
+        On an exception, the system aborts with no switch. Possession The Core models it as
+        (`cfc:PossessionState`). The "possessed by exactly one" cardinality is Core's own
         Workpiece restriction, the commit-time SHACL backstop.
         """
         if self.mode != Mode.RESOURCE:
@@ -718,7 +830,7 @@ class SemanticMiddleware(Middleware):
                 f"to {mode_ability_iri}"
             )
 
-        # Body runs here; an exception aborts before any possession switch.
+        # Body runs here. An exception aborts before any possession switch.
         yield
 
         # __exit__ (clean): switch possession to the counterpart (append possessor link, then
@@ -733,14 +845,14 @@ class SemanticMiddleware(Middleware):
     def register_callback(self, callback: Any, scope: Any = None) -> None:
         """Register a domain work callback fired on enqueue (#15, ADR 0009).
 
-        `callback` is the work function `callback(operation) -> result`: it runs the
-        Operation's work and returns the value recorded as `svc:executionResult`. On each
-        enqueue the middleware drives a background pull-and-run around it —
-        `with claim_next(scope) as c: c.result = callback(c.operation)` — so status
-        (`running`->`done`/`failed`) and provenance are handled by the middleware and the
-        domain writes only the work. Opt-in: with no callback registered, an enqueued
-        Operation is left `queued` for a manual `claim_next`. `scope` is the domain
-        ClassScope used to re-fetch the Operation.
+        `callback` is the work function `callback(operation) -> result`. It runs the
+        Operation's work, and returns the value recorded as `svc:executionResult`. On each
+        enqueue, The middleware drives a background pull-and-run around it:
+        `with claim_next(scope) as c: c.result = callback(c.operation)`. The middleware
+        handles status (`running`->`done`/`failed`) and provenance. The domain writes only
+        the work. Opt-in: with no callback registered, an enqueued Operation stays `queued`
+        for a manual `claim_next`. `scope` is the domain ClassScope used to re-fetch the
+        Operation.
         """
         if self.mode != Mode.RESOURCE:
             raise RuntimeError(
@@ -752,17 +864,17 @@ class SemanticMiddleware(Middleware):
     async def _run_callback(self) -> None:
         """Drive the domain callback's pull-and-run off the event loop (#15).
 
-        The blocking pull-and-run runs in a worker thread so it never stalls the server. A
-        failure inside the domain work is a normal terminal outcome — `claim_next` has
-        already recorded it as `failed` with provenance in the graph — so it is logged at
-        warning level (not error) here; the exception is caught only so this fire-and-forget
+        The blocking pull-and-run runs in a worker thread, so it never stalls the server. A
+        failure inside the domain work is a normal terminal outcome. `claim_next` has
+        already recorded it as `failed`, with provenance in the graph. This logs it at
+        warning level, not error. The system catches the exception so this fire-and-forget
         task does not leak an unretrieved-exception warning. A drained-queue race
         (`OperationQueueEmpty`, another callback task claimed the op first) is benign.
         """
         try:
             await anyio.to_thread.run_sync(self._drive_callback)
         except OperationQueueEmpty:
-            pass  # another callback task claimed the operation first; nothing to do
+            pass  # another callback task already claimed the operation, nothing to do
         except Exception:
             logger.warning(
                 "Domain callback did not complete cleanly for a queued operation on %s",
@@ -773,7 +885,7 @@ class SemanticMiddleware(Middleware):
     def _drive_callback(self) -> None:
         """Run one pull-and-run wrapping the registered domain callback (#15)."""
         callback = self._callback
-        if callback is None:  # defensive: only scheduled when a callback is registered
+        if callback is None:  # defensive: only scheduled when the system registers a callback
             return
         with self.claim_next(self._callback_scope) as claimed:
             claimed.result = callback(claimed.operation)
@@ -781,12 +893,12 @@ class SemanticMiddleware(Middleware):
     async def _reconstruct_queue(self) -> None:
         """Reconstruct the operation queue from the graph on startup (ADR 0009 durability).
 
-        Own ``queued`` Operations are re-enqueued into the in-memory cache; own orphaned
-        ``running`` Operations — this resource crashed mid-execution — are transitioned to
-        ``failed`` and never auto-rerun, because a half-done physical action must not silently
-        replay. Both are found by ontology traversal (Operation -> Capability <- resource),
-        whose links persist across a restart, so this is a one-shot startup query rather than
-        steady-state polling.
+        Own ``queued`` Operations are re-enqueued into the in-memory cache. Own orphaned
+        ``running`` Operations (this resource crashed mid-execution) transition to
+        ``failed``, and The system never auto-reruns them, because a half-done physical action must not
+        silently replay. Both are found by ontology traversal (Operation -> Capability <-
+        resource), The links persist across a restart. So this is a one-shot startup
+        query, rather than steady-state polling.
         """
         queued = await anyio.to_thread.run_sync(
             functools.partial(
@@ -816,32 +928,33 @@ class SemanticMiddleware(Middleware):
                     mark_operation_failed,
                     self.ogm,
                     op_iri,
-                    "orphaned running operation reclaimed at startup; not auto-rerun",
+                    "orphaned running operation reclaimed at startup, not auto-rerun",
                     self.named_graph,
                 )
             )
 
     def _wire_semantic_connectors(self) -> None:
-        """Recognise this resource's interface parameters and connect what the flavour allows.
+        """Recognize this resource's interface parameters, and connect what the wiring allows.
 
-        Called from ``__init__`` rather than from an ``on_start_up`` callback, and that is
-        not a stylistic choice: ``lifespan`` calls ``connect()`` on everything in the
-        connection registry *before* running ``on_start_up``, and ``initiate_sync`` — what
-        ``add_synced_connector`` defers — starts ``run_receive()`` but never calls
-        ``connect()``. A connector registered later never connects, its listener never
-        starts, and ``receive()`` blocks forever while outbound limps on through
+        Called from ``__init__`` rather than from an ``on_start_up`` callback. That is not
+        a stylistic choice. ``lifespan`` calls ``connect()`` on everything in the connection
+        registry *before* running ``on_start_up``. ``initiate_sync`` (what
+        ``add_synced_connector`` defers) starts ``run_receive()`` but never calls
+        ``connect()``. A connector registered later does not connect. Its listener never
+        starts. ``receive()`` blocks forever, while outbound limps on through
         ``consume()``'s reconnect. Silent, one-directional failure (ADR 0023).
 
-        Recognition and the northbound projection run whatever the flavour;
-        ``autoregister_connectors`` gates only the connecting. An inspector that skipped
-        recognition would treat each parameter node as ordinary data and serve its broker
-        address northbound — the least-privileged instance would leak the most (ADR 0028).
+        Recognition and the northbound projection run identically for every connector
+        wiring (ADR 0032). ``autoregister_connectors`` controls only the connection. An
+        inspecting instance that skipped recognition would treat each parameter node as
+        ordinary data, and serves its broker address northbound. The least-privileged
+        instance would leak the most (ADR 0028).
         """
-        # Deliberately not wrapped in a try/except. Asking for a class_scope is asking for the
-        # parameters under it to be wired, and a resource that cannot resolve them has not
+        # Deliberately not wrapped in a try/except. A class_scope request means the
+        # parameters under it must wire, and a resource that cannot resolve them has not
         # "come up with a smaller surface" — it has come up unable to reach its device, with
-        # the projection that keeps broker addresses off the wire never having been computed.
-        # Failing construction is the honest outcome; a warning here would produce exactly
+        # the projection that keeps broker addresses off the wire never computed.
+        # Failing construction is the honest outcome. A warning here would produce exactly
         # the silent half-alive resource ADR 0023 is written to avoid.
         self._wiring = plan_wiring(
             ogm=self.ogm,
@@ -880,17 +993,17 @@ class SemanticMiddleware(Middleware):
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
 
-        Resource mode builds its REST surface from the graph: OGM-fetch the resource
-        individual, materialize its aas_middleware datamodel, and generate the CRUD REST
-        API (``generate_rest_api_for_data_model``). Best-effort and additive — the
-        event-trigger and workflow routes are the load-bearing surface for this slice, so
-        a resource with no materializable data is skipped with a warning rather than
-        failing startup.
+        Resource mode builds its REST surface from the graph. It fetches the resource
+        individual through the OGM, materializes its aas_middleware datamodel, and
+        generates the CRUD REST API (``generate_rest_api_for_data_model``). This is
+        best-effort and additive. The event-trigger and workflow routes are the
+        load-bearing surface for this slice. So a resource with no materializable data is
+        skipped, with a warning, instead of failing startup.
 
-        When a ``class_scope`` was given, the fetch goes through the **pruned** spec, so the
-        served datamodel has no field that could carry a broker address or a topic
-        (ADR 0028). Without one, the fetch is unscoped and returns the bare individual —
-        which is what scenarios 1 and 2 rely on and why the projection cannot leak there.
+        When a ``class_scope`` was given, the fetch goes through the **pruned** spec. So
+        the served datamodel has no field that could carry a broker address or a topic
+        (ADR 0028). Without one, the system fetches unscoped, and returns the individual.
+        This is what scenarios 1 and 2 rely on, and why the projection cannot leak there.
         """
         try:
             fetch = functools.partial(
@@ -907,7 +1020,29 @@ class SemanticMiddleware(Middleware):
             if instance is None:
                 return
             self.load_model_instances("resource", [instance])
-            self.generate_rest_api_for_data_model("resource")
+            if self._wiring is not None:
+                # load_model_instances does not persist (it calls load_data_model with its
+                # persist_instances default, False), so no "resource" persistence connector
+                # exists unless we create one here. A synced connector's initiate_sync
+                # (registered by _wire_semantic_connectors, and run after this callback --
+                # see the on_start_up registration order in __init__) looks this connector
+                # up by data_model_name="resource" and this exact resource_iri, and raises
+                # a bare KeyError if it is missing. Scenarios 1 and 2 pass no class_scope,
+                # so self._wiring remains None and they keep the behavior unchanged.
+                await self.persist("resource", instance)
+            # The local recursive router, not the framework generator (ADR 0017). It still
+            # produces the framework's top-level CRUD -- it calls it -- and then descends the
+            # datamodel tree to give every interface-accessible parameter its own address, so a
+            # setpoint is a PUT to one belt rather than a read-modify-write of the whole list.
+            # With no wiring, no bindings exist, so the system adds nothing and scenarios 1 and 2
+            # keep exactly the surface they have today.
+            self._parameter_routes = generate_recursive_rest_api(
+                self,
+                "resource",
+                root_id=str(self.resource_iri),
+                instance=instance,
+                bindings=self._wiring.bindings if self._wiring is not None else (),
+            )
         except Exception as exc:  # noqa: BLE001 - additive convenience surface, never fatal
             logger.warning(
                 "Could not generate the resource datamodel REST API for %s: %s",
@@ -918,11 +1053,12 @@ class SemanticMiddleware(Middleware):
     def _dump_resource_datamodel(self) -> Optional[str]:
         """Serialize this resource's aas_middleware datamodel to a JSON string, or None.
 
-        The failed-Operation state snapshot (ADR 0009 / #14): on a body exception, `claim_next`
-        records this alongside `operationStatus=failed` (`svc:failureState`) so the resource
-        state under which the failure occurred is diagnosable from the graph. Best-effort — a
-        resource with no materializable datamodel, or a serialization error, yields None so the
-        `failed` status and error string are still recorded; the snapshot is purely additive.
+        This is the failed Operation state snapshot (ADR 0009 / #14). On a body exception,
+        `claim_next` records this alongside `operationStatus=failed` (`svc:failureState`),
+        so the user can diagnose the resource state from the
+        graph. This is best-effort. A resource with no materializable datamodel, or a
+        serialization error, yields None. The `failed` status and error string are still
+        recorded either way. The snapshot is additive.
         """
         try:
             node = self.ogm.fetch(instance_iri=self.resource_iri, materialize=True)

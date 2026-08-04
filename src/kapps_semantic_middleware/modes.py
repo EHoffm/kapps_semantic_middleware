@@ -1,15 +1,15 @@
-"""The three middleware modes as constants rather than bare strings (ADR 0005, #21).
+"""The three middleware modes as constants. Do not use bare strings (ADR 0005, #21).
 
-``SemanticMiddleware(mode=...)`` took a plain ``str`` and validated it against a tuple written
-out at the call site. A typo produced a ``ValueError`` at construction — which is at least loud —
-but nothing made the valid values discoverable, and every comparison in the class restated one of
-the literals.
+``SemanticMiddleware(mode=...)`` took a plain ``str``. It validated the string against a tuple.
+The tuple was written out at the call site. A typo produced a ``ValueError`` at construction. This
+is at least loud. Nothing made the valid values discoverable. Every comparison in the class restated
+one of the literals.
 
-A ``str`` subclass rather than a plain ``Enum``, deliberately: every existing caller passes
-``mode="resource"``, and the scenarios, tests and notebooks are full of it. Subclassing ``str``
-keeps all of that working unchanged — ``Mode.RESOURCE == "resource"`` is true, and so is
+Use a ``str`` subclass. Do not use a plain ``Enum``. This is deliberate. Every existing caller
+passes ``mode="resource"``. The scenarios, tests and notebooks are full of it. Subclass ``str``.
+This keeps all of that working unchanged. ``Mode.RESOURCE == "resource"`` is true. So is
 ``mode in (Mode.RESOURCE, Mode.WATCHDOG)`` for a caller who passed the bare string. The constant
-is the better way to say it; the string does not stop being a way to say it.
+is the better way to say it. The string does not stop being a way to say it.
 """
 
 from __future__ import annotations
@@ -18,26 +18,26 @@ from enum import Enum
 
 
 class Mode(str, Enum):
-    """A middleware instance's mode. See ADR 0005 for what each one means."""
+    """A middleware instance mode. See ADR 0005 for what each one means."""
 
     RESOURCE = "resource"
-    """Wraps one ``resource_iri``: registers a Service, serves its workflows and parameters,
-    and holds a heartbeat. The only mode with runtime consequence today."""
+    """Wrap one ``resource_iri``. Register a Service. Serve its workflows and parameters.
+    Hold a heartbeat. This is the only mode with runtime consequence today."""
 
     SERVER = "server"
-    """Reserved — data-serving with no physical resource. Not implemented; constructing one
-    raises. Ruled out of scope for the scenario-3 controller in ADR 0005's third amendment,
-    because a controller consumes a graph rather than serving one."""
+    """Reserved. Serve data with no physical resource. Not implemented. Construct one
+    raises. Rule out of scope for the scenario-3 controller. ADR 0005 third amendment states
+    this. A controller consumes a graph. It does not serve one."""
 
     WATCHDOG = "watchdog"
-    """Reserved — centralized liveness sweeping (ADR 0007). Sweeps stale Services; registers
+    """Reserved. Sweep liveness from a central point (ADR 0007). Sweep stale Services. Register
     nothing of its own."""
 
     def __str__(self) -> str:
-        # Without this, an f-string renders "Mode.RESOURCE" rather than "resource", which
+        # Without this, an f-string renders "Mode.RESOURCE". It does not render "resource". This
         # would change every log line and error message that interpolates a mode.
         return self.value
 
 
 ALL = tuple(Mode)
-"""Every valid mode, for validation and for error messages that list the alternatives."""
+"""Every valid mode. Use for validation. Use for error messages that list the alternatives."""

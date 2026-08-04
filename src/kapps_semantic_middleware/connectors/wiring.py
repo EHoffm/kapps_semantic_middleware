@@ -1,21 +1,23 @@
-"""Recognition and wiring: turning a resource's ClassSpec into connector registrations.
+"""Recognition and wiring: turn a resource's ClassSpec into connector registrations.
 
-This is the step ADR 0023 calls "registering from the knowledge graph". It runs at
-**construction**, not during ``on_start_up``, and the reason is sharp: ``lifespan`` calls
-``connect()`` on everything in the connection registry *before* running ``on_start_up``
-callbacks, and ``initiate_sync`` — what ``add_synced_connector`` defers — starts
-``run_receive()`` but never calls ``connect()``. A connector registered while materializing
-the datamodel therefore never connects: the client stays ``None``, the listener task never
-starts, its queue is never fed, and ``receive()`` blocks forever. Outbound would limp along,
-because ``consume()`` reconnects on failure. The failure is one-directional and silent.
+This is the step ADR 0023 calls "register from the knowledge graph". It runs at
+**construction**, not during ``on_start_up``. The reason is sharp. ``lifespan`` calls
+``connect()`` on everything in the connection registry *before* it runs ``on_start_up``
+callbacks. ``initiate_sync`` (what ``add_synced_connector`` defers) starts
+``run_receive()``, but never calls ``connect()``. A connector registered while the
+datamodel materializes therefore never connects. The client stays ``None``. The listener
+task never starts. Its queue is never fed. ``receive()`` blocks forever. Outbound would
+limp along, because ``consume()`` reconnects on failure. The failure is one-directional
+and silent.
 
-Registering at construction avoids it with no out-of-band lifecycle call, and is possible
-because everything a ``ConnectionInfo`` needs comes from the ClassSpec and the graph.
+Register at construction instead. This avoids the failure, with no out-of-band lifecycle
+call. It is possible because everything a ``ConnectionInfo`` needs comes from the
+ClassSpec and the graph.
 
-Two shapes come out of here, and both are needed (ADR 0028):
+Two shapes come out of here. ADR 0028 needs both.
 
-- the **full** spec, which the bindings read to find broker addresses and topics, and
-- the **pruned** spec, which is what gets served northbound.
+- The **full** spec. The bindings read it to find broker addresses and topics.
+- The **pruned** spec. The system serves this northbound.
 """
 
 from __future__ import annotations
@@ -41,34 +43,34 @@ logger = logging.getLogger(__name__)
 EXPLICIT_GRAPH = "FROM <http://www.ontotext.com/explicit>"
 """Restrict a query to asserted triples.
 
-Not an ontology term, so it does not belong in ``vocabulary.py`` — it names a GraphDB
+It is not an ontology term, so it does not belong in ``vocabulary.py``. It names a GraphDB
 *feature*, the pseudo-graph of explicit statements. It is a constant rather than three inline
-copies because every recognition query needs it for the same reason: the default graph
-includes materialised inference, and a parameter node's only types are anonymous restriction
-nodes that exist by inference alone (ADR 0020). Counting or reading without this returns
+copies because every recognition query needs it for the same reason. The default graph
+includes materialized inference, and a parameter node's only types are anonymous restriction
+nodes that exist by inference alone (ADR 0020). Count or read without this. This returns
 inferred triples and inflates every result.
 """
 
 
 @dataclass
 class WiringPlan:
-    """What recognition found, and what the caller should do about it."""
+    """This describes what recognition found, and what the caller should do about it."""
 
     northbound_spec: Any
     """The pruned ClassSpec, safe to materialize and serve."""
 
     class_scope: Any
-    """The scope the specs were resolved under.
+    """The scope where the system resolves the specs.
 
-    Kept because a fetch needs **both**: ``_fetch_object_property`` decides whether a nested
+    Keep this because a fetch needs **both**. ``_fetch_object_property`` decides whether a nested
     individual is hydrated or fetched as a bare reference from the *class_scope*
     (``as_reference = nested_class_scope is None``), not from whether the spec it was handed
     has a ``nested``. Passing only the pruned spec yields belts and barriers with empty
-    parameters. Use :func:`northbound_fetch_kwargs` rather than restating this."""
+    parameters. Use :func:`northbound_fetch_kwargs` rather than restate this."""
 
     bindings: List[ParameterBinding]
-    """Every recognised interface-accessible parameter. Populated for every flavour,
-    including one that wires nothing — recognition is never gated (ADR 0020, ADR 0028)."""
+    """This lists every recognized interface-accessible parameter. Populate for every flavour,
+    including one that wires nothing. The system never gates recognition (ADR 0020, ADR 0028)."""
 
     registrations: List[Tuple[ParameterBinding, Registration]]
     """The connector registrations to perform. Empty when the flavour wires nothing."""
@@ -97,10 +99,10 @@ def plan_wiring(
 ) -> WiringPlan:
     """Resolve a resource's parameters and decide what to connect.
 
-    ``autoregister`` gates only the registrations. The spec, the projection and the recognised
-    bindings are produced either way, because an inspector that skipped recognition would
-    treat every parameter node as ordinary data and serve its broker address — the
-    least-privileged flavour would leak the most (ADR 0028).
+    ``autoregister`` gates only the registrations. Produce the spec, the projection, and
+    the recognized bindings either way. An inspecting instance that skipped recognition
+    would treat every parameter node as ordinary data, and serve its broker address. The
+    least-privileged connector wiring would leak the most (ADR 0028).
     """
     resource_class = resource_class or _class_of(ogm, resource_iri)
     full_spec = ogm.get_class_spec(class_iri=resource_class, class_scope=class_scope)
@@ -108,12 +110,12 @@ def plan_wiring(
     # The projection asks the *ontology* what is protocol metadata, not the registry. A
     # registry-derived set only knows the protocols this middleware has code for, and a
     # parameter reachable over an unregistered protocol would have its endpoint served
-    # (measured, ADR 0028). Recomputed here on every construction, because the ontology may
+    # (measured, ADR 0028). Recompute here on every construction, because the ontology may
     # have grown a protocol since this instance last started.
     # `cache` is shared with the loop below so the ontology is asked once per distinct property
     # rather than once per use. Every one of these is a live SPARQL round trip, and the store
-    # this runs against refuses distinct/group-by queries under memory pressure — so redundant
-    # queries are not merely slow, they raise the chance of a spurious startup failure.
+    # this runs against refuses distinct/group-by queries under memory pressure. Redundant
+    # queries are not merely slow. They raise the chance of a spurious startup failure.
     southbound_by_property: Dict[str, frozenset] = {}
     northbound_spec = prune_southbound(full_spec, ogm=ogm, cache=southbound_by_property)
 
@@ -127,9 +129,9 @@ def plan_wiring(
         for prop in southbound_by_property.get(str(binding.parameter_property), ())
     )
 
-    # Cross-check the two declarations against each other. The ontology governs what is hidden;
-    # a descriptor's connection_metadata says what it reads. Disagreement is a real deployment
-    # state rather than an error, so it is reported and not raised.
+    # Cross-check the two declarations against each other. The ontology governs what is hidden.
+    # A descriptor's connection_metadata says what it reads. Disagreement is a real deployment
+    # state rather than an error, so report it and do not raise.
     for binding in bindings:
         cross_check(
             binding.parameter_property,
@@ -145,7 +147,7 @@ def plan_wiring(
                 registrations.append((binding, registration))
     else:
         logger.info(
-            "autoregister_connectors=False: recognised %d parameter(s) on %s and connected "
+            "autoregister_connectors=False: recognized %d parameter(s) on %s and connected "
             "none. The northbound projection still applies.",
             len(bindings),
             resource_iri,
@@ -169,8 +171,8 @@ def _recognise(
 ) -> List[ParameterBinding]:
     """Walk a resource's spec and the graph, and pair each parameter with its descriptor.
 
-    Matching is on the **interface property**, not on ``rdf:type``. A parameter node has no
-    named type of its own — only anonymous restriction nodes, which exist by inference and so
+    Match on the **interface property**, not on ``rdf:type``. A parameter node has no
+    named type of its own. It has only anonymous restriction nodes, which exist by inference and so
     never appear in an explicit-graph fetch. The property hierarchy is what survives a
     round trip (ADR 0020).
     """
@@ -182,7 +184,7 @@ def _recognise(
         descriptor = _descriptor_for(ogm=ogm, prop_iri=prop_iri, registry=registry)
         if descriptor is None:
             # Unrecognised complex content is plain data: shown, readable, nothing wired
-            # (ADR 0020). Not an error — the graph may well hold structure this middleware
+            # (ADR 0020). Not an error. The graph may well hold structure this middleware
             # has no connector for.
             continue
 
@@ -197,7 +199,7 @@ def _recognise(
                 resource_iri=holder_iri,
                 parameter_property=IRI(str(prop_iri)),
                 # ClassSpec keys arrive as rdflib URIRef, not IRI, so the mangling has to go
-                # through a converted copy -- URIRef has no `lined`.
+                # through a converted copy. URIRef has no `lined`.
                 field_id=IRI(str(prop_iri)).lined,
                 metadata=normalize_metadata(metadata),
                 descriptor=descriptor,
@@ -211,13 +213,13 @@ def _recognise(
 def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
     """Yield ``(holder_iri, property_iri, property_spec)`` for every COMPLEX property.
 
-    A COMPLEX property is the deepest addressable thing: ``ConnectionInfo`` has exactly three
+    A COMPLEX property is the deepest addressable thing. ``ConnectionInfo`` has exactly three
     levels and ``field_id`` resolves by plain ``getattr``, so ``inf:hasValue`` — one level
     further down — is unreachable. This is the same atomic unit ADR 0017 reached from the
     routing side (ADR 0023).
 
-    Descends one level through object properties to reach a resource's components, since a
-    TransferUnit's parameters hang off its belts and barriers rather than off the unit.
+    Descend one level through object properties to reach a resource's components. A
+    TransferUnit's parameters hang off its belts and barriers, not off the unit itself.
     """
     from kapps_ogm.mapping.property_spec import PropertyValueKind
 
@@ -237,7 +239,7 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
 
 
 def _linked_individuals(ogm: Any, subject: IRI, prop_iri: IRI) -> List[IRI]:
-    """The individuals a resource points at through one object property."""
+    """This function returns the individuals a resource references through one object property."""
     rows = ogm.db.query(
         f"SELECT ?o {EXPLICIT_GRAPH} "
         f"WHERE {{ <{subject}> <{prop_iri}> ?o . FILTER(isIRI(?o)) }}",
@@ -247,11 +249,11 @@ def _linked_individuals(ogm: Any, subject: IRI, prop_iri: IRI) -> List[IRI]:
 
 
 def _descriptor_for(*, ogm: Any, prop_iri: IRI, registry: SemanticConnectorRegistry):
-    """The registered descriptor whose interface property this property specializes.
+    """This function returns the registered descriptor whose interface property this property specializes.
 
     Resolution walks ``rdfs:subPropertyOf*``, so ``tu:hasConveyorSpeed`` matches the binding
     registered for ``inf:isInterfaceAccessibleMQTTParameter``. The most specific registered
-    match wins: a protocol marker is a subproperty of the generic one, and binding to the
+    match wins. A protocol marker is a subproperty of the generic one, and binding to the
     generic one would leave the middleware without a protocol to speak.
     """
     matches = [
@@ -276,7 +278,7 @@ def _descriptor_for(*, ogm: Any, prop_iri: IRI, registry: SemanticConnectorRegis
             return descriptor
 
     logger.warning(
-        "%s matches %d interface properties with no most-specific one (%s); not binding it.",
+        "%s matches %d interface properties with no most-specific one (%s); do not bind it.",
         prop_iri,
         len(matches),
         ", ".join(str(d.interface_property) for d in matches),
@@ -285,7 +287,7 @@ def _descriptor_for(*, ogm: Any, prop_iri: IRI, registry: SemanticConnectorRegis
 
 
 def _is_subproperty_of(ogm: Any, prop_iri: IRI, ancestor: IRI) -> bool:
-    """Whether ``prop_iri`` is ``ancestor`` or specializes it, transitively."""
+    """This function returns whether ``prop_iri`` is ``ancestor`` or specializes it, transitively."""
     return bool(
         ogm.db.query(
             f"ASK {{ <{prop_iri}> "
@@ -300,9 +302,9 @@ def _parameter_metadata(
     """Read one parameter node's properties straight from the ABox.
 
     Read from the graph rather than from a materialized model because this runs at
-    construction, before any datamodel exists. Only properties the effective shape declares
-    are returned: a property the restriction does not declare would never survive a write
-    either, so binding to one would produce a connector whose values silently vanish.
+    construction, before any datamodel exists. Return only properties the effective shape declares.
+    A property the restriction does not declare would never survive a write
+    either, so bind to one would produce a connector whose values silently vanish.
     """
     declared = {str(p) for p in getattr(prop_spec.nested, "properties", {})}
 
@@ -315,7 +317,7 @@ def _parameter_metadata(
     if not rows:
         logger.warning(
             "%s on %s is interface-accessible but its parameter node is empty; nothing to "
-            "bind. Has the resource been provisioned?",
+            "bind. Has the resource received provision?",
             prop_iri,
             holder_iri,
         )
@@ -347,8 +349,8 @@ def _parameter_metadata(
     return metadata
 
 
-# Types every individual carries that say nothing about what it *is*. An OGM ClassSpec
-# resolved against one of these fails outright, and `owl:NamedIndividual` in particular is
+# These are types every individual carries that say nothing about what it *is*. An OGM ClassSpec
+# You resolve against one of these fails outright, and `owl:NamedIndividual` in particular is
 # asserted on everything the OGM writes.
 _META_TYPE_NAMESPACES = (
     "http://www.w3.org/2002/07/owl#",
@@ -358,10 +360,10 @@ _META_TYPE_NAMESPACES = (
 
 
 def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
-    """The individual's asserted domain class, so a caller need not restate what the graph knows.
+    """This function returns the individual's asserted domain class, so a caller need not restate what the graph knows.
 
     An individual carries several ``rdf:type`` assertions and their order is not meaningful,
-    so the structural ones are filtered out rather than trusted to sort last — picking
+    so filter out the structural ones rather than trust them to sort last. Picking
     ``owl:NamedIndividual`` yields a ClassSpec that cannot resolve at all.
     """
     rows = ogm.db.query(
@@ -383,7 +385,7 @@ def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
         )
     if len(candidates) > 1:
         logger.warning(
-            "%s asserts %d domain classes (%s); resolving its ClassSpec against %s. Pass "
+            "%s asserts %d domain classes (%s); resolve its ClassSpec against %s. Pass "
             "resource_class explicitly to choose.",
             instance_iri,
             len(candidates),

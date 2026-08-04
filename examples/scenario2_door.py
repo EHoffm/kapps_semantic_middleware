@@ -1,12 +1,12 @@
 """Scenario 2: a door and a mobile robot — direct workflow/state invocation.
 
 A debugger-friendly, plain-Python equivalent of ``scenario2_door.ipynb``. It demonstrates
-the *direct* interaction pattern (as opposed to scenario 1's operation coordination): a
+the *direct* interaction pattern, as opposed to the operation coordination of scenario 1. A
 door resource exposes open/close workflows and a live status StateProperty, with **no
-operation queue**; a minimal mobile robot discovers the door purely through the knowledge
-graph (a SPARQL query), reads its live status over the StateProperty GET endpoint, and —
-finding it closed — invokes the door's open workflow directly at the endpoint it found in
-the graph. Not operation based.
+operation queue**. A minimal mobile robot discovers the door purely through the knowledge
+graph, and it uses a SPARQL query. It reads the door's live status over the StateProperty GET
+endpoint. When it finds the door closed, it invokes the open workflow of the door directly.
+It uses the endpoint it found in the graph. This is not operation based.
 
 Run from a debugger or as a script. The numbered functions are convenient breakpoints.
 """
@@ -27,9 +27,9 @@ from kapps_ogm import OGM
 from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
-    mint_service_iri,
     mint_state_property_iri,
     mint_workflow_iri,
+    services_of_resource,
 )
 from kapps_semantic_middleware.vocabulary import SVC
 
@@ -69,7 +69,7 @@ def step_1_seed_clean_repository(db: GraphDB) -> None:
 
 
 def step_2_start_door_middleware(db: GraphDB) -> tuple[SemanticMiddleware, uvicorn.Server, threading.Thread]:
-    """Register the door's two workflows + live status StateProperty, and start its server."""
+    """Register the two door workflows + live status StateProperty, and start its server."""
     print("\nStep 2 — Start the Door Middleware")
     door = SemanticMiddleware(
         mode=Mode.RESOURCE,
@@ -97,10 +97,17 @@ def step_2_start_door_middleware(db: GraphDB) -> tuple[SemanticMiddleware, uvico
     return door, server, thread
 
 
-def step_3_inspect_registration(db: GraphDB) -> str:
-    """Verify the door's workflows, state property, and reachable endpoints are in the graph."""
+def step_3_inspect_registration(db: GraphDB, ogm: OGM) -> str:
+    """Verify the door workflows, state property, and reachable endpoints are in the graph.
+
+    The Service IRI is *discovered* through ``svc:isServiceOf`` rather than reconstructed from
+    the resource IRI. It carries an instance discriminator now (ADR 0022), and one resource may
+    carry several Services. The door runs a single instance, so exactly one is reachable.
+    """
     print("\nStep 3 — Inspect What Registration Wrote")
-    service_iri = seed.DOOR_RESOURCE + "_service"
+    reachable = services_of_resource(ogm, seed.DOOR_RESOURCE, reachable_only=True)
+    assert len(reachable) == 1, f"expected one reachable door service, found {len(reachable)}"
+    service_iri = reachable[0]
     open_wf = mint_workflow_iri(service_iri, "door_open")
     status_sp = mint_state_property_iri(service_iri, "door_status")
     status_cap = mint_capability_iri(seed.DOOR_RESOURCE, "door_status")
@@ -116,10 +123,11 @@ def step_3_inspect_registration(db: GraphDB) -> str:
 
 
 def _discover_door_endpoints(ogm, door_resource_iri) -> tuple[str, str]:
-    """Discover the door's live-state GET endpoint and open-workflow execute URL via SPARQL."""
+    """Discover the door live status GET endpoint and open-workflow execute URL via SPARQL."""
     sparql = f"""
     SELECT ?status_url ?open_url WHERE {{
         ?svc <{SVC.isServiceOf}> <{door_resource_iri}> .
+        ?svc <{SVC.address}> ?addr .
         ?sp <{SVC.isStatePropertyOf}> ?svc .
         ?sp a <{seed.DOOR_STATUS_STATE_CLASS}> .
         ?sp <{SVC.endpoint}> ?status_url .
@@ -130,16 +138,16 @@ def _discover_door_endpoints(ogm, door_resource_iri) -> tuple[str, str]:
     """
     result = ogm.db.query(sparql, convert_bindings=True)
     bindings = result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
-    assert bindings, "robot could not discover the door's endpoints in the knowledge graph"
+    assert bindings, "robot could not discover the door endpoints in the knowledge graph"
     b = bindings[0]
     return str(b["status_url"]), str(b["open_url"])
 
 
 def step_4_robot_passes_through_door(robot_ogm, door_resource_iri) -> None:
-    """The mobile robot's scripted behaviour: discover the door, ensure it is open, pass it.
+    """The mobile robot behavior: discover the door, ensure it is open, pass it.
 
-    Deterministic, one step after another; the only forks are "is the door open?" and, if
-    not, "open it". Discovery is via SPARQL; the live state and the workflow invocation are
+    Deterministic, one step after another. The only forks are "is the door open?" and, if
+    not, "open it". Discovery is via SPARQL. The live state and the workflow invocation are
     direct REST calls to the endpoints found in the graph.
     """
     print("\nStep 4 — The Mobile Robot Discovers and Passes the Door")
@@ -177,6 +185,7 @@ def step_5_verify_state_not_persisted(db: GraphDB, service_iri: str) -> None:
 def step_6_shutdown(
     db: GraphDB,
     service_iri: str,
+    robot_service: IRI,
     servers: list[tuple[uvicorn.Server, threading.Thread]],
 ) -> None:
     """Stop both servers and verify reachability is removed while individuals remain.
@@ -193,7 +202,6 @@ def step_6_shutdown(
     status_sp = mint_state_property_iri(service_iri, "door_status")
     endpoint_gone = len(list(db.triples_get(sub=status_sp, pred=SVC.endpoint))) == 0
     preserved = db.triple_exists((status_sp, RDF.type, seed.DOOR_STATUS_STATE_CLASS))
-    robot_service = mint_service_iri(IRI(seed.MOBILE_ROBOT))
     robot_address_gone = len(list(db.triples_get(sub=robot_service, pred=SVC.address))) == 0
 
     print(f"  State property endpoint removed:    {endpoint_gone}")
@@ -211,13 +219,14 @@ def main() -> None:
     print(f"Connected to GraphDB repository: {os.getenv('GRAPHDB_REPOSITORY')}")
 
     step_1_seed_clean_repository(db)
-    _door_mw, server, thread = step_2_start_door_middleware(db)
+    door_mw, server, thread = step_2_start_door_middleware(db)
     running: list[tuple[uvicorn.Server, threading.Thread]] = [(server, thread)]
     service_iri: str | None = None
+    robot_service: IRI | None = None
     try:
-        service_iri = step_3_inspect_registration(db)
+        service_iri = step_3_inspect_registration(db, door_mw.ogm)
         # The mobile robot: a minimal second middleware. Its scripted logic discovers and
-        # drives the door through the graph + REST, using its own OGM for the SPARQL query.
+        # drives the door through the graph + REST, and it uses its own OGM for the SPARQL query.
         robot = SemanticMiddleware(
             mode=Mode.RESOURCE,
             resource_iri=seed.MOBILE_ROBOT,
@@ -233,7 +242,9 @@ def main() -> None:
         # door is a peer, and peers are discoverable — the door could ring it back.
         robot_server, robot_thread = _start_server(robot, ROBOT_PORT)
         running.append((robot_server, robot_thread))
-        robot_service = mint_service_iri(IRI(seed.MOBILE_ROBOT))
+        assert robot.service_iri is not None, "the robot is served, so it must have registered"
+        dispatched_robot_service = robot.service_iri
+        robot_service = dispatched_robot_service
         robot_address = list(db.triples_get(sub=robot_service, pred=SVC.address))
         print(f"\nMobile robot served on port {ROBOT_PORT}")
         print(f"  Service registered:   {bool(robot_address)}")
@@ -244,8 +255,8 @@ def main() -> None:
         step_5_verify_state_not_persisted(db, service_iri)
     finally:
         reset_door()
-        if service_iri is not None:
-            step_6_shutdown(db, service_iri, running)
+        if service_iri is not None and robot_service is not None:
+            step_6_shutdown(db, service_iri, robot_service, running)
         else:
             for srv, thr in running:
                 srv.should_exit = True

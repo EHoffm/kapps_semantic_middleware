@@ -1,10 +1,10 @@
 """Event-trigger coordination end-to-end integration test (#13) against a live GraphDB.
 
-Proves the decentralized event trigger over REST (ADR 0009): resource A *dispatches* an
-Operation to resource B by creating it in the graph (status ``queued``) and triggering B's
-event-trigger endpoint over HTTP; B enqueues it and leaves it ``queued``. Also covers the
-atomic revert (ADR 0010): a dispatch whose trigger cannot be delivered removes the created
-Operation. Skipped when GRAPHDB_* env vars are absent (see conftest).
+Prove the decentralized event trigger over REST (ADR 0009). Resource A *dispatches*
+an Operation to resource B. Create it in the graph (status ``queued``). Trigger B
+event-trigger endpoint over HTTP. B enqueues it. Leave it ``queued``. Also cover
+the atomic revert (ADR 0010). A dispatch trigger cannot be delivered. Remove the
+created Operation. Skip when GRAPHDB_* env vars are absent (see conftest).
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from kapps_semantic_middleware import SemanticMiddleware
 from kapps_semantic_middleware.registration import (
     OperationQueueEmpty,
     mint_capability_iri,
+    mint_service_iri,
     mint_workflow_iri,
     register_service,
     register_workflow,
@@ -40,7 +41,7 @@ requires_graphdb = pytest.mark.skipif(
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 
-# examples/ is not a package; add it to the path to reuse the scenario seed helper.
+# examples/ is not a package. Add it to the path. Reuse the scenario seed helper.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 import seed  # noqa: E402
 from handlers import door_open, door_status, reset_door  # noqa: E402
@@ -49,7 +50,7 @@ B_PORT = 8995
 
 
 def hello_world() -> str:
-    """B's domain workflow — the same trivial greeting as scenario 1."""
+    """B domain workflow. The same trivial greeting as scenario 1."""
     return "hello world"
 
 
@@ -68,14 +69,13 @@ def _start_server(mw: SemanticMiddleware, port: int) -> tuple[uvicorn.Server, th
 
 @requires_graphdb
 def test_event_trigger_dispatch_enqueues_over_rest(graphdb):
-    """A dispatches -> B's event trigger over REST -> B enqueues -> Operation queued in the graph."""
+    """A dispatches -> B event trigger over REST -> B enqueues -> Operation queued in the graph."""
     db = graphdb
     seed.seed_scenario1(db)
 
-    b_service = seed.HELLO_RESOURCE + "_service"
     cap_instance = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
 
-    # B: the hello resource, exposing helloworld + the built-in event trigger over REST.
+    # B: the hello resource. Expose helloworld + the built-in event trigger over REST.
     mw_b = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.HELLO_RESOURCE,
@@ -91,9 +91,9 @@ def test_event_trigger_dispatch_enqueues_over_rest(graphdb):
 
     server, thread = _start_server(mw_b, B_PORT)
     try:
-        assert db.triples_get(sub=b_service, pred=SVC.address)
+        assert db.triples_get(sub=mw_b.service_iri, pred=SVC.address)
 
-        # A: the planner, dispatching an Operation for B's capability (no hardcoded peer).
+        # A: the planner. Dispatch an Operation for B capability (no hardcoded peer).
         mw_a = SemanticMiddleware(
             mode="resource",
             resource_iri=seed.PLANNER_RESOURCE,
@@ -107,16 +107,16 @@ def test_event_trigger_dispatch_enqueues_over_rest(graphdb):
             capability_class=seed.HELLO_CAPABILITY_CLASS,
             operation_class=str(CFC.Operation),
         ) as op:
-            pass  # helloworld takes no arguments; nothing to populate on the draft
+            pass  # helloworld takes no arguments. Nothing to populate on the draft
         op_iri = op.iri
 
-        # The dispatch created the Operation queued in the graph, addressed via its Capability.
+        # The dispatch created the Operation queued in the graph. Addressed via its Capability.
         assert db.triple_exists((op_iri, RDF.type, CFC.Operation))
         assert db.triple_exists((op_iri, CFC.implementsCapability, cap_instance))
         status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
         assert status and str(status[0][2]) == OperationStatus.QUEUED
 
-        # The event trigger reached B over REST and B enqueued it (receiver queue state).
+        # The event trigger reached B over REST. B enqueued it (receiver queue state).
         assert op_iri in mw_b._operation_queue
     finally:
         server.should_exit = True
@@ -126,13 +126,14 @@ def test_event_trigger_dispatch_enqueues_over_rest(graphdb):
 
 @requires_graphdb
 def test_event_trigger_revert_on_undeliverable(graphdb):
-    """A dispatch whose event trigger cannot be delivered reverts the created Operation (ADR 0010)."""
+    """A dispatch event trigger cannot be delivered. Revert the created Operation (ADR 0010)."""
     db = graphdb
     seed.seed_scenario1(db)
 
-    # Seed a reachable-looking receiver whose address points at a dead port (no server is
-    # started), so resolution succeeds but the event-trigger POST fails to connect.
-    dead_service = seed.HELLO_RESOURCE + "_service"
+    # Seed a reachable-looking receiver. Address points at a dead port (no server is
+    # started). Resolution succeeds. The event-trigger POST fails to connect.
+    dead_address = "http://127.0.0.1:9"  # nothing listens on port 9
+    dead_service = mint_service_iri(seed.HELLO_RESOURCE, dead_address)
     cap_instance = mint_capability_iri(seed.HELLO_RESOURCE, "hello_world")
     ogm = OGM(db=db)
     register_service(
@@ -140,13 +141,13 @@ def test_event_trigger_revert_on_undeliverable(graphdb):
         resource_iri=seed.HELLO_RESOURCE,
         service_iri=dead_service,
         service_class=seed.HELLO_SERVICE_CLASS,
-        address="http://127.0.0.1:9",  # nothing listens on port 9
+        address=dead_address,
     )
     register_workflow(
         ogm,
         resource_iri=seed.HELLO_RESOURCE,
         service_iri=dead_service,
-        workflow_iri=seed.HELLO_RESOURCE + "_service_workflow_hello_world",
+        workflow_iri=mint_workflow_iri(dead_service, "hello_world"),
         workflow_class=seed.HELLO_WORKFLOW_CLASS,
         capability_iri=cap_instance,
         capability_class=seed.HELLO_CAPABILITY_CLASS,
@@ -170,20 +171,20 @@ def test_event_trigger_revert_on_undeliverable(graphdb):
             pass
     op_iri = op.iri
 
-    # The Operation was reverted: no type, no capability link, no status remain.
+    # The Operation reverted. No type remains. No capability link remains. No status remains.
     assert not db.triple_exists((op_iri, RDF.type, CFC.Operation))
     assert not db.triple_exists((op_iri, CFC.implementsCapability, cap_instance))
     assert not db.triples_get(sub=op_iri, pred=SVC.operationStatus)
 
 
 # --------------------------------------------------------------------------- #
-# Pull-and-run (#14): claim the next queued Operation, run the work, record the
+# Pull-and-run (#14): claim the next queued Operation. Run the work. Record the
 # terminal status + provenance atomically (ADR 0009 / 0010).
 # --------------------------------------------------------------------------- #
 
 
 def _hello_resource(graphdb, port: int) -> SemanticMiddleware:
-    """A hello-resource middleware exposing the helloworld workflow + the event trigger."""
+    """A hello-resource middleware. Expose the helloworld workflow + the event trigger."""
     mw = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.HELLO_RESOURCE,
@@ -200,7 +201,7 @@ def _hello_resource(graphdb, port: int) -> SemanticMiddleware:
 
 
 def _dispatch_hello_op(graphdb) -> str:
-    """Dispatch one hello-capability Operation from a planner middleware; return its IRI."""
+    """Dispatch one hello-capability Operation from a planner middleware. Return its IRI."""
     mw_a = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.PLANNER_RESOURCE,
@@ -222,14 +223,14 @@ def test_pull_and_run_completes_operation(graphdb):
     """Full loop: A dispatches -> B enqueues -> B pull-and-runs helloworld -> Operation done + provenance."""
     db = graphdb
     seed.seed_scenario1(db)
-    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
-
     mw_b = _hello_resource(graphdb, B_PORT)
+    # Per-instance since ADR 0022. Derived from the instance. Not from the resource.
+    wf_instance = mint_workflow_iri(mw_b.service_iri, "hello_world")
     server, thread = _start_server(mw_b, B_PORT)
     try:
         op_iri = _dispatch_hello_op(graphdb)  # queued on B via the REST event trigger
 
-        # B pulls the queued Operation and runs the work under a domain-supplied ClassScope.
+        # B pulls the queued Operation. Run the work under a domain-supplied ClassScope.
         scope = ClassScope.from_property_chains([[SVC.operationStatus]])
         with mw_b.claim_next(scope) as claimed:
             assert claimed.iri == op_iri
@@ -253,12 +254,12 @@ def test_pull_and_run_completes_operation(graphdb):
 
 @requires_graphdb
 def test_pull_and_run_failure_marks_failed(graphdb):
-    """A body exception marks the Operation `failed` with the error message + provenance (ADR 0009)."""
+    """A body exception marks the Operation `failed`. Error message + provenance (ADR 0009)."""
     db = graphdb
     seed.seed_scenario1(db)
-    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
-
     mw_b = _hello_resource(graphdb, B_PORT)
+    # Per-instance since ADR 0022. Derived from the instance. Not from the resource.
+    wf_instance = mint_workflow_iri(mw_b.service_iri, "hello_world")
     server, thread = _start_server(mw_b, B_PORT)
     try:
         op_iri = _dispatch_hello_op(graphdb)
@@ -272,7 +273,7 @@ def test_pull_and_run_failure_marks_failed(graphdb):
         assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
         result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
         assert result and "boom" in str(result[0][2])
-        # The resource datamodel is snapshotted into svc:failureState, atomically with `failed`.
+        # The resource datamodel is snapshotted into svc:failureState. Atomically with `failed`.
         failure = list(db.triples_get(sub=op_iri, pred=SVC.failureState))
         assert failure, "svc:failureState should capture the resource datamodel on failure"
         assert json.loads(str(failure[0][2]))["id"] == str(seed.HELLO_RESOURCE)
@@ -317,22 +318,22 @@ def _wait_for_status(db, op_iri, status: str, timeout: float = 15.0) -> None:
 
 @requires_graphdb
 def test_callback_runs_operation_on_enqueue(graphdb):
-    """A registered callback fires on enqueue and drives a pull-and-run to done + provenance (#15).
+    """A registered callback fires on enqueue. Drive a pull-and-run to done + provenance (#15).
 
-    The no-callback path — an Operation left `queued` — is covered by
-    test_event_trigger_dispatch_enqueues_over_rest, which dispatches without a callback.
+    The no-callback path exists. An Operation left `queued`. Covered by
+    test_event_trigger_dispatch_enqueues_over_rest. Dispatch without a callback.
     """
     db = graphdb
     seed.seed_scenario1(db)
-    wf_instance = mint_workflow_iri(seed.HELLO_RESOURCE + "_service", "hello_world")
-
     mw_b = _hello_resource(graphdb, B_PORT)
+    # Per-instance since ADR 0022. Derived from the instance. Not from the resource.
+    wf_instance = mint_workflow_iri(mw_b.service_iri, "hello_world")
     mw_b.register_callback(lambda operation: hello_world())  # domain work function
     server, thread = _start_server(mw_b, B_PORT)
     try:
         op_iri = _dispatch_hello_op(graphdb)  # event trigger enqueues + fires the callback
 
-        # The callback runs in the background; wait for the terminal transition.
+        # The callback runs in the background. Wait for the terminal transition.
         _wait_for_status(db, op_iri, OperationStatus.DONE)
         assert db.triple_exists((op_iri, SVC.executedByWorkflow, wf_instance))
         result = list(db.triples_get(sub=op_iri, pred=SVC.executionResult))
@@ -346,24 +347,21 @@ def test_callback_runs_operation_on_enqueue(graphdb):
 
 
 # --------------------------------------------------------------------------- #
-# Two-instance REST event-trigger proof (#16): A dispatches to B over real HTTP;
-# B enqueues (queued), then pulls-and-runs a STATEFUL workflow (done), with the
-# door's state change as B's observable side effect.
+# Two-instance REST event-trigger proof (#16): A dispatches to B over real HTTP.
+# B enqueues (queued). Pull-and-runs a STATEFUL workflow (done). The door state
+# change is B observable side effect.
 # --------------------------------------------------------------------------- #
 
 
 @requires_graphdb
 def test_two_instance_rest_event_trigger_full_lifecycle(graphdb):
-    """A (mobile robot) dispatches an open Operation to B (door) over REST; B enqueues it
-    (queued), then pulls-and-runs door_open (done). Asserts the full status lifecycle across
-    two instances and B's observable side effect (the door actually opens)."""
+    """A (mobile robot) dispatches an open Operation to B (door) over REST. B enqueues it
+    (queued). Pull-and-runs door_open (done). Assert the full status lifecycle across
+    two instances and B observable side effect (the door actually opens)."""
     db = graphdb
     reset_door()
     seed.seed_scenario2(db)
-    door_service = seed.DOOR_RESOURCE + "_service"
-    open_wf = mint_workflow_iri(door_service, "door_open")
-
-    # B: the door resource, exposing door_open + the built-in event trigger over REST.
+    # B: the door resource. Expose door_open + the built-in event trigger over REST.
     mw_b = SemanticMiddleware(
         mode="resource",
         resource_iri=seed.DOOR_RESOURCE,
@@ -376,11 +374,13 @@ def test_two_instance_rest_event_trigger_full_lifecycle(graphdb):
         capability_class=seed.DOOR_OPEN_CAPABILITY_CLASS,
         workflow_class=seed.DOOR_OPEN_WORKFLOW_CLASS,
     )(door_open)
+    # Per-instance since ADR 0022. Derived from the instance. Not from the resource.
+    open_wf = mint_workflow_iri(mw_b.service_iri, "door_open")
 
     server, thread = _start_server(mw_b, B_PORT)
     try:
-        # A: the mobile robot, dispatching an open Operation to the door — the peer resolved
-        # purely through the graph, the event trigger fired over HTTP.
+        # A: the mobile robot. Dispatch an open Operation to the door. Peer resolved
+        # purely through the graph. Event trigger fired over HTTP.
         mw_a = SemanticMiddleware(
             mode="resource",
             resource_iri=seed.MOBILE_ROBOT,
@@ -396,19 +396,19 @@ def test_two_instance_rest_event_trigger_full_lifecycle(graphdb):
             pass
         op_iri = op.iri
 
-        # The REST event trigger reached B and B enqueued it: the Operation is `queued`,
-        # and the door has not moved yet.
+        # The REST event trigger reached B. B enqueued it. The Operation is `queued`.
+        # The door has not moved yet.
         status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
         assert status and str(status[0][2]) == OperationStatus.QUEUED
         assert op_iri in mw_b._operation_queue
         assert door_status() == "closed"
 
-        # B's domain pulls and runs it: the door opens (observable side effect), op -> done.
+        # B domain pulls and runs it. The door opens (observable side effect). Op -> done.
         with mw_b.claim_next() as claimed:
             assert claimed.iri == op_iri
             claimed.result = door_open()
 
-        assert door_status() == "opened"  # B's observable state change
+        assert door_status() == "opened"  # B observable state change
         status = list(db.triples_get(sub=op_iri, pred=SVC.operationStatus))
         assert status and str(status[0][2]) == OperationStatus.DONE
         assert db.triple_exists((op_iri, SVC.executedByWorkflow, open_wf))

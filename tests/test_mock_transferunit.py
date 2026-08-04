@@ -15,8 +15,8 @@ from pathlib import Path
 import aiomqtt
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
-from mock_transferunit import MockTransferUnit  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from demo.transferunits.plc.transfer_unit import TransferUnit  # noqa: E402
 
 
 async def _collect(broker: str, topics, count, timeout=5.0):
@@ -43,7 +43,7 @@ class TestTopicScheme:
     """The scheme is TransferUnit<n>/<component>/<position>/<param>, +_set (ADR 0023)."""
 
     def test_publishes_four_topics(self):
-        unit = MockTransferUnit()
+        unit = TransferUnit()
 
         assert unit.published_topics == [
             "TransferUnit1/ConveyorBelt/left/speed",
@@ -53,7 +53,7 @@ class TestTopicScheme:
         ]
 
     def test_subscribes_to_two_topics(self):
-        unit = MockTransferUnit()
+        unit = TransferUnit()
 
         assert unit.subscribed_topics == [
             "TransferUnit1/ConveyorBelt/left/speed_set",
@@ -62,7 +62,7 @@ class TestTopicScheme:
 
     def test_the_unit_name_parameterises_every_topic(self):
         """Multiple simultaneous TransferUnits are in scope for map #24."""
-        unit = MockTransferUnit(unit="TransferUnit7")
+        unit = TransferUnit(unit_index=7)
 
         assert all(t.startswith("TransferUnit7/") for t in unit.published_topics)
         assert all(t.startswith("TransferUnit7/") for t in unit.subscribed_topics)
@@ -72,7 +72,7 @@ class TestTopicScheme:
 class TestLiveBehaviour:
     async def test_publishes_all_four_values(self, mqtt_broker):
         host, port = mqtt_broker.split(":")
-        async with MockTransferUnit(broker=host, port=int(port), publish_interval=0.1) as unit:
+        async with TransferUnit(broker=host, port=int(port), publish_interval=0.1) as unit:
             received = await _collect(mqtt_broker, unit.published_topics, count=4)
 
         assert {topic for topic, _ in received} == set(unit.published_topics)
@@ -80,7 +80,7 @@ class TestLiveBehaviour:
     async def test_a_setpoint_moves_the_published_speed(self, mqtt_broker):
         """#40's acceptance: a setpoint on speed_set moves the published speed."""
         host, port = mqtt_broker.split(":")
-        async with MockTransferUnit(
+        async with TransferUnit(
             broker=host, port=int(port), publish_interval=0.1
         ) as unit:
             assert unit.speeds["left"] == 0.0
@@ -101,7 +101,7 @@ class TestLiveBehaviour:
 
     async def test_a_setpoint_does_not_disturb_the_other_belt(self, mqtt_broker):
         host, port = mqtt_broker.split(":")
-        async with MockTransferUnit(
+        async with TransferUnit(
             broker=host, port=int(port), publish_interval=0.1
         ) as unit:
             async with aiomqtt.Client(host, port=int(port)) as publisher:
@@ -115,7 +115,7 @@ class TestLiveBehaviour:
 
     async def test_a_light_barrier_reports_occupancy(self, mqtt_broker):
         host, port = mqtt_broker.split(":")
-        async with MockTransferUnit(
+        async with TransferUnit(
             broker=host, port=int(port), publish_interval=5.0
         ) as unit:
             await unit.set_occupied("front", True)
@@ -129,7 +129,7 @@ class TestLiveBehaviour:
     async def test_an_unparseable_setpoint_is_ignored_not_fatal(self, mqtt_broker):
         """A malformed payload from a device must not take the mock down."""
         host, port = mqtt_broker.split(":")
-        async with MockTransferUnit(
+        async with TransferUnit(
             broker=host, port=int(port), publish_interval=0.1
         ) as unit:
             async with aiomqtt.Client(host, port=int(port)) as publisher:

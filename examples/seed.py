@@ -1,19 +1,18 @@
 """Self-contained seeding for the example scenarios (ADR 0010).
 
 Every example scenario runs against a dedicated, clearable GraphDB repository.
-These helpers clear it and load exactly the ground-truth ontology the scenario
-needs (the ``svc:`` module plus the scenario's own demo ontology), then create
-the starting instance data — so a scenario notebook or integration test is a
-complete, reproducible specification of its own prerequisites and never depends
-on production state.
+These helpers clear it. They load exactly the ground-truth ontology the
+scenario needs (the ``svc:`` module plus the demo ontology of the scenario).
+They then create the starting instance data. A scenario notebook or
+integration test is therefore a complete, reproducible specification of its
+own prerequisites, and never depends on the production state.
 
-Everything is written into the repository's default graph, which
+The system writes everything into the default graph of the repository, which
 ``clear_repository`` wipes at the start of each run.
 """
 
 from __future__ import annotations
 
-from importlib import resources
 from pathlib import Path
 
 from graph_db_interface import IRI
@@ -21,6 +20,14 @@ from kapps_ogm.utils.class_scope import ClassScope
 from rdflib.namespace import RDF
 
 from kapps_semantic_middleware.registration import create_possession
+from kapps_semantic_middleware.seeding import (
+    CORE_GRAPH,
+    MES_GRAPH,
+    SERVICE_GRAPH,
+    _read_mes_ontology,
+    clear_repository,
+    load_shared_ontologies,
+)
 from kapps_semantic_middleware.vocabulary import MES
 
 
@@ -63,16 +70,6 @@ HANDOVER_SOURCE = IRI(f"{DEMO_NS}transfer_module_A")
 HANDOVER_DEST = IRI(f"{DEMO_NS}transfer_module_B")
 HANDOVER_BOX = IRI(f"{DEMO_NS}box_001")
 
-# --- Shared ontology named graphs -------------------------------------------------
-# Core and svc: are needed by every scenario and never change during a run, so they
-# live in named graphs of their own rather than being re-imported into the default
-# graph each time. ``clear_repository`` clears only the default graph, so a seed wipes
-# the scenario's own data and leaves these standing. GraphDB reasons across all graphs,
-# so a domain class still resolves its cfc: superclass from here.
-CORE_GRAPH = IRI("https://w3id.org/circularfactory/Core")
-SERVICE_GRAPH = IRI("https://w3id.org/circularfactory/Service")
-MES_GRAPH = IRI("https://w3id.org/circularfactory/MES")
-
 # --- Scenario 3 (TransferUnit) ----------------------------------------------------
 TU_NS = "https://www.sfb1574.kit.edu/ontologies/TransferUnit#"
 TUI_NS = "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#"
@@ -103,75 +100,9 @@ LIGHT_BARRIER_BACK = IRI(f"{TUI_NS}LightBarrier1_back")
 MQTT_BROKER_IP = "127.0.0.1"
 
 
-def _read_core_ontology() -> str:
-    """Return the vendored cfc: Core ontology Turtle.
-
-    A verbatim copy of the published Core (version 0.9.0,
-    https://circularfactory.github.io/Core/latest/ontology.ttl). Core is external and
-    superior: imported and specialized, never modified (Core Middleware ADR 0012). It is
-    vendored rather than fetched so seeding stays reproducible offline, matching the
-    self-containment rule in examples ADR 0001.
-    """
-    return (
-        resources.files("kapps_semantic_middleware")
-        .joinpath("ontology", "core.ttl")
-        .read_text(encoding="utf-8")
-    )
-
-
-def _read_service_ontology() -> str:
-    """Return the packaged ``svc:`` ontology Turtle."""
-    return (
-        resources.files("kapps_semantic_middleware")
-        .joinpath("ontology", "service.ttl")
-        .read_text(encoding="utf-8")
-    )
-
-
 def _read_demo_ontology(filename: str) -> str:
     """Return a scenario demo ontology Turtle file (sibling of this file)."""
     return (Path(__file__).parent / filename).read_text(encoding="utf-8")
-
-
-def clear_repository(db) -> None:
-    """Clear the repository's default graph (authorized clearable test repo).
-
-    Always run this before seeding, so a scenario never accumulates residual
-    triples from a previous run or a different scenario.
-    """
-    db.clear_graph()
-
-
-def load_shared_ontologies(db, *, reload: bool = False) -> None:
-    """Load the published/general ontology modules, one named graph per ontology.
-
-    Core, ``svc:`` and ``mes:`` are needed by every scenario and never change during a
-    run, so each gets its own named graph rather than being re-imported into the default
-    graph on every seed. ``clear_repository`` clears only the default graph, so a seed
-    wipes the scenario's own data and leaves these standing; GraphDB reasons across all
-    graphs, so a domain class still resolves its ``cfc:`` superclass from here.
-
-    Idempotent: a module already present is skipped unless ``reload`` is set.
-    """
-    for graph, turtle in (
-        (CORE_GRAPH, _read_core_ontology()),
-        (SERVICE_GRAPH, _read_service_ontology()),
-        (MES_GRAPH, _read_mes_ontology()),
-    ):
-        if reload:
-            db.clear_graph(graph)
-        elif _graph_is_populated(db, graph):
-            continue
-        db.import_statements(
-            turtle, graph_iri=graph, content_type="application/x-turtle"
-        )
-
-
-def _graph_is_populated(db, graph_iri: IRI) -> bool:
-    """Whether a named graph already holds any statement."""
-    return bool(
-        db.query(f"ASK {{ GRAPH <{graph_iri}> {{ ?s ?p ?o }} }}").get("boolean", False)
-    )
 
 
 def load_scenario1_ontologies(db) -> None:
@@ -218,16 +149,19 @@ def seed_scenario1(db) -> None:
 
 
 def seed_scenario3(db, ogm) -> None:
-    """Full scenario 3 seed: clear, load the shared modules + TransferUnit classes, and
-    create one TransferUnit with two conveyor belts and two light barriers **through the
-    OGM**.
+    """Full scenario 3 seed.
 
-    Instances are created rather than authored as Turtle, so the seed exercises the same
-    validated write path a running middleware uses (root ADR 0008) and the ontology file
-    stays classes-only.
+    Clears the graph, loads the shared modules and the TransferUnit classes,
+    and creates one TransferUnit with two belts and two light barriers,
+    **through the OGM**.
 
-    No ``inf:hasValue`` literals: scenario 3 is a locator (ADR 0024). The graph records
-    where each value lives; the live value exists only in the datamodel and over REST.
+    This function creates instances rather than authored as Turtle. So the seed
+    exercises the same validated write path a running middleware uses (root
+    ADR 0008), and the ontology file stays classes-only.
+
+    No ``inf:hasValue`` literals: scenario 3 is a locator (ADR 0024). The
+    graph records where each value lives. The live value exists only in the
+    datamodel and over REST.
     """
     clear_repository(db)
     load_scenario3_ontologies(db)
@@ -305,19 +239,14 @@ def seed_scenario2(db) -> None:
     create_resource(db, MOBILE_ROBOT, MOBILE_ROBOT_RESOURCE_CLASS)
 
 
-def _read_mes_ontology() -> str:
-    """Return the packaged mes: ontology Turtle (handover-ability vocabulary)."""
-    return (
-        resources.files("kapps_semantic_middleware")
-        .joinpath("ontology", "mes.ttl")
-        .read_text(encoding="utf-8")
-    )
-
-
 def seed_handover(db, ogm) -> None:
-    """Full handover seed: clear, load the mes: + handover ontologies, create two transfer
-    modules and a box, give the destination the ability complementary to Pass (Retrieve), and
-    make the source currently possess the box (Core reified possession, written via the OGM)."""
+    """Full handover seed.
+
+    Clears the graph, loads the mes: and handover ontologies, and creates
+    two transfer modules and a box. It gives the destination the ability
+    complementary to Pass (Retrieve). Makes the source currently possess the
+    box (Core reified possession, written through the OGM).
+    """
     clear_repository(db)
     db.import_statements(_read_mes_ontology(), content_type="application/x-turtle")
     db.import_statements(
@@ -332,6 +261,6 @@ def seed_handover(db, ogm) -> None:
     create_possession(ogm, workpiece_iri=HANDOVER_BOX, possessor_iri=HANDOVER_SOURCE)
 
 
-# Resource *class* IRIs (instances above are typed with these).
+# Resource *class* IRIs (the code types the instances above with these classes).
 HELLO_RESOURCE_CLASS = IRI(f"{DEMO_NS}DemoResource")
 PLANNER_RESOURCE_CLASS = IRI(f"{DEMO_NS}PlannerResource")
