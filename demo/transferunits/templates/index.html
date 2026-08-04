@@ -40,6 +40,9 @@
   .addr { font:12px/1.7 ui-monospace,monospace; margin-top:3px }
   .addr a { color:#0b5cad; text-decoration:none }
   .addr a:hover { text-decoration:underline }
+  .addr a.activity { margin-left:6px; font-size:11px; border:1px solid var(--line);
+                      border-radius:3px; padding:0 4px; color:var(--muted) }
+  .addr a.activity:hover { color:#0b5cad; text-decoration:none }
   .none { color:var(--stopped) }
   .src { font-size:10px; border:1px solid var(--line); border-radius:3px; padding:0 4px;
          color:var(--muted); margin-left:5px; cursor:help }
@@ -87,11 +90,18 @@ let frozen = false;
 
 function box(key, id, title, node, wide) {
   const isLink = node.address && node.address.startsWith('http');
+  // Only middleware and the control station hold an activity feed (ADR 0029) — a PLC
+  // holds no middleware, so it gets no link, and that asymmetry is the demonstration.
+  const hasActivityFeed = key === 'middleware' || key === 'controller';
+  const activityLink = (isLink && hasActivityFeed)
+    ? `<a class="activity" href="${node.address}/activity" target="_blank">activity</a>`
+    : '';
   const addr = node.address
     ? (isLink
         ? `<a href="${node.address}" target="_blank">${node.address}</a>`
         : `<span>${node.address}</span>`) +
-      (node.source ? `<span class="src" data-src="${node.source}">${node.source}</span>` : '')
+      (node.source ? `<span class="src" data-src="${node.source}">${node.source}</span>` : '') +
+      activityLink
     : `<span class="none">${node.state === 'stopped' ? 'stopped' : 'no address yet'}</span>`;
   const failedAttrs = node.state === 'failed' ? ` onclick="toggleOutput('${id}')"` : '';
   const stateText = node.state === 'slow' ? 'slow — check the output' : node.state;

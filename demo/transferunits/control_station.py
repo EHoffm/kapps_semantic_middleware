@@ -76,6 +76,7 @@ async def main() -> None:
         ogm=ogm,
         host=args.host,
         port=port,
+        activity_feed=True,
     )
 
     print(f"The control station runs on http://{args.host}:{port}/", flush=True)

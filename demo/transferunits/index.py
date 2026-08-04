@@ -32,14 +32,17 @@ TEACH = {
     },
     "middleware": {
         "title": "One middleware instance, for one unit",
-        "what": "It reads its unit out of the graph and builds its connectors from what it "
-        "finds there. No topic and no address is written in its code.",
-        "file": "src/kapps_semantic_middleware/middleware.py",
+        "what": "Every middleware carries a live activity feed of its own wiring and traffic "
+        "(ADR 0029) -- the \"activity\" link beside its address opens it. The same instance "
+        "also reads its unit out of the graph and builds its connectors from what it finds "
+        "there; no topic and no address is written in its code.",
+        "file": "src/kapps_semantic_middleware/activity.py",
     },
     "controller": {
         "title": "The control station",
         "what": "It lists every resource it finds in the graph, and it drives any of them. "
-        "No endpoint is configured into it.",
+        "No endpoint is configured into it. It carries the same live activity feed as a "
+        "middleware (ADR 0022) -- the \"activity\" link beside its address opens it.",
         "file": "src/kapps_semantic_middleware/rest_router.py",
     },
     "broker": {

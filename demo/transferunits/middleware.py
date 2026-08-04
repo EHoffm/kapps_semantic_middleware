@@ -93,6 +93,7 @@ async def main() -> None:
         port=port,
         class_scope=class_scope,
         autoregister_connectors=True,
+        activity_feed=True,
     )
 
     # No broker flag here: the connector reads the broker address (and, per
