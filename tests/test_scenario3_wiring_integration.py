@@ -9,6 +9,7 @@ carries no connection metadata, regardless of the connector wiring.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from kapps_semantic_middleware.connectors.semantic import SemanticConnectorRegis
 from kapps_semantic_middleware.connectors.wiring import plan_wiring
 from kapps_semantic_middleware.projection import (
     carries_southbound,
+    load_northbound,
     southbound_properties,
 )
 from kapps_semantic_middleware.vocabulary import INF, AccessMode
@@ -345,3 +347,108 @@ class TestNorthboundProjection:
         assert INF.accessMode.lined in served
         assert seed.TU_HAS_UNIT.lined in served
         assert INF.hasValue.lined in served
+
+
+@requires_graphdb
+class TestLoadNorthbound:
+    """Prune-on-load path (ADR 0033, #78): a consumer fetches with the prune already applied."""
+
+    def test_a_loaded_transferunit_carries_no_mqtt_property(self, scenario3, unit_scope):
+        _, ogm = scenario3
+
+        node = load_northbound(
+            ogm,
+            instance_iri=seed.TRANSFER_UNIT_1,
+            resource_class=seed.TRANSFER_UNIT_CLASS,
+            class_scope=unit_scope,
+        )
+        dumped = node.instance.model_dump()
+
+        assert "hasMQTT" not in str(dumped)
+        assert not carries_southbound(
+            dumped, southbound_properties(ogm, seed.TU_HAS_CONVEYOR_SPEED)
+        )
+        # Northbound content survives -- not passing by serving nothing.
+        assert INF.accessMode.lined in str(dumped)
+        assert seed.TU_HAS_UNIT.lined in str(dumped)
+
+    def test_an_unregistered_synthetic_marker_is_pruned_with_no_code_change(
+        self, scenario3, unit_scope
+    ):
+        """A protocol declared only in the graph is excluded -- the prune is ontology-derived."""
+        graphdb, ogm = scenario3
+        opcua_marker = IRI(f"{seed.INF_NS}isInterfaceAccessibleOPCUAParameter")
+        opcua_endpoint = IRI(f"{seed.INF_NS}hasOPCUAEndpoint")
+        owl, rdfs, xsd = (
+            "http://www.w3.org/2002/07/owl#",
+            "http://www.w3.org/2000/01/rdf-schema#",
+            "http://www.w3.org/2001/XMLSchema#",
+        )
+
+        graphdb.query(
+            f"""
+            INSERT DATA {{
+              <{opcua_marker}> a <{owl}ObjectProperty> ;
+                  <{rdfs}subPropertyOf> <{seed.INF_NS}isInterfaceAccessibleParameter> ;
+                  <{rdfs}range> [ a <{owl}Class> ; <{owl}intersectionOf> (
+                      [ a <{owl}Restriction> ; <{owl}onProperty> <{opcua_endpoint}> ;
+                        <{owl}allValuesFrom> <{xsd}string> ] ) ] .
+              <{opcua_endpoint}> a <{owl}DatatypeProperty> .
+              <{seed.TU_HAS_CONVEYOR_SPEED}> <{rdfs}subPropertyOf> <{opcua_marker}> .
+            }}
+            """,
+            update=True,
+        )
+        graphdb.query(
+            f'INSERT {{ ?n <{opcua_endpoint}> "opc.tcp://10.0.0.5:4840/belt" }} '
+            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n }}",
+            update=True,
+        )
+
+        node = load_northbound(
+            ogm,
+            instance_iri=seed.TRANSFER_UNIT_1,
+            resource_class=seed.TRANSFER_UNIT_CLASS,
+            class_scope=unit_scope,
+        )
+        dumped = node.instance.model_dump()
+
+        assert "opc.tcp://10.0.0.5:4840/belt" not in str(dumped)
+        assert opcua_endpoint.lined not in str(dumped)
+        # Northbound content survives.
+        assert INF.accessMode.lined in str(dumped)
+
+    def test_what_was_pruned_is_logged_per_parameter(self, scenario3, unit_scope, caplog):
+        _, ogm = scenario3
+
+        with caplog.at_level(logging.INFO, logger="kapps_semantic_middleware.projection"):
+            load_northbound(
+                ogm,
+                instance_iri=seed.TRANSFER_UNIT_1,
+                resource_class=seed.TRANSFER_UNIT_CLASS,
+                class_scope=unit_scope,
+            )
+
+        assert str(seed.TRANSFER_UNIT_1) in caplog.text
+        assert str(seed.TU_HAS_CONVEYOR_SPEED) in caplog.text
+        assert "hasMQTTTopic" in caplog.text or str(INF.hasMQTTTopic) in caplog.text
+        # One line per parameter: tu:hasConveyorSpeed and tu:isOccupied are both
+        # interface-accessible in the scenario-3 seed.
+        assert len([r for r in caplog.records if "pruned" in r.message]) >= 2
+
+    def test_a_consumer_keeps_only_the_pruned_shape(self, scenario3, unit_scope):
+        """Unlike the serving path, nothing here ever holds a field to carry a broker address."""
+        _, ogm = scenario3
+
+        node = load_northbound(
+            ogm,
+            instance_iri=seed.TRANSFER_UNIT_1,
+            resource_class=seed.TRANSFER_UNIT_CLASS,
+            class_scope=unit_scope,
+        )
+        served = node.instance.model_dump()
+
+        belt = served[seed.TU_HAS_CONVEYOR_BELT.lined][0]
+        parameter = belt[seed.TU_HAS_CONVEYOR_SPEED.lined][0]
+
+        assert INF.hasMQTTBrokerIP.lined not in parameter
