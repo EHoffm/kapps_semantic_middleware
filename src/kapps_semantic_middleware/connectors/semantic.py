@@ -125,6 +125,26 @@ class ParameterBinding:
     (ADR 0023). It comes from the **full** spec, not the pruned northbound one. The node the
     binding writes must still be the shape the graph expects."""
 
+    root_iri: Optional[IRI] = None
+    """The top-level resource individual recognition started from (e.g. the TransferUnit).
+
+    ``resource_iri`` above is the *holder* of the parameter, a belt or a barrier. REST
+    addressing (ADR 0017) is structural and relative to the **root**, not the holder, so a
+    binding one level of nesting deep needs both. ``None`` only for a ``ParameterBinding``
+    built by hand outside recognition (as the MQTT tests do); nothing that reads
+    ``root_iri`` is reachable from one of those."""
+
+    root_class_local_name: Optional[str] = None
+    """Fragment of the root resource's class IRI, the ``{Model}`` segment of an ADR 0017
+    route. Paired with ``root_iri``; see its docstring."""
+
+    path_steps: Tuple[Tuple[str, str], ...] = ()
+    """``(field_name, child_iri)`` hops from ``root_iri`` down to ``resource_iri``, mirroring
+    ``rest_router.py``'s ``_accumulate_routes``. Empty when ``resource_iri`` already is the
+    root. ``field_name`` is the mangled form (``IRI(prop).lined``), matching what the served
+    route actually uses; ``child_iri`` is the raw individual IRI, mangled by
+    ``rest_binding.build_parameter_path`` itself."""
+
     def get(self, prop: IRI) -> Any:
         """The single value of one metadata property, or ``None``."""
         return first(self.metadata.get(str(prop)))
@@ -138,6 +158,27 @@ class ParameterBinding:
         """
         raw = self.get(INF.accessMode)
         return raw if raw in AccessMode.ALL else AccessMode.READ
+
+    @property
+    def label(self) -> str:
+        """A short human-readable label for a log line, e.g. "Belt1 hasConveyorSpeed".
+
+        Full mangled IRIs are correct in route paths (ADR 0021) but unreadable in a log line
+        a human watches scroll past. Display-only: never parse it, never use it to address
+        anything. Shared here rather than restated per binding descriptor — every binding
+        builds one of these for its formatter's log lines.
+        """
+        resource_fragment = (
+            self.resource_iri.fragment
+            if hasattr(self.resource_iri, "fragment") and self.resource_iri.fragment
+            else str(self.resource_iri)
+        )
+        param_fragment = (
+            self.parameter_property.fragment
+            if hasattr(self.parameter_property, "fragment") and self.parameter_property.fragment
+            else str(self.parameter_property)
+        )
+        return f"{resource_fragment} {param_fragment}"
 
 
 class BindingDescriptor(Protocol):

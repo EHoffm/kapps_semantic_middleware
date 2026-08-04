@@ -19,6 +19,9 @@ import httpx
 from graph_db_interface import IRI
 
 from kapps_semantic_middleware import Mode, SemanticMiddleware
+from kapps_semantic_middleware.connectors.rest_binding import (
+    build_parameter_path as _rest_build_parameter_path,
+)
 from kapps_semantic_middleware.vocabulary import CFC, SVC
 
 logger = logging.getLogger(__name__)
@@ -295,9 +298,11 @@ class Controller(SemanticMiddleware):
     ) -> str:
         """Build the structural REST path for a parameter from known (field, child_id) hops.
 
-        Mirrors rest_router.py's _accumulate_routes path shape exactly:
-        /{Model}/{lined_root}/{field}/{lined_child}/.../{field}. Field names stay literal.
-        Only individual IDs are mangled, via IRI.lined (ADR 0017, ADR 0021).
+        Delegates to ``rest_binding.build_parameter_path`` (ticket #77): the algorithm names
+        no domain term and the REST semantic connector needs the identical derivation at
+        recognition time, so it moved to ``src/`` rather than being duplicated or rewritten
+        (ADR 0033). This wrapper is kept because it is this class's own public surface and
+        existing callers address it as ``Controller._build_parameter_path``.
 
         The caller already knows each hop's child id. It typically reads the id off
         the JSON tree that open_resource() returned. This method only assembles path
@@ -313,12 +318,9 @@ class Controller(SemanticMiddleware):
         Returns:
             The structural URL path.
         """
-        path_parts = ["", resource_class_local_name, IRI(resource_iri).lined]
-        for field_name, child_id in steps:
-            path_parts.append(field_name)
-            path_parts.append(IRI(child_id).lined)
-        path_parts.append(terminal_field)
-        return "/".join(path_parts)
+        return _rest_build_parameter_path(
+            resource_class_local_name, resource_iri, steps, terminal_field
+        )
 
     @staticmethod
     def _derive_parameter_path(

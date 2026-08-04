@@ -37,6 +37,7 @@ from kapps_semantic_middleware.connectors.semantic import (
     resolve_direction,
 )
 from kapps_semantic_middleware.projection import cross_check, prune_southbound
+from kapps_semantic_middleware.vocabulary import SVC
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,11 @@ def plan_wiring(
     northbound_spec = prune_southbound(full_spec, ogm=ogm, cache=southbound_by_property)
 
     bindings = _recognise(
-        ogm=ogm, resource_iri=resource_iri, spec=full_spec, registry=registry
+        ogm=ogm,
+        resource_iri=resource_iri,
+        resource_class=resource_class,
+        spec=full_spec,
+        registry=registry,
     )
 
     southbound = frozenset(
@@ -166,6 +171,7 @@ def _recognise(
     *,
     ogm: Any,
     resource_iri: IRI,
+    resource_class: IRI,
     spec: Any,
     registry: SemanticConnectorRegistry,
 ) -> List[ParameterBinding]:
@@ -175,10 +181,23 @@ def _recognise(
     named type of its own. It has only anonymous restriction nodes, which exist by inference and so
     never appear in an explicit-graph fetch. The property hierarchy is what survives a
     round trip (ADR 0020).
+
+    **The evidence may sit on the parameter or on the resource's Service** (ADR 0023's
+    2026-08-03 amendment, ticket #33). An MQTT connector recognises ``inf:hasMQTTTopic`` on
+    the parameter itself. A REST connector has no such marker; its evidence is the resource's
+    own ``svc:address``, one hop out through ``svc:isServiceOf``. Look that address up **once**
+    per resource here, and fold it into every recognised binding's metadata alongside whatever
+    the parameter node itself carries — a binding descriptor that does not care (MQTT) simply
+    never reads the key.
     """
     bindings: List[ParameterBinding] = []
+    address = _service_address(ogm=ogm, resource_iri=resource_iri)
+    # `resource_class` arrives as `IRI` from every existing caller (`_class_of`'s own return
+    # type, or `plan_wiring`'s type hint), but convert defensively the same way `prop_iri`
+    # is converted below -- a plain string has no `.fragment`.
+    root_class_local_name = IRI(str(resource_class)).fragment or str(resource_class)
 
-    for holder_iri, prop_iri, prop_spec in _parameter_properties(
+    for holder_iri, prop_iri, prop_spec, steps in _parameter_properties(
         ogm=ogm, root_iri=resource_iri, spec=spec
     ):
         descriptor = _descriptor_for(ogm=ogm, prop_iri=prop_iri, registry=registry)
@@ -194,6 +213,10 @@ def _recognise(
         if metadata is None:
             continue
 
+        metadata = normalize_metadata(metadata)
+        if address is not None:
+            metadata.setdefault(str(SVC.address), [address])
+
         bindings.append(
             ParameterBinding(
                 resource_iri=holder_iri,
@@ -201,17 +224,20 @@ def _recognise(
                 # ClassSpec keys arrive as rdflib URIRef, not IRI, so the mangling has to go
                 # through a converted copy. URIRef has no `lined`.
                 field_id=IRI(str(prop_iri)).lined,
-                metadata=normalize_metadata(metadata),
+                metadata=metadata,
                 descriptor=descriptor,
                 node_model_type=prop_spec.nested.to_pydantic_model(),
+                root_iri=IRI(str(resource_iri)),
+                root_class_local_name=root_class_local_name,
+                path_steps=steps,
             )
         )
 
     return bindings
 
 
-def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
-    """Yield ``(holder_iri, property_iri, property_spec)`` for every COMPLEX property.
+def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any, steps: Tuple[Tuple[str, str], ...] = ()):
+    """Yield ``(holder_iri, property_iri, property_spec, path_steps)`` for every COMPLEX property.
 
     A COMPLEX property is the deepest addressable thing. ``ConnectionInfo`` has exactly three
     levels and ``field_id`` resolves by plain ``getattr``, so ``inf:hasValue`` — one level
@@ -220,12 +246,19 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
 
     Descend one level through object properties to reach a resource's components. A
     TransferUnit's parameters hang off its belts and barriers, not off the unit itself.
+
+    ``path_steps`` accumulates the ``(field_name, child_iri)`` hops taken to reach the
+    current ``root_iri``, mirroring ``rest_router.py``'s own tree walk exactly — that is what
+    lets ``rest_binding.py`` derive a structural URL with no second walk and no ontology
+    term (ADR 0017, ADR 0033). ``field_name`` is mangled here (``IRI(prop_iri).lined``), the
+    same way ``field_id`` is mangled below, because that is the actual pydantic field name
+    the served route uses.
     """
     from kapps_ogm.mapping.property_spec import PropertyValueKind
 
     for prop_iri, prop_spec in getattr(spec, "properties", {}).items():
         if prop_spec.value_kind is PropertyValueKind.COMPLEX:
-            yield root_iri, prop_iri, prop_spec
+            yield root_iri, prop_iri, prop_spec, steps
             continue
 
         nested = getattr(prop_spec, "nested", None)
@@ -234,8 +267,30 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
 
         for component_iri in _linked_individuals(ogm, root_iri, prop_iri):
             yield from _parameter_properties(
-                ogm=ogm, root_iri=component_iri, spec=nested
+                ogm=ogm,
+                root_iri=component_iri,
+                spec=nested,
+                steps=steps + ((IRI(str(prop_iri)).lined, str(component_iri)),),
             )
+
+
+def _service_address(*, ogm: Any, resource_iri: IRI) -> Optional[str]:
+    """The resource's own ``svc:address``, one hop out through ``svc:isServiceOf``.
+
+    One query per ``_recognise`` call, not per parameter — a resource has one Service, and
+    every parameter on it shares the same answer. ``None`` when the resource has no Service,
+    or the Service has not (yet) published an address. That is the ordinary state of a
+    freshly-constructing instance recognising its *own* resource: ``plan_wiring`` runs from
+    ``__init__``, and ``_register_service`` is an ``on_start_up`` callback that has not run
+    yet, so there is no address to find and REST recognition finds nothing to bind (ADR
+    0023's Service-join amendment).
+    """
+    rows = ogm.db.query(
+        f"SELECT ?addr {EXPLICIT_GRAPH} "
+        f"WHERE {{ ?svc <{SVC.isServiceOf}> <{resource_iri}> ; <{SVC.address}> ?addr }}",
+        convert_bindings=True,
+    )["results"]["bindings"]
+    return str(rows[0]["addr"]) if rows else None
 
 
 def _linked_individuals(ogm: Any, subject: IRI, prop_iri: IRI) -> List[IRI]:

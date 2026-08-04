@@ -303,27 +303,12 @@ def _formatter_for(
         for prop, value in binding.metadata.items()
         if prop not in southbound and IRI(prop).lined != value_field
     }
-    # Build a short human-readable label for log lines. Full mangled IRIs are correct in
-    # route paths (ADR 0021) but unreadable in a log line a human watches scroll past.
-    # This string is display-only. Never parse it. Never use it to address anything.
-    resource_fragment = (
-        binding.resource_iri.fragment
-        if hasattr(binding.resource_iri, "fragment") and binding.resource_iri.fragment
-        else str(binding.resource_iri)
-    )
-    param_fragment = (
-        binding.parameter_property.fragment
-        if hasattr(binding.parameter_property, "fragment")
-        and binding.parameter_property.fragment
-        else str(binding.parameter_property)
-    )
-    parameter_label = f"{resource_fragment} {param_fragment}"
     return MQTTParameterFormatter(
         model_type=binding.node_model_type,
         northbound_facets=facets,
         value_field=value_field,
         value_path=value_path,
-        parameter_label=parameter_label,
+        parameter_label=binding.label,
         topic=topic,
         set_topic=set_topic,
     )

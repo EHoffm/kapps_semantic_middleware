@@ -13,9 +13,11 @@ from kapps_semantic_middleware.connectors.knowledge_graph_connector import (
     KnowledgeGraphConnector,
 )
 
-# Imported for its registration side effect. `MQTTBinding` is re-exported so a caller can
-# reference it directly (to build a restricted registry, or to override it).
+# Imported for its registration side effect. `MQTTBinding` and `RESTBinding` are re-exported
+# so a caller can reference either directly (to build a restricted registry, or to override
+# one of them).
 from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding
+from kapps_semantic_middleware.connectors.rest_binding import RESTBinding
 from kapps_semantic_middleware.connectors.semantic import (
     BindingDescriptor,
     ParameterBinding,
@@ -28,6 +30,7 @@ from kapps_semantic_middleware.connectors.semantic import (
 __all__ = [
     "KnowledgeGraphConnector",
     "MQTTBinding",
+    "RESTBinding",
     "BindingDescriptor",
     "ParameterBinding",
     "Registration",

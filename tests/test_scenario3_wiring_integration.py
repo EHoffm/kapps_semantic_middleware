@@ -19,6 +19,7 @@ from graph_db_interface import IRI
 from kapps_ogm import OGM
 
 from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding
+from kapps_semantic_middleware.connectors.rest_binding import RESTBinding, build_parameter_path
 from kapps_semantic_middleware.connectors.semantic import SemanticConnectorRegistry
 from kapps_semantic_middleware.connectors.wiring import plan_wiring
 from kapps_semantic_middleware.projection import (
@@ -26,7 +27,7 @@ from kapps_semantic_middleware.projection import (
     load_northbound,
     southbound_properties,
 )
-from kapps_semantic_middleware.vocabulary import INF, AccessMode
+from kapps_semantic_middleware.vocabulary import INF, SVC, AccessMode
 
 from conftest import requires_graphdb  # noqa: E402
 
@@ -53,13 +54,38 @@ def scenario3(graphdb):
 
 
 def _plan(ogm, unit_scope, **kwargs):
+    kwargs.setdefault("registry", SemanticConnectorRegistry([MQTTBinding]))
     return plan_wiring(
         ogm=ogm,
         resource_iri=seed.TRANSFER_UNIT_1,
         class_scope=unit_scope,
-        registry=SemanticConnectorRegistry([MQTTBinding]),
         **kwargs,
     )
+
+
+SERVICE_ADDRESS = "http://10.0.0.5:8010"
+
+
+def _publish_service(graphdb, resource_iri, address=SERVICE_ADDRESS):
+    """Give ``resource_iri`` a live Service, the way ``_register_service`` would at runtime.
+
+    Plain ``INSERT DATA``, not the OGM write path -- the same pattern
+    ``test_an_envelope_path_reaches_the_binding_from_the_graph`` already relies on to prove a
+    raw insert lands in the explicit graph that ``wiring.py``'s ``EXPLICIT_GRAPH``-scoped
+    queries read from.
+    """
+    service_iri = f"{resource_iri}Service"
+    graphdb.query(
+        f"""
+        INSERT DATA {{
+          <{service_iri}> a <{SVC.Service}> ;
+              <{SVC.isServiceOf}> <{resource_iri}> ;
+              <{SVC.address}> "{address}" .
+        }}
+        """,
+        update=True,
+    )
+    return address
 
 
 @requires_graphdb
@@ -452,3 +478,120 @@ class TestLoadNorthbound:
         parameter = belt[seed.TU_HAS_CONVEYOR_SPEED.lined][0]
 
         assert INF.hasMQTTBrokerIP.lined not in parameter
+
+
+@requires_graphdb
+class TestServiceJoinRecognition:
+    """ADR 0023's 2026-08-03 amendment: evidence may sit on the resource's Service (#77).
+
+    ``_recognise`` looks the address up once per resource and folds it into every binding's
+    metadata, regardless of which protocol ends up matching. These tests exercise that against
+    MQTT bindings -- the metadata plumbing is protocol-agnostic even though only REST reads it.
+    """
+
+    def test_a_live_resource_s_address_reaches_every_binding(self, scenario3, unit_scope):
+        graphdb, ogm = scenario3
+        address = _publish_service(graphdb, seed.TRANSFER_UNIT_1)
+
+        plan = _plan(ogm, unit_scope)
+
+        assert all(b.get(SVC.address) == address for b in plan.bindings)
+
+    def test_a_resource_with_no_service_carries_no_address(self, scenario3, unit_scope):
+        _, ogm = scenario3
+
+        plan = _plan(ogm, unit_scope)
+
+        assert all(b.get(SVC.address) is None for b in plan.bindings)
+
+    def test_bindings_carry_the_root_and_the_path_to_their_own_holder(self, scenario3, unit_scope):
+        """The left belt's speed is one hop from the unit; the structural path reflects it."""
+        _, ogm = scenario3
+
+        plan = _plan(ogm, unit_scope)
+        left = next(
+            b for b in plan.bindings if str(b.resource_iri) == str(seed.CONVEYOR_BELT_LEFT)
+        )
+
+        assert str(left.root_iri) == str(seed.TRANSFER_UNIT_1)
+        assert left.root_class_local_name == "TransferUnit"
+        assert left.path_steps == (
+            (seed.TU_HAS_CONVEYOR_BELT.lined, str(seed.CONVEYOR_BELT_LEFT)),
+        )
+
+
+@requires_graphdb
+class TestRESTRecognition:
+    """A live resource, generically interface-accessible, binds a REST connector (#77)."""
+
+    def test_mqtt_still_wins_when_both_bindings_are_registered(self, scenario3, unit_scope):
+        """The acceptance criterion: MQTT recognition is unchanged. A parameter carrying an
+        MQTT marker keeps resolving to MQTTBinding even with RESTBinding in the registry and
+        a live Service present -- wiring.py's existing most-specific-match tie-break, exercised
+        against a new competitor."""
+        graphdb, ogm = scenario3
+        _publish_service(graphdb, seed.TRANSFER_UNIT_1)
+
+        plan = _plan(ogm, unit_scope, registry=SemanticConnectorRegistry([MQTTBinding, RESTBinding]))
+
+        assert {b.descriptor for b in plan.bindings} == {MQTTBinding}
+        assert len(plan.registrations) == 6  # unchanged from TestRegistrationCount
+
+    def test_rest_binds_when_the_resource_is_live(self, scenario3, unit_scope):
+        """With MQTTBinding out of the registry, the same seeded (MQTT-marked) parameters
+        still recognise -- through the generic interface root, per ADR 0023's amendment --
+        and build a REST connector addressed at the live Service."""
+        graphdb, ogm = scenario3
+        address = _publish_service(graphdb, seed.TRANSFER_UNIT_1)
+
+        plan = _plan(ogm, unit_scope, registry=SemanticConnectorRegistry([RESTBinding]))
+
+        assert len(plan.bindings) == 4
+        assert {b.descriptor for b in plan.bindings} == {RESTBinding}
+        assert len(plan.registrations) == 6  # 2 settable belts (rw) + 2 read-only barriers
+
+        left_speed = next(
+            r
+            for b, r in plan.registrations
+            if str(b.resource_iri) == str(seed.CONVEYOR_BELT_LEFT)
+            and r.sync_direction is SyncDirection.TO_PERSISTENCE
+        )
+        expected_path = build_parameter_path(
+            "TransferUnit",
+            seed.TRANSFER_UNIT_1,
+            [(seed.TU_HAS_CONVEYOR_BELT.lined, str(seed.CONVEYOR_BELT_LEFT))],
+            seed.TU_HAS_CONVEYOR_SPEED.lined,
+        )
+        assert left_speed.connector.base_url == address
+        assert left_speed.connector.path == expected_path
+
+    def test_a_resource_with_no_live_service_binds_nothing_and_says_so(
+        self, scenario3, unit_scope, caplog
+    ):
+        """The acceptance criterion this ticket names explicitly: recognition still runs
+        (ADR 0020 / ADR 0028), but no connector is built and the reason is logged."""
+        _, ogm = scenario3
+
+        with caplog.at_level(logging.WARNING):
+            plan = _plan(ogm, unit_scope, registry=SemanticConnectorRegistry([RESTBinding]))
+
+        assert len(plan.bindings) == 4
+        assert plan.registrations == []
+        assert "no live" in caplog.text
+
+    def test_a_monitor_builds_read_only_rest_connectors(self, scenario3, unit_scope):
+        """readwrite + observing binds read-only, the same rule as MQTT (ADR 0023)."""
+        graphdb, ogm = scenario3
+        _publish_service(graphdb, seed.TRANSFER_UNIT_1)
+
+        plan = _plan(
+            ogm,
+            unit_scope,
+            registry=SemanticConnectorRegistry([RESTBinding]),
+            flavour=SyncDirection.TO_PERSISTENCE,
+        )
+
+        assert len(plan.registrations) == 4
+        assert all(
+            r.sync_direction is SyncDirection.TO_PERSISTENCE for _, r in plan.registrations
+        )
