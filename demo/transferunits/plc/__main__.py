@@ -42,6 +42,8 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="TransferUnit PLC with panel")
     parser.add_argument("--unit-index", type=int, default=1, help="Unit index (default: 1)")
     parser.add_argument("--broker", type=str, default="127.0.0.1", help="MQTT broker host")
+    # 1883 here is only the bare fallback for a standalone run with the flag omitted -- the
+    # launcher always passes --broker-port <seed.broker_port(unit_index)> explicitly (#79).
     parser.add_argument("--broker-port", type=int, default=1883, help="MQTT broker port")
     parser.add_argument("--panel-port", type=int, default=0, help="Panel HTTP port (0 = free)")
     args = parser.parse_args()

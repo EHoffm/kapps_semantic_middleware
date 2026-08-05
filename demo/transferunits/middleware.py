@@ -5,6 +5,11 @@ the main thread, and owns the process event loop. This is load-bearing:
 It enables signal handling. This enables the library's
 on_shutdown deregistration fire (ADR 0029). The process reads GRAPHDB_* from
 its environment and derives its resource IRI from the unit index.
+
+It also fills the library's transport seam (ADR 0034): ``ensure_transport`` below is this
+unit's own in-process MQTT broker, brought up on first MQTT connector registration and torn
+down with nothing at all, because it lives on a daemon thread of this same process (ADR 0029
+as amended -- "a unit's broker dies with its unit").
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import socket
+import threading
 
 from graph_db_interface import GraphDB
 from kapps_ogm import OGM
@@ -20,6 +26,8 @@ from kapps_ogm.utils.class_scope import ClassScope
 from kapps_semantic_middleware import Mode, SemanticMiddleware
 
 from . import seed
+
+BROKER_READY_TIMEOUT_SECONDS = 5.0
 
 
 def bind_free_socket(host: str) -> socket.socket:
@@ -35,6 +43,64 @@ def bind_free_socket(host: str) -> socket.socket:
     sock.bind((host, 0))
     sock.listen(1)
     return sock
+
+
+def _listening(host: str, port: int) -> bool:
+    """Probe whether something already answers at host:port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(1.0)
+            probe.connect((host, port))
+            return True
+    except OSError:
+        return False
+
+
+async def _serve_broker(host: str, port: int, ready: threading.Event) -> None:
+    """Run one amqtt broker forever, on this thread's own event loop.
+
+    Config shape matches ``tests/conftest.py``'s ``mqtt_broker`` fixture. ``ready`` is set the
+    instant the broker is actually listening, so ``ensure_transport``'s caller -- about to
+    build a connector for this same address -- never races it.
+    """
+    from amqtt.broker import Broker
+
+    broker = Broker(
+        {
+            "listeners": {
+                "default": {"type": "tcp", "bind": f"{host}:{port}", "max_connections": 100}
+            },
+            "sys_interval": 0,
+            "auth": {"allow-anonymous": True},
+            "topic-check": {"enabled": False},
+        }
+    )
+    await broker.start()
+    ready.set()
+    await asyncio.Event().wait()
+
+
+def ensure_transport(host: str, port: int) -> None:
+    """The demo's transport hook (ADR 0034): bring up this unit's own MQTT broker.
+
+    Called once, synchronously, from inside the ``SemanticMiddleware`` constructor -- before
+    this process has an event loop of its own, which is why the broker gets a thread and a
+    loop of its own rather than a spot on this one. The thread is daemon and never joined: it
+    outlives this call and dies only when the process does, which is what makes "a unit's
+    broker dies with its unit" true with no teardown code anywhere.
+
+    Idempotent (ADR 0034): a probe first, so a broker already listening at this address --
+    this unit's own from an earlier call, or anything else already there -- means this does
+    nothing.
+    """
+    if _listening(host, port):
+        return
+
+    ready = threading.Event()
+    threading.Thread(
+        target=lambda: asyncio.run(_serve_broker(host, port, ready)), daemon=True
+    ).start()
+    ready.wait(timeout=BROKER_READY_TIMEOUT_SECONDS)
 
 
 async def run_server(
@@ -94,10 +160,12 @@ async def main() -> None:
         class_scope=class_scope,
         autoregister_connectors=True,
         activity_feed=True,
+        ensure_transport=ensure_transport,
     )
 
-    # No broker flag here: the connector reads the broker address (and, per
-    # ADR 0031, an absent port means 1883) off the graph at wiring time.
+    # No broker flag here: the connector reads the broker address and port off the graph
+    # at wiring time (ADR 0031), and ensure_transport above brings that broker up itself
+    # (ADR 0034) -- this runner names no broker host or port anywhere in its own code.
     print(f"Middleware running on http://{args.host}:{port}/", flush=True)
     await run_server(args.host, port, middleware, sock)
 

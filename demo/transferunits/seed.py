@@ -50,6 +50,7 @@ INF_ACCESS_MODE = IRI(f"{INF_NS}accessMode")
 INF_HAS_MQTT_TOPIC = IRI(f"{INF_NS}hasMQTTTopic")
 INF_HAS_MQTT_SET_TOPIC = IRI(f"{INF_NS}hasMQTTSetTopic")
 INF_HAS_MQTT_BROKER_IP = IRI(f"{INF_NS}hasMQTTBrokerIP")
+INF_HAS_MQTT_BROKER_PORT = IRI(f"{INF_NS}hasMQTTBrokerPort")
 
 # --- Control station ---------------------------------------------------------- #
 
@@ -58,6 +59,27 @@ CONTROL_STATION_CLASS = IRI(f"{FAC_NS}ControlStation")
 CONTROL_STATION_SERVICE_CLASS = IRI(f"{FAC_NS}ControlStationService")
 
 MQTT_BROKER_IP = "127.0.0.1"
+
+# Every unit's own broker (ADR 0029 as amended, ADR 0030 as amended). Not 1883 + n: 1900 is
+# SSDP/UPnP and is live on most Linux desktops, so --units 17 would break on a
+# machine-specific collision that presents as a broker fault. 18830 is a quiet, unassigned
+# stretch of the registered range that never touches 1883 itself.
+BROKER_PORT_BASE = 18830
+
+
+def broker_port(n: int) -> int:
+    """The port of unit n's own MQTT broker. Unit 1 -> 18831, unit 2 -> 18832, ...
+
+    Both readers -- the middleware, off inf:hasMQTTBrokerPort on the graph, and the PLC, off
+    the launcher's --broker-port flag -- must know this before either process starts, so it is
+    a pure function of the unit index, exactly like every IRI and every topic (ADR 0030).
+
+    Unit 1's port, 18831, coincides with tests/conftest.py's MQTT_TEST_PORT -- picked there,
+    separately, as an unlikely-to-collide high port. Harmless: the demo's own launcher and the
+    test suite's live-broker fixtures never run in the same process at once. Noted here so the
+    match reads as coincidence, not a shared constant someone forgot to factor out.
+    """
+    return BROKER_PORT_BASE + n
 
 
 def _mint_transfer_unit_iri(n: int) -> IRI:
@@ -103,6 +125,7 @@ def _create_belt(ogm, n: int, position: str) -> IRI:
                         _mqtt_topic(n, "ConveyorBelt", position, "speed_set")
                     ],
                     INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
+                    INF_HAS_MQTT_BROKER_PORT: [broker_port(n)],
                 }
             ]
         },
@@ -125,6 +148,7 @@ def _create_barrier(ogm, n: int, position: str) -> IRI:
                         _mqtt_topic(n, "LightBarrier", position, "occupied")
                     ],
                     INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
+                    INF_HAS_MQTT_BROKER_PORT: [broker_port(n)],
                 }
             ]
         },

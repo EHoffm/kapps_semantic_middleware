@@ -138,6 +138,9 @@ const openOutputs = new Set();
 function outputTarget(id) {
   if (id === 'controller') return [0, 'controller'];
   const [kind, n] = id.split('-');
+  // A broker is a thread inside its unit's own middleware process (#79) -- it captures no
+  // output of its own, so a failed broker box opens that middleware's output instead.
+  if (kind === 'broker') return [parseInt(n, 10), 'middleware'];
   return [parseInt(n, 10), kind === 'mw' ? 'middleware' : 'plc'];
 }
 
@@ -175,13 +178,17 @@ function render(s) {
       ${box('plc', 'plc-' + u.index, 'PLC and panel', u.plc)}
     </div>`).join('');
 
+  const brokers = s.unit.map(u =>
+    box('broker', 'broker-' + u.index, 'broker ' + u.index, u.broker)
+  ).join('');
+
   const mws = s.unit.map(u =>
     box('middleware', 'mw-' + u.index, 'middleware ' + u.index, u.middleware)
   ).join('');
 
   document.getElementById('layers').innerHTML = `
     <div class="layer" style="${cols}">${plcs}</div>
-    <div class="layer one">${box('broker', 'broker', 'MQTT broker', s.broker, true)}</div>
+    <div class="layer" style="${cols}">${brokers}</div>
     <div class="layer" style="${cols}">${mws}</div>
     <div class="layer one">${box('graph', 'graph', 'knowledge graph', s.graph, true)}</div>
     <div class="layer one">
@@ -226,8 +233,8 @@ function wires(s) {
   }
 
   for (const u of s.unit) {
-    straight('plc-' + u.index, 'broker', 'arrow-plc-broker', 'MQTT');
-    straight('broker', 'mw-' + u.index, 'arrow-broker-mw', 'MQTT');
+    straight('plc-' + u.index, 'broker-' + u.index, 'arrow-plc-broker', 'MQTT');
+    straight('broker-' + u.index, 'mw-' + u.index, 'arrow-broker-mw', 'MQTT');
     straight('mw-' + u.index, 'graph', 'arrow-mw-graph', 'OGM');
   }
   straight('graph', 'controller', 'arrow-graph-ctrl', 'discovery');

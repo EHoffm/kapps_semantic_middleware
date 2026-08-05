@@ -8,6 +8,7 @@ the device knows nothing about the graph.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ import aiomqtt
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from demo.transferunits.middleware import ensure_transport  # noqa: E402
 from demo.transferunits.plc.transfer_unit import TransferUnit  # noqa: E402
 
 
@@ -143,3 +145,41 @@ class TestLiveBehaviour:
                 await unit.wait_for_setpoint()
 
             assert unit.speeds["left"] == 3.0
+
+
+class TestSurvivesAStartupRace:
+    """#79's acceptance: the PLC survives being started before its broker exists.
+
+    The middleware brings up a unit's broker concurrently with the PLC now (ADR 0029 as
+    amended), rather than the launcher starting it first, so refusal on the first
+    connection attempts is the ordinary startup race and ``start()`` must retry through it.
+    """
+
+    # Distinct from conftest.py's MQTT_TEST_PORT (18831): nothing may already listen here
+    # when the test begins, and the mqtt_broker fixture owns that one.
+    _PORT = 18841
+
+    @pytest.mark.asyncio
+    async def test_start_retries_until_the_broker_appears(self):
+        unit = TransferUnit(broker="127.0.0.1", port=self._PORT, publish_interval=0.1)
+        start_task = asyncio.create_task(unit.start())
+        try:
+            await asyncio.sleep(0.5)
+            assert not start_task.done(), "start() must not die on the first refusal"
+
+            # The real production path (#79, ADR 0034): the unit's own middleware brings its
+            # broker up through this same hook. Reusing it here, rather than hand-rolling
+            # another amqtt Broker(...), is both less duplication and a more faithful stand-in
+            # for what actually races the PLC's retry loop in the running demo.
+            ensure_transport("127.0.0.1", self._PORT)
+
+            await asyncio.wait_for(start_task, timeout=10.0)
+        finally:
+            # No broker teardown here, on purpose (ADR 0034: a caller owns no lifetime it
+            # didn't start) -- ensure_transport's daemon thread dies with the test process.
+            if start_task.done() and not start_task.cancelled() and start_task.exception() is None:
+                await unit.stop()
+            else:
+                start_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await start_task

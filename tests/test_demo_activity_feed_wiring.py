@@ -59,6 +59,27 @@ def test_transferunit_middleware_enables_the_activity_feed(monkeypatch):
     assert kwargs.get("activity_feed") is True
 
 
+def test_transferunit_middleware_passes_its_own_ensure_transport(monkeypatch):
+    """The per-unit middleware runner must fill the library's transport seam (#79, ADR 0034)
+    with its own ``ensure_transport`` -- the in-process broker starter -- not leave it unset."""
+    import demo.transferunits.middleware as mw_runner
+
+    semantic_middleware_cls = MagicMock(return_value=MagicMock())
+
+    monkeypatch.setattr(mw_runner, "SemanticMiddleware", semantic_middleware_cls)
+    monkeypatch.setattr(mw_runner, "GraphDB", MagicMock())
+    monkeypatch.setattr(mw_runner, "OGM", MagicMock())
+    monkeypatch.setattr(mw_runner, "ClassScope", MagicMock())
+    monkeypatch.setattr(mw_runner, "run_server", _noop_run_server)
+    monkeypatch.setattr(mw_runner, "bind_free_socket", lambda host: _FakeListeningSocket())
+    monkeypatch.setattr("sys.argv", ["prog", "--unit-index", "1"])
+
+    asyncio.run(mw_runner.main())
+
+    _, kwargs = semantic_middleware_cls.call_args
+    assert kwargs.get("ensure_transport") is mw_runner.ensure_transport
+
+
 def test_control_station_enables_the_activity_feed(monkeypatch):
     """The control-station runner must pass activity_feed=True to Controller.
 

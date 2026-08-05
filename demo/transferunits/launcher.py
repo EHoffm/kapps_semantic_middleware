@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 import re
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -30,9 +29,6 @@ from graph_db_interface import GraphDB
 from kapps_semantic_middleware.vocabulary import SVC
 
 from . import seed
-
-BROKER_HOST = "127.0.0.1"
-BROKER_PORT = 1883
 
 SLOW_AFTER_SECONDS = 30.0
 WATCH_INTERVAL_SECONDS = 1.0
@@ -53,54 +49,6 @@ class ChildHandle:
     started_at: float = field(default_factory=time.time)
     stopping: bool = False
     output: Deque[str] = field(default_factory=lambda: deque(maxlen=20))
-
-
-def _broker_listening(host: str = BROKER_HOST, port: int = BROKER_PORT) -> bool:
-    """Check whether something already listens on host:port."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1.0)
-            s.connect((host, port))
-            return True
-    except OSError:
-        return False
-
-
-def _start_broker() -> Optional[subprocess.Popen]:
-    """Start an in-process amqtt broker on 127.0.0.1:1883, if nothing listens there.
-
-    Runs in its own subprocess with its own asyncio loop. The config shape matches the mqtt_broker fixture in tests/conftest.py. It stays alive for the lifetime of the launcher. Returns None if a broker already answers —
-    there is then nothing for this launcher to stop later.
-    """
-    if _broker_listening():
-        return None
-
-    script = (
-        "import asyncio\n"
-        "from amqtt.broker import Broker\n"
-        "async def main():\n"
-        "    broker = Broker({\n"
-        "        'listeners': {'default': {'type': 'tcp', "
-        f"'bind': '{BROKER_HOST}:{BROKER_PORT}', 'max_connections': 100}}}},\n"
-        "        'sys_interval': 0,\n"
-        "        'auth': {'allow-anonymous': True},\n"
-        "        'topic-check': {'enabled': False},\n"
-        "    })\n"
-        "    await broker.start()\n"
-        "    await asyncio.Event().wait()\n"
-        "asyncio.run(main())\n"
-    )
-    proc = subprocess.Popen(
-        [sys.executable, "-c", script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    deadline = time.time() + 5.0
-    while time.time() < deadline:
-        if _broker_listening():
-            break
-        time.sleep(0.1)
-    return proc
 
 
 def _strip_graphdb_env(env: dict) -> dict:
@@ -131,7 +79,7 @@ def _echo_address_line(child: ChildHandle, line: str) -> None:
     print(f"  {_child_identity(child):<{_IDENTITY_COLUMN_WIDTH}}{line}", flush=True)
 
 
-def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BROKER_PORT) -> ChildHandle:
+def _spawn_plc(unit_index: int) -> ChildHandle:
     """Spawn a PLC and panel process for one unit.
 
     Its environment carries no GRAPHDB_* variable — enforced by construction,
@@ -140,6 +88,10 @@ def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BR
     Blocks until that line arrives or the process exits, so the returned
     handle already carries its outcome — starting a PLC panel is fast, and a
     live index page has nothing useful to show before it either way.
+
+    Its own broker (ADR 0029 as amended) is this unit's alone: the port is
+    ``seed.broker_port(unit_index)``, the same pure function of the index the seed writes
+    into the graph, so both readers agree before either process starts.
     """
     cmdline = [
         sys.executable,
@@ -148,9 +100,9 @@ def _spawn_plc(unit_index: int, broker: str = BROKER_HOST, broker_port: int = BR
         "--unit-index",
         str(unit_index),
         "--broker",
-        broker,
+        seed.MQTT_BROKER_IP,
         "--broker-port",
-        str(broker_port),
+        str(seed.broker_port(unit_index)),
         "--panel-port",
         "0",
     ]
@@ -340,17 +292,27 @@ class Factory:
 
     def __init__(self) -> None:
         self.children: List[ChildHandle] = []
-        self.broker_proc: Optional[subprocess.Popen] = None
         self._db = GraphDB.from_env()
 
     def start(self, units: int, force: bool = False) -> None:
-        """Seed the graph and spawn every participant. Blocking; call once at startup."""
+        """Seed the graph and spawn every participant. Blocking; call once at startup.
+
+        No broker is started here (ADR 0029 as amended): each unit's own middleware brings
+        its own up, the moment its wiring registers its first MQTT connector.
+
+        The middleware is spawned before its unit's PLC, and that order is load-bearing.
+        ``_spawn_middleware`` returns as soon as the process exists, without waiting on it,
+        so that unit's broker gets a head start coming up in its own process while
+        ``_spawn_plc`` -- which blocks until its panel announces itself, and the panel
+        announces itself only once the PLC's own retrying connection attempt succeeds --
+        does its own spawn and read. Spawning the PLC first would have the launcher block on
+        a connection to a broker that nothing has even been asked to bring up yet.
+        """
         probe_and_seed(units, force=force)
-        self.broker_proc = _start_broker()
 
         for n in range(1, units + 1):
-            self.children.append(_spawn_plc(n))
             self.children.append(_spawn_middleware(n))
+            self.children.append(_spawn_plc(n))
         self.children.append(_spawn_controller())
 
         for child in self.children:
@@ -421,19 +383,17 @@ class Factory:
             c.source = None
 
     def stop_all(self) -> None:
-        """Stop the whole factory: every middleware and the control station, then every PLC."""
+        """Stop the whole factory: every middleware and the control station, then every PLC.
+
+        Nothing to stop here beyond the children themselves: each unit's broker is a daemon
+        thread inside that unit's own middleware process (ADR 0029 as amended), so it dies
+        the moment ``stop_factory`` kills that process.
+        """
         children = list(self.children)
         for c in children:
             c.stopping = True
 
         stop_factory(children)
-
-        if self.broker_proc is not None:
-            self.broker_proc.terminate()
-            try:
-                self.broker_proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.broker_proc.kill()
 
         for c in children:
             c.state = "stopped"
@@ -450,12 +410,13 @@ class Factory:
         return []
 
     def state_snapshot(self, launcher_address: str) -> dict:
-        """Serialize every participant's live state for the index page."""
-        broker_address = f"{BROKER_HOST}:{BROKER_PORT}"
-        if self.broker_proc is None:
-            broker_state = "live" if _broker_listening() else "failed"
-        else:
-            broker_state = "live" if self.broker_proc.poll() is None else "failed"
+        """Serialize every participant's live state for the index page.
+
+        No broker is tracked here as its own participant (ADR 0029 as amended): each unit's
+        broker is a thread inside that unit's own middleware process, so its display state
+        simply mirrors that middleware's -- it is exactly as live, and it dies at exactly the
+        same moment.
+        """
 
         def entry(child: ChildHandle) -> dict:
             return {
@@ -474,9 +435,16 @@ class Factory:
             bucket = units.setdefault(child.unit_index, {"index": child.unit_index})
             bucket[child.kind] = entry(child)
 
+        for index, bucket in units.items():
+            middleware_state = bucket.get("middleware", {}).get("state", "starting")
+            bucket["broker"] = {
+                "state": middleware_state,
+                "address": f"{seed.MQTT_BROKER_IP}:{seed.broker_port(index)}",
+                "source": "flag",
+            }
+
         return {
             "graph": {"state": "live", "address": os.environ.get("GRAPHDB_URL", ""), "source": "env"},
-            "broker": {"state": broker_state, "address": broker_address, "source": "flag"},
             "launcher": {"state": "live", "address": launcher_address, "source": "flag"},
             "controller": controller_entry
             or {"state": "starting", "address": None, "source": None, "pid": None},

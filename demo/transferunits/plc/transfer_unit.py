@@ -35,7 +35,14 @@ import aiomqtt
 logger = logging.getLogger(__name__)
 
 DEFAULT_BROKER = "127.0.0.1"
+# The plain MQTT default, not seed.broker_port(1) (#79) -- this is only the standalone
+# fallback for a PLC started with no --broker-port at all. The launcher always passes one
+# explicitly, and this module stays free of any import from seed.py or the middleware side
+# on purpose: a PLC knows nothing about the graph or the unit-index port scheme (ADR 0029).
 DEFAULT_PORT = 1883
+
+CONNECT_RETRY_INITIAL_SECONDS = 0.2
+CONNECT_RETRY_MAX_SECONDS = 5.0
 
 
 class TransferUnit:
@@ -96,9 +103,32 @@ class TransferUnit:
     # --- Lifecycle ---------------------------------------------------------------- #
 
     async def start(self) -> None:
-        """Connect, subscribe to both setpoint topics, and begin publishing."""
+        """Connect, subscribe to both setpoint topics, and begin publishing.
+
+        Retries the connection with a backoff, capped at ``CONNECT_RETRY_MAX_SECONDS``. The
+        middleware brings up this unit's broker concurrently with the PLC rather than before
+        it (ADR 0029 as amended), so refusal on the first attempts is the ordinary startup
+        race, not a fault -- and a real machine has to survive a broker restart the same way.
+        This is a device concern: it holds no knowledge of the middleware or why the broker
+        was briefly unreachable, only that a fresh attempt is worth making.
+        """
         self._client = aiomqtt.Client(self.broker, port=self.port)
-        await self._client.__aenter__()
+        delay = CONNECT_RETRY_INITIAL_SECONDS
+        while True:
+            try:
+                await self._client.__aenter__()
+                break
+            except aiomqtt.MqttError as exc:
+                logger.info(
+                    "%s broker at %s:%s not ready yet (%s), retrying in %.1fs",
+                    self.unit,
+                    self.broker,
+                    self.port,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, CONNECT_RETRY_MAX_SECONDS)
         for topic in self.subscribed_topics:
             await self._client.subscribe(topic)
         self._tasks = [

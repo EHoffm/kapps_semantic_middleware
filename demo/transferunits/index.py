@@ -46,10 +46,12 @@ TEACH = {
         "file": "src/kapps_semantic_middleware/rest_router.py",
     },
     "broker": {
-        "title": "The MQTT broker",
-        "what": "The Launcher starts one when no broker listens, so the demonstration runs "
-        "on a bare checkout.",
-        "file": "src/kapps_semantic_middleware/connectors/mqtt_binding.py",
+        "title": "This unit's own MQTT broker",
+        "what": "Its middleware brings this up itself, the moment it registers its first "
+        "MQTT connector -- on a daemon thread, so it dies with the middleware process, no "
+        "teardown code required. No two units share transport; the knowledge graph is the "
+        "only thing any two units in this factory have in common.",
+        "file": "demo/transferunits/middleware.py",
     },
     "graph": {
         "title": "The knowledge graph",

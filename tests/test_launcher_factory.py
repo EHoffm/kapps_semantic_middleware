@@ -17,7 +17,6 @@ def make_factory() -> Factory:
     """A Factory with no real GraphDB connection -- __init__ is bypassed."""
     factory = Factory.__new__(Factory)
     factory.children = []
-    factory.broker_proc = None
     factory._db = MagicMock()
     return factory
 
@@ -138,8 +137,53 @@ class TestStopUnit:
         assert all(c.state == "stopped" for c in children)
 
 
+class TestStartSpawnOrder:
+    """Regression pin (#79): each unit's middleware must be spawned before its own PLC.
+
+    ``_spawn_plc`` blocks reading its process's stdout until the panel announces itself, and
+    the panel announces itself only once the PLC's own (retrying) broker connection succeeds.
+    That broker does not exist until this unit's middleware brings it up (ADR 0029 as
+    amended, ADR 0034). Spawning the PLC first would have the launcher block forever on a
+    broker nothing was ever asked to start.
+    """
+
+    def test_middleware_is_spawned_before_its_units_plc(self, monkeypatch):
+        factory = make_factory()
+        order = []
+
+        def fake_spawn_middleware(n):
+            order.append(("middleware", n))
+            return make_child("middleware", n)
+
+        def fake_spawn_plc(n):
+            order.append(("plc", n))
+            return make_child("plc", n)
+
+        def fake_spawn_controller():
+            order.append(("controller", None))
+            return make_child("controller", None)
+
+        monkeypatch.setattr(launcher, "probe_and_seed", lambda units, force=False: None)
+        monkeypatch.setattr(launcher, "_spawn_middleware", fake_spawn_middleware)
+        monkeypatch.setattr(launcher, "_spawn_plc", fake_spawn_plc)
+        monkeypatch.setattr(launcher, "_spawn_controller", fake_spawn_controller)
+        monkeypatch.setattr(launcher.threading, "Thread", lambda *a, **k: MagicMock())
+
+        factory.start(units=2)
+
+        assert order == [
+            ("middleware", 1),
+            ("plc", 1),
+            ("middleware", 2),
+            ("plc", 2),
+            ("controller", None),
+        ]
+
+
 class TestStateSnapshot:
-    """This class tests Factory.state_snapshot's shape: graph/broker/launcher/controller/unit."""
+    """This class tests Factory.state_snapshot's shape: graph/launcher/controller/unit,
+    where each unit now carries its own broker (#79, ADR 0029 as amended) -- there is no
+    top-level, factory-wide broker entry any more."""
 
     def test_snapshot_groups_children_by_unit(self):
         factory = make_factory()
@@ -152,13 +196,27 @@ class TestStateSnapshot:
 
         assert snapshot["launcher"]["address"] == "http://127.0.0.1:8080/"
         assert snapshot["controller"]["state"] == "live"
+        assert "broker" not in snapshot
         assert snapshot["unit"] == [
             {
                 "index": 1,
                 "middleware": {"state": "live", "address": None, "source": None, "pid": 4242},
                 "plc": {"state": "live", "address": None, "source": None, "pid": 4242},
+                "broker": {"state": "live", "address": "127.0.0.1:18831", "source": "flag"},
             }
         ]
+
+    def test_snapshot_broker_state_mirrors_its_unit_s_middleware(self):
+        """The broker is a thread inside its unit's middleware process (ADR 0029 as
+        amended), so its display state is exactly that middleware's -- no separate probe."""
+        factory = make_factory()
+        mw2 = make_child("middleware", 2, state="failed")
+        factory.children = [mw2]
+
+        snapshot = factory.state_snapshot("http://127.0.0.1:8080/")
+
+        unit2 = snapshot["unit"][0]
+        assert unit2["broker"] == {"state": "failed", "address": "127.0.0.1:18832", "source": "flag"}
 
     def test_snapshot_with_no_children_has_a_placeholder_controller(self):
         factory = make_factory()

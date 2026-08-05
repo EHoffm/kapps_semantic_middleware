@@ -77,6 +77,23 @@ class TestMQTTTopics:
         assert seed._mqtt_topic(4, "LightBarrier", "back", "occupied") == "TransferUnit4/LightBarrier/back/occupied"
 
 
+class TestBrokerPort:
+    """This class tests broker_port(n) = 18830 + n (#79, ADR 0029/0030 as amended).
+
+    Not 1883 + n: 1900 is SSDP/UPnP and is live on most Linux desktops.
+    """
+
+    def test_unit_1_is_18831(self):
+        assert seed.BROKER_PORT_BASE == 18830
+        assert seed.broker_port(1) == 18831
+
+    def test_unit_2_is_18832(self):
+        assert seed.broker_port(2) == 18832
+
+    def test_follows_the_index_pattern(self):
+        assert seed.broker_port(17) == 18847
+
+
 class TestEnvironmentHandling:
     """This class tests that _strip_graphdb_env strips GRAPHDB_* credentials for PLC children (ADR 0029)."""
 
@@ -163,6 +180,29 @@ class TestLiveSeeding:
                 f'ASK {{ <{seed._mint_transfer_unit_iri(n)}> a <{seed.TRANSFER_UNIT_CLASS}> }}'
             )
             assert result.get("boolean", False), f"TransferUnit{n} should exist"
+
+    def test_seed_writes_each_unit_s_own_broker_port_as_an_integer(self, graphdb):
+        """#79's acceptance: unit 2's parameters declare port 18832, as xsd:integer -- the
+        round trip must hand back 18832, not "18832" (ADR 0031's rule, extended per-unit)."""
+        from kapps_ogm import OGM
+        from kapps_semantic_middleware.vocabulary import INF
+
+        ogm = OGM(db=graphdb)
+        seed.seed_factory(graphdb, ogm, units=2)
+
+        belt = seed._mint_conveyor_belt_iri(2, "left")
+        result = graphdb.query(
+            f"""
+            SELECT ?port WHERE {{
+                <{belt}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?param .
+                ?param <{INF.hasMQTTBrokerPort}> ?port .
+            }}
+            """,
+            convert_bindings=True,
+        )
+        bindings = result.get("results", {}).get("bindings", [])
+        assert len(bindings) == 1
+        assert bindings[0]["port"] == 18832
 
     def test_factory_is_live_detects_fresh_heartbeat(self, graphdb):
         """factory_is_live returns a Service that carries a fresh heartbeat."""

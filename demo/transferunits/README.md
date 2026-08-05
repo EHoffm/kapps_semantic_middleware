@@ -20,8 +20,10 @@ launcher            fixed port, the only bookmarkable one; seeds the graph, spaw
 ## Run it
 
 Requires a running GraphDB with `GRAPHDB_URL` / `GRAPHDB_USERNAME` / `GRAPHDB_PASSWORD` /
-`GRAPHDB_REPOSITORY` set in the environment. Nothing else needs to be running first — the launcher
-starts a local MQTT broker itself if none is listening on `127.0.0.1:1883`.
+`GRAPHDB_REPOSITORY` set in the environment. Nothing else needs to be running first — each unit
+brings up its own MQTT broker, on `18830 + <unit index>` (unit 1 → `18831`, unit 2 → `18832`, …),
+the moment its middleware registers that unit's first MQTT connector (ADR 0029 as amended, ADR
+0034). No broker is shared, and nothing in this demo listens on `1883`.
 
 ```
 python -m demo.transferunits --units 2
@@ -33,16 +35,20 @@ python -m demo.transferunits --units 2
 This opens the index page at `http://127.0.0.1:8080/` — a live topology picture of every
 participant, since every other port in the factory is dynamic. Point at a box or a wire to read
 what it is and which backend file to open; a failed box opens to show its last output. One `stop`
-button per unit, and one `stop the factory` button.
+button per unit, and one `stop the factory` button. Stopping one unit stops that unit's PLC,
+middleware and broker together, and leaves every other unit's MQTT traffic untouched.
 
 Every child's command line is also printed as it's spawned, so any one process can be
 copy-pasted into a debugger and run alone against the already-seeded graph, e.g. for unit 2:
 
 ```
-python -m demo.transferunits.plc --unit-index 2 --broker 127.0.0.1 --broker-port 1883 --panel-port 0
+python -m demo.transferunits.plc --unit-index 2 --broker 127.0.0.1 --broker-port 18832 --panel-port 0
 python -m demo.transferunits.middleware --unit-index 2 --port 0
 python -m demo.transferunits.control_station --port 0
 ```
+
+The PLC tolerates being started before its broker exists — it retries the connection with a
+backoff, since the middleware brings that broker up concurrently rather than before it.
 
 Press Ctrl+C to stop. Teardown is ordered: every middleware and the control station are SIGTERMed
 first, so each deregisters (`svc:Service` removed) while its PLC is still answering; then the PLCs.
@@ -78,11 +84,13 @@ chosen. Forward the mismatched port by hand if this bites, or free up the local 
   seed here — a guard test enforces it.
 - `templates/index.html` — the topology picture, the teaching layer, and the polling JS. Grown
   from the throwaway prototype #68 specified (`prototype_index.py`, deleted once this page shipped).
-- `middleware.py` — the runner: one resource-mode `SemanticMiddleware` per unit.
+- `middleware.py` — the runner: one resource-mode `SemanticMiddleware` per unit. Also fills the
+  library's transport seam (ADR 0034) with `ensure_transport`: this unit's own in-process MQTT
+  broker, on a daemon thread that dies with the process.
 - `control_station.py` — the runner for the Controller (#43), wrapped as middleware.
 - `controller.py` — discovery + dispatch logic: lists resources by type, drives any unit found.
-- `seed.py` — index-derived IRI minting and MQTT topics for N units (ADR 0030), plus the one
-  control station individual.
+- `seed.py` — index-derived IRI minting, MQTT topics and each unit's own broker port for N units
+  (ADR 0030), plus the one control station individual.
 - `plc/` — the mock PLC and its own panel UI, one process per unit (ADR 0029's process split).
 - `factory.ttl`, `transferunit.ttl` — the demo's own ontology (control station class, TransferUnit
   shape).
