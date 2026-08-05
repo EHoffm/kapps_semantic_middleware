@@ -576,7 +576,11 @@ class TestServiceJoinRecognition:
         )
 
         assert str(left.root_iri) == str(seed.TRANSFER_UNIT_1)
-        assert left.root_class_local_name == "TransferUnit"
+        # Mangled whole (IRI(...).lined), not the bare fragment: this must equal
+        # `type(instance).__name__` for the materialized root, which is what
+        # `ClassSpec.to_pydantic_model` (kapps_ogm) actually names the class -- the
+        # {Model} segment `rest_router.py` mounts routes under (#80).
+        assert left.root_class_local_name == IRI(str(seed.TRANSFER_UNIT_CLASS)).lined
         assert left.path_steps == (
             (seed.TU_HAS_CONVEYOR_BELT.lined, str(seed.CONVEYOR_BELT_LEFT)),
         )
@@ -619,7 +623,10 @@ class TestRESTRecognition:
             and r.sync_direction is SyncDirection.TO_PERSISTENCE
         )
         expected_path = build_parameter_path(
-            "TransferUnit",
+            # Mangled whole (IRI(...).lined), not the bare fragment -- must equal
+            # `type(instance).__name__` for the materialized root, kapps_ogm's own
+            # `ClassSpec.to_pydantic_model` naming (#80).
+            IRI(str(seed.TRANSFER_UNIT_CLASS)).lined,
             seed.TRANSFER_UNIT_1,
             [(seed.TU_HAS_CONVEYOR_BELT.lined, str(seed.CONVEYOR_BELT_LEFT))],
             seed.TU_HAS_CONVEYOR_SPEED.lined,

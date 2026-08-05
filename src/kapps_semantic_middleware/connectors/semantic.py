@@ -136,8 +136,12 @@ class ParameterBinding:
     ``root_iri`` is reachable from one of those."""
 
     root_class_local_name: Optional[str] = None
-    """Fragment of the root resource's class IRI, the ``{Model}`` segment of an ADR 0017
-    route. Paired with ``root_iri``; see its docstring."""
+    """The root resource's class IRI, mangled (``IRI(...).lined``), the ``{Model}``
+    segment of an ADR 0017 route. Not the bare fragment: ``kapps_ogm``'s
+    ``ClassSpec.to_pydantic_model`` names the materialized class after the whole mangled
+    IRI (``class_spec.py``), so this must match that or a REST connector's own PUT/GET
+    404s against the real served route (kapps_semantic_middleware#80). Paired with
+    ``root_iri``; see its docstring."""
 
     path_steps: Tuple[Tuple[str, str], ...] = ()
     """``(field_name, child_iri)`` hops from ``root_iri`` down to ``resource_iri``, mirroring

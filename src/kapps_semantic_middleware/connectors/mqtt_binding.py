@@ -150,8 +150,27 @@ class MQTTParameterFormatter:
         return [self.model_type(**fields)]
 
     def serialize(self, data: Any) -> bytes:
-        """Persistence value to the device payload, encoded for ``consume``."""
+        """Persistence value to the device payload, encoded for ``consume``.
+
+        Raises if nothing has ever been observed for this parameter (ADR 0024's
+        locator pattern: the graph holds no ``inf:hasValue`` until a connector
+        fills it). This is reachable in practice: the framework's cross-field
+        notify fan-out (``PersistedConnector._notify_synced_connectors``) asks
+        *every* write leg on a resource to re-derive its own slice whenever *any*
+        field on that resource changes, including a sibling parameter nothing has
+        set yet. A bare ``None`` would encode as the JSON scalar ``null``, not a
+        valid device value, and a receiver expecting a number or boolean chokes on
+        it. The caller's best-effort fan-out (``persisted_connector.py``) already
+        catches and logs a per-sibling failure exactly like this one, so raising
+        here is the same "nothing safe to send" outcome silently accepting `None`
+        would have hidden as a network-level failure at the device.
+        """
         value = self._value_of(data)
+        if value is None:
+            raise ValueError(
+                f"{self.parameter_label or 'parameter'} has no observed value yet; "
+                f"refusing to publish null to {self.set_topic or 'its set topic'}"
+            )
         if self.value_path is None:
             result = json.dumps(value).encode()
         else:

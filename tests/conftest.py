@@ -8,6 +8,8 @@ set, so the pure-logic unit tests still run anywhere.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 
 import pytest
@@ -135,4 +137,16 @@ async def mqtt_broker():
     try:
         yield f"127.0.0.1:{MQTT_TEST_PORT}"
     finally:
-        await broker.shutdown()
+        try:
+            # Bounded, not bare: a client that never cleanly drains (a receive loop
+            # still mid-cycle when the test body returns, for instance) can leave
+            # amqtt's own shutdown waiting on it indefinitely. A hung fixture
+            # teardown blocks the whole run silently; a bounded one fails loudly
+            # at a fixed cost instead, which is the only difference an unbounded
+            # await here was ever going to buy.
+            await asyncio.wait_for(broker.shutdown(), timeout=10.0)
+        except asyncio.TimeoutError:
+            logging.getLogger(__name__).warning(
+                "mqtt_broker fixture: broker.shutdown() did not complete within 10s; "
+                "abandoning it rather than hanging the test run."
+            )

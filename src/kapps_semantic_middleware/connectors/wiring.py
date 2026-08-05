@@ -229,10 +229,17 @@ def _recognise(
     """
     bindings: List[ParameterBinding] = []
     address = _service_address(ogm=ogm, resource_iri=resource_iri)
-    # `resource_class` arrives as `IRI` from every existing caller (`_class_of`'s own return
-    # type, or `plan_wiring`'s type hint), but convert defensively the same way `prop_iri`
-    # is converted below -- a plain string has no `.fragment`.
-    root_class_local_name = IRI(str(resource_class)).fragment or str(resource_class)
+    # This must equal `type(instance).__name__` for the materialized root -- the {Model}
+    # segment `rest_router.py` actually mounts routes under. `kapps_ogm`'s
+    # `ClassSpec.to_pydantic_model` names that class `self.iri.lined`, the class IRI
+    # mangled whole (`class_spec.py`), not its bare fragment: two classes from different
+    # namespaces that happen to share a fragment (e.g. two ontologies each defining their
+    # own `TransferUnit`) would otherwise collide on one Python class name. A REST
+    # binding derives this route independently, with no served route list to read it
+    # from, so it has to reconstruct the same mangling `to_pydantic_model` used, not the
+    # shorter fragment a human would write by hand -- using the fragment here 404s every
+    # request this binding ever builds (kapps_semantic_middleware#80).
+    root_class_local_name = IRI(str(resource_class)).lined
 
     for holder_iri, prop_iri, prop_spec, steps in _parameter_properties(
         ogm=ogm, root_iri=resource_iri, spec=spec

@@ -87,8 +87,16 @@ chosen. Forward the mismatched port by hand if this bites, or free up the local 
 - `middleware.py` — the runner: one resource-mode `SemanticMiddleware` per unit. Also fills the
   library's transport seam (ADR 0034) with `ensure_transport`: this unit's own in-process MQTT
   broker, on a daemon thread that dies with the process.
-- `control_station.py` — the runner for the Controller (#43), wrapped as middleware.
-- `controller.py` — discovery + dispatch logic: lists resources by type, drives any unit found.
+- `control_station.py` — the runner for the Controller (#43), wrapped as middleware; now also runs
+  the view mechanism and algorithm loop alongside the app lifespan (ADR 0033).
+- `controller.py` — SPARQL-driven discovery and actuation: `view(query)` returns matching resource
+  IRIs, `wire_view(hits, class_scope=...)` registers REST connectors for each hit's parameters,
+  `await push(iri)` drives in-place assignments out to their owners over REST.
+- `algorithm.py` — the Control Expert's own code: the SPARQL view query (even-unit-index heuristic),
+  the unit `ClassScope`, and a deliberately meaningless periodic algorithm (ADR 0033 step 5) that
+  reads a barrier on one live unit and sets a conveyor belt's speed on another, purely to demonstrate
+  reach — never a real material-flow controller (the graph carries no plant layout, so nothing here
+  could route anything even if it tried).
 - `seed.py` — index-derived IRI minting, MQTT topics and each unit's own broker port for N units
   (ADR 0030), plus the one control station individual.
 - `plc/` — the mock PLC and its own panel UI, one process per unit (ADR 0029's process split).

@@ -1,22 +1,32 @@
 """The control station runner for the factory demo.
 
-It serves the Controller (ticket #43) as a resource-mode middleware.
-Uvicorn runs on the main thread, and owns the process event loop, the same
-way the middleware runner does (ADR 0029). The process reads GRAPHDB_* from
-its environment.
+It serves the Controller (ticket #43) as a resource-mode middleware. Uvicorn runs on
+the main thread, and owns the process event loop, the same way the middleware runner
+does (ADR 0029). The process reads GRAPHDB_* from its environment.
+
+The view mechanism (ADR 0033, ticket #80) now runs here: ``main()`` calls
+``controller.view()`` with the algorithm's SPARQL query, then ``controller.wire_view()``
+to recognize and register REST connectors for every hit. This must happen synchronously
+before the server starts serving, because connector registration must precede the app's
+lifespan connecting everything (see ``Controller.wire_view``'s docstring for why). Once
+the app starts, each wired hit's northbound datamodel loads into ``controller.units``,
+and a background loop runs the demonstration algorithm every few seconds.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import socket
 
 from graph_db_interface import GraphDB
 from kapps_ogm import OGM
 
-from . import seed
+from . import algorithm, seed
 from .controller import Controller
+
+logger = logging.getLogger(__name__)
 
 
 def bind_free_socket(host: str) -> socket.socket:
@@ -43,6 +53,33 @@ async def run_server(
     )
     server = __import__("uvicorn").Server(config=config)
     await server.serve(sockets=[sock] if sock is not None else None)
+
+
+def _wire_algorithm(controller: Controller) -> None:
+    """Register the demonstration algorithm's start-up/shutdown callback pair.
+
+    Mirrors ``SemanticMiddleware``'s own heartbeat convention
+    (``middleware.py``'s ``_start_heartbeat``/``_stop_heartbeat``): a background task
+    created on ``on_start_up``, cancelled and awaited cleanly on ``on_shutdown``. The
+    one-element list is the closure's box for the task object -- ``_start_algorithm``
+    needs to *set* it, and a bare ``nonlocal`` has nothing to rebind across the two
+    separately-registered callbacks otherwise.
+    """
+    algorithm_task: list[asyncio.Task] = []
+
+    async def _start_algorithm() -> None:
+        algorithm_task.append(asyncio.create_task(algorithm.run_algorithm_loop(controller)))
+
+    async def _stop_algorithm() -> None:
+        if algorithm_task:
+            algorithm_task[0].cancel()
+            try:
+                await algorithm_task[0]
+            except asyncio.CancelledError:
+                pass
+
+    controller.add_callback("on_start_up", _start_algorithm)
+    controller.add_callback("on_shutdown", _stop_algorithm)
 
 
 async def main() -> None:
@@ -78,6 +115,14 @@ async def main() -> None:
         port=port,
         activity_feed=True,
     )
+
+    # ADR 0033 steps 1-4: run the view, then wire a driving REST connector for every
+    # hit. Synchronous, and before run_server -- connector registration must precede
+    # the app's lifespan connecting everything (Controller.wire_view's own docstring).
+    hits = controller.view(algorithm.build_view_query())
+    logger.info("The view found %d live, even-indexed unit(s)", len(hits))
+    controller.wire_view(hits, class_scope=algorithm.unit_class_scope())
+    _wire_algorithm(controller)
 
     print(f"The control station runs on http://{args.host}:{port}/", flush=True)
     await run_server(args.host, port, controller, sock)

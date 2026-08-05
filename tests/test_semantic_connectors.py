@@ -409,12 +409,21 @@ class TestMQTTFormatter:
         assert getattr(node, INF.hasValue.lined) == []
         assert "value path" in caplog.text
 
-    def test_an_unobserved_parameter_serializes_as_null(self):
-        """Scenario 3 is a locator. A parameter has no value until the device publishes."""
+    def test_an_unobserved_parameter_refuses_to_serialize(self):
+        """Scenario 3 is a locator. A parameter has no value until the device publishes.
+
+        Serializing it used to encode as the JSON scalar ``null`` -- not a valid device
+        value, and a receiver expecting a number or boolean chokes on it (#80's
+        cross-field notify fan-out makes exactly this reachable: any change on a
+        resource asks every write leg on it to re-derive its own slice, including a
+        sibling parameter nothing has ever set). Refusing loudly here, rather than
+        publishing ``null``, is the fix.
+        """
         formatter = self._formatter()
         [node] = formatter.deserialize(None)
 
-        assert json.loads(formatter.serialize([node])) is None
+        with pytest.raises(ValueError, match="no observed value"):
+            formatter.serialize([node])
 
 
 class _FakeOGM:

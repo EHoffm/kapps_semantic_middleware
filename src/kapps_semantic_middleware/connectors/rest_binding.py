@@ -139,7 +139,10 @@ def build_parameter_path(
     domain term and two callers now need it, one of them in ``src/``.
 
     Args:
-        root_class_local_name: Fragment of the root resource's class IRI (e.g. "TransferUnit").
+        root_class_local_name: The root resource's class IRI, mangled (``IRI(...).lined``)
+            -- what ``kapps_ogm`` names the materialized pydantic class, and so the
+            ``{Model}`` segment the served route actually mounts under. Not the bare
+            fragment: see ``ParameterBinding.root_class_local_name``'s docstring.
         root_iri: The root resource's own IRI.
         steps: Sequence of (field_name, child_id) hops from the root to the parameter's owner.
         terminal_field: The final field name (the parameter itself).
