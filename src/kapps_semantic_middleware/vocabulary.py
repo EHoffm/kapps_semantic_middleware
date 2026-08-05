@@ -159,6 +159,7 @@ class INF:
     hasMQTTTopic = IRI("hasMQTTTopic", base=INF_NS)  # topic the device publishes readings on
     hasMQTTSetTopic = IRI("hasMQTTSetTopic", base=INF_NS)  # setpoint topic; readwrite only
     hasMQTTBrokerIP = IRI("hasMQTTBrokerIP", base=INF_NS)  # broker carrying both topics
+    hasMQTTBrokerPort = IRI("hasMQTTBrokerPort", base=INF_NS)  # xsd:integer; absent means 1883 (ADR 0031)
     hasMQTTValuePath = IRI("hasMQTTValuePath", base=INF_NS)  # JSON envelope path; absent = raw scalar
 
 

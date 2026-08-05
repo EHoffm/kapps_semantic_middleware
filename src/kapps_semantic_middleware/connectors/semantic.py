@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterable,
@@ -212,9 +213,17 @@ class BindingDescriptor(Protocol):
 
     @staticmethod
     def build(
-        binding: ParameterBinding, direction: SyncDirection
+        binding: ParameterBinding,
+        direction: SyncDirection,
+        *,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
     ) -> Iterable[Registration]:
-        """Turn one resolved parameter into the registrations that realize it."""
+        """Turn one resolved parameter into the registrations that realize it.
+
+        ``ensure_transport``, when given, is the deployment's transport hook (ADR 0034),
+        already deduped by ``plan_wiring`` to fire once per distinct ``(host, port)`` across
+        this resource's whole wiring. A binding with nothing to bring up (REST, ADR 0033)
+        simply never calls it."""
         ...
 
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import math
 import logging
-from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, ClassVar, Dict, Iterable, List, Optional, Tuple
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from graph_db_interface import IRI
@@ -215,19 +215,29 @@ class MQTTBinding:
     connection_metadata: ClassVar[Tuple[IRI, ...]] = (
         INF.hasMQTTTopic,
         INF.hasMQTTBrokerIP,
+        INF.hasMQTTBrokerPort,
         INF.hasMQTTSetTopic,
         INF.hasMQTTValuePath,
     )
 
     @staticmethod
     def build(
-        binding: ParameterBinding, direction: SyncDirection
+        binding: ParameterBinding,
+        direction: SyncDirection,
+        *,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
     ) -> Iterable[Registration]:
         """One read registration always. One write registration when both sides permit it.
 
         ``direction`` has already been reduced to the most restrictive of the parameter's
         ``inf:accessMode`` and the instance's flavour (ADR 0023), so this only honours
         it. It must never re-widen.
+
+        ``ensure_transport``, when given, is called once with the declared ``(host, port)``,
+        immediately before the first connector for it is built (ADR 0034). Deduping across
+        several parameters that share one address is the caller's job (``wiring.py``'s
+        ``plan_wiring``), not this method's -- a single ``build`` call sees only its own
+        parameter, never its siblings.
         """
         connector_cls = _mqtt_client_connector_cls()
 
@@ -235,6 +245,9 @@ class MQTTBinding:
         topic = binding.get(INF.hasMQTTTopic)
         set_topic = binding.get(INF.hasMQTTSetTopic)
         value_path = binding.get(INF.hasMQTTValuePath)
+        port = binding.get(INF.hasMQTTBrokerPort)
+        if port is None:
+            port = 1883  # ADR 0031: absent means 1883, so every existing ABox keeps its meaning.
 
         if not broker or not topic:
             # A parameter marked MQTT-accessible whose metadata is incomplete would come up
@@ -253,10 +266,13 @@ class MQTTBinding:
             )
             return
 
+        if ensure_transport is not None:
+            ensure_transport(broker, port)
+
         formatter = _formatter_for(binding, value_path, topic=topic, set_topic=set_topic or "")
 
         yield Registration(
-            connector=connector_cls(broker, topic),
+            connector=connector_cls(broker, topic, port),
             sync_direction=SyncDirection.TO_PERSISTENCE,
             model_type=list,
             formatter=formatter,
@@ -276,7 +292,7 @@ class MQTTBinding:
             return
 
         yield Registration(
-            connector=connector_cls(broker, set_topic),
+            connector=connector_cls(broker, set_topic, port),
             sync_direction=SyncDirection.FROM_PERSISTENCE,
             model_type=list,
             formatter=formatter,

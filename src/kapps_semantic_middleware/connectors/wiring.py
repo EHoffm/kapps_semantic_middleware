@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from graph_db_interface import IRI
@@ -97,6 +97,7 @@ def plan_wiring(
     registry: SemanticConnectorRegistry,
     flavour: SyncDirection = SyncDirection.BIDIRECTIONAL,
     autoregister: bool = True,
+    ensure_transport: Optional[Callable[[str, int], None]] = None,
 ) -> WiringPlan:
     """Resolve a resource's parameters and decide what to connect.
 
@@ -104,6 +105,12 @@ def plan_wiring(
     the recognized bindings either way. An inspecting instance that skipped recognition
     would treat every parameter node as ordinary data, and serve its broker address. The
     least-privileged connector wiring would leak the most (ADR 0028).
+
+    ``ensure_transport`` is the deployment's transport hook (ADR 0034). Wrapped once here,
+    fresh per call, so it fires at most once per distinct ``(host, port)`` across every
+    binding built below -- a binding descriptor calls it unconditionally and the wrapper
+    absorbs the dedup, so no descriptor has to track addresses it has already seen across
+    calls it cannot see each other from.
     """
     resource_class = resource_class or _class_of(ogm, resource_iri)
     full_spec = ogm.get_class_spec(class_iri=resource_class, class_scope=class_scope)
@@ -144,11 +151,15 @@ def plan_wiring(
             getattr(binding.descriptor, "connection_metadata", None),
         )
 
+    deduped_ensure_transport = _dedupe_by_address(ensure_transport)
+
     registrations: List[Tuple[ParameterBinding, Registration]] = []
     if autoregister:
         for binding in bindings:
             direction = resolve_direction(binding.access_mode, flavour)
-            for registration in binding.descriptor.build(binding, direction):
+            for registration in binding.descriptor.build(
+                binding, direction, ensure_transport=deduped_ensure_transport
+            ):
                 registrations.append((binding, registration))
     else:
         logger.info(
@@ -165,6 +176,32 @@ def plan_wiring(
         registrations=registrations,
         southbound_properties=southbound,
     )
+
+
+def _dedupe_by_address(
+    ensure_transport: Optional[Callable[[str, int], None]],
+) -> Optional[Callable[[str, int], None]]:
+    """Wrap a transport hook so it fires at most once per distinct ``(host, port)``.
+
+    ``None`` in, ``None`` out -- a resource with no hook calls nothing (ADR 0034). Otherwise
+    a fresh ``seen`` set is closed over per call to :func:`plan_wiring`, which is exactly the
+    scope one middleware construction spans. A resource whose parameters ever name two
+    addresses gets the hook called twice; four parameters sharing one address get it once,
+    before the first connector for that address is built.
+    """
+    if ensure_transport is None:
+        return None
+
+    seen: set = set()
+
+    def wrapped(host: str, port: int) -> None:
+        key = (host, port)
+        if key in seen:
+            return
+        seen.add(key)
+        ensure_transport(host, port)
+
+    return wrapped
 
 
 def _recognise(
@@ -381,7 +418,12 @@ def _parameter_metadata(
     metadata: Dict[str, Any] = {}
     undeclared = set()
     for row in rows:
-        prop, value = str(row["p"]), str(row["v"])
+        # `row["p"]` is the property IRI -- always stringified for a plain dict key. `row["v"]`
+        # is left as `convert_bindings=True` produced it: every metadata property here has been
+        # `xsd:string` until now, so this was a no-op, but forcing `str()` on it would turn
+        # `inf:hasMQTTBrokerPort`'s `xsd:integer` back into a string (#69's stated acceptance:
+        # the round trip must hand back 18831, not "18831").
+        prop, value = str(row["p"]), row["v"]
         if prop not in declared:
             undeclared.add(prop)
             continue

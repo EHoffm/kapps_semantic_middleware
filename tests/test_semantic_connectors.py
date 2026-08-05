@@ -58,7 +58,9 @@ def _node_model():
     return create_model("AnonymousClass", **{k: (v[0], v[1]) for k, v in fields.items()})
 
 
-def _binding(access_mode=AccessMode.READWRITE, value_path=None, set_topic="belt/speed_set"):
+def _binding(
+    access_mode=AccessMode.READWRITE, value_path=None, set_topic="belt/speed_set", port=None
+):
     metadata = {
         str(INF.accessMode): [access_mode],
         str(IRI("https://example.org/tu#hasUnit")): ["m/s"],
@@ -69,6 +71,8 @@ def _binding(access_mode=AccessMode.READWRITE, value_path=None, set_topic="belt/
         metadata[str(INF.hasMQTTSetTopic)] = [set_topic]
     if value_path is not None:
         metadata[str(INF.hasMQTTValuePath)] = [value_path]
+    if port is not None:
+        metadata[str(INF.hasMQTTBrokerPort)] = [port]
     return ParameterBinding(
         resource_iri=BELT,
         parameter_property=SPEED,
@@ -116,6 +120,7 @@ class TestRegistry:
         assert registry.declared_connection_metadata() == {
             str(INF.hasMQTTTopic),
             str(INF.hasMQTTBrokerIP),
+            str(INF.hasMQTTBrokerPort),
             str(INF.hasMQTTSetTopic),
             str(INF.hasMQTTValuePath),
         }
@@ -154,6 +159,7 @@ class TestDefaultRegistry:
             str(INF.hasMQTTTopic),
             str(INF.hasMQTTSetTopic),
             str(INF.hasMQTTBrokerIP),
+            str(INF.hasMQTTBrokerPort),
             str(INF.hasMQTTValuePath),
         } <= southbound
 
@@ -248,6 +254,103 @@ class TestMQTTBindingBuild:
         assert list(MQTTBinding.build(binding, SyncDirection.BIDIRECTIONAL)) == []
         assert "missing a broker" in caplog.text
         assert str(SPEED) in caplog.text
+
+
+class TestMQTTBindingPort:
+    """inf:hasMQTTBrokerPort reaches the connector. Absent means 1883 (ADR 0031)."""
+
+    def test_absent_port_defaults_to_1883(self):
+        registrations = list(MQTTBinding.build(_binding(), SyncDirection.TO_PERSISTENCE))
+
+        assert registrations[0].connector.mqtt_broker_port == 1883
+
+    def test_a_declared_port_reaches_the_connector(self):
+        registrations = list(
+            MQTTBinding.build(_binding(port=18831), SyncDirection.TO_PERSISTENCE)
+        )
+
+        assert registrations[0].connector.mqtt_broker_port == 18831
+
+    def test_both_legs_of_a_settable_parameter_share_the_declared_port(self):
+        registrations = list(
+            MQTTBinding.build(_binding(port=18831), SyncDirection.BIDIRECTIONAL)
+        )
+
+        assert {r.connector.mqtt_broker_port for r in registrations} == {18831}
+
+    def test_the_round_trip_preserves_an_integer_not_a_string(self):
+        """The seed writes xsd:integer. binding.get() must hand back 18831, not "18831"
+        (#69's stated acceptance -- the first non-string literal any seed here writes)."""
+        registrations = list(
+            MQTTBinding.build(_binding(port=18831), SyncDirection.TO_PERSISTENCE)
+        )
+
+        port = registrations[0].connector.mqtt_broker_port
+        assert port == 18831
+        assert isinstance(port, int)
+
+
+class TestEnsureTransport:
+    """The deployment's transport hook (ADR 0034). The library only ever calls it -- it
+    never probes, never starts anything, and never reads a return value."""
+
+    def test_absent_hook_calls_nothing(self):
+        """An instance constructed without ensure_transport calls nothing."""
+        list(MQTTBinding.build(_binding(), SyncDirection.BIDIRECTIONAL))
+        # No exception, and nothing to assert on -- the point is there is no hook to call.
+
+    def test_the_hook_is_called_with_the_declared_address(self):
+        calls = []
+        list(
+            MQTTBinding.build(
+                _binding(port=18831),
+                SyncDirection.TO_PERSISTENCE,
+                ensure_transport=lambda host, port: calls.append((host, port)),
+            )
+        )
+
+        assert calls == [("127.0.0.1", 18831)]
+
+    def test_the_hook_defaults_to_1883_the_same_as_the_connector(self):
+        calls = []
+        list(
+            MQTTBinding.build(
+                _binding(),
+                SyncDirection.TO_PERSISTENCE,
+                ensure_transport=lambda host, port: calls.append((host, port)),
+            )
+        )
+
+        assert calls == [("127.0.0.1", 1883)]
+
+    def test_a_settable_parameter_calls_the_hook_once_not_once_per_leg(self):
+        """One binding, two connectors (read + write), one declared address."""
+        calls = []
+        list(
+            MQTTBinding.build(
+                _binding(port=18831),
+                SyncDirection.BIDIRECTIONAL,
+                ensure_transport=lambda host, port: calls.append((host, port)),
+            )
+        )
+
+        assert calls == [("127.0.0.1", 18831)]
+
+    def test_no_broker_binds_nothing_and_calls_no_hook(self):
+        """A parameter that binds nothing has no address to ensure transport for."""
+        binding = _binding()
+        binding.metadata.pop(str(INF.hasMQTTBrokerIP))
+        calls = []
+
+        list(
+            MQTTBinding.build(
+                binding,
+                SyncDirection.BIDIRECTIONAL,
+                ensure_transport=lambda host, port: calls.append((host, port)),
+            )
+        )
+
+        assert calls == []
 
 
 class TestMQTTFormatter:

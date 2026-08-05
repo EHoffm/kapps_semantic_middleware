@@ -59,10 +59,12 @@ import logging
 from typing import (
     Any,
     AsyncGenerator,
+    Callable,
     ClassVar,
     Dict,
     Iterable,
     List,
+    Optional,
     Sequence,
     Tuple,
     Type,
@@ -311,7 +313,10 @@ class RESTBinding:
 
     @staticmethod
     def build(
-        binding: ParameterBinding, direction: SyncDirection
+        binding: ParameterBinding,
+        direction: SyncDirection,
+        *,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
     ) -> Iterable[Registration]:
         """One read registration when the resource is live. One write registration too,
         when ``direction`` permits it.
@@ -319,6 +324,9 @@ class RESTBinding:
         ``direction`` has already been reduced to the most restrictive of the parameter's
         ``inf:accessMode`` and the instance's connector wiring (ADR 0023), so this only
         honours it.
+
+        ``ensure_transport`` is unused. REST reaches a peer middleware, not a broker this
+        deployment needs to bring up (ADR 0034) -- there is nothing here to ensure.
         """
         address = binding.get(SVC.address)
         if not address:

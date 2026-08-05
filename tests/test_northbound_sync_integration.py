@@ -98,9 +98,13 @@ async def running_unit(graphdb, mqtt_broker, unit_scope):
     """
     host, port = mqtt_broker.split(":")
     seed.seed_scenario3(graphdb, OGM(db=graphdb))
+    # Declare both host and port in the graph, the way provisioning will (#69). No manual
+    # patch of the built connectors is needed once `inf:hasMQTTBrokerPort` reaches the
+    # connector through the binding itself.
     graphdb.query(
         f"DELETE {{ ?n <{INF.hasMQTTBrokerIP}> ?old }} "
-        f"INSERT {{ ?n <{INF.hasMQTTBrokerIP}> \"{host}\" }} "
+        f'INSERT {{ ?n <{INF.hasMQTTBrokerIP}> "{host}" ; '
+        f'    <{INF.hasMQTTBrokerPort}> "{port}"^^<http://www.w3.org/2001/XMLSchema#integer> }} '
         f"WHERE  {{ ?n <{INF.hasMQTTBrokerIP}> ?old }}",
         update=True,
     )
@@ -116,10 +120,6 @@ async def running_unit(graphdb, mqtt_broker, unit_scope):
         connector_sync_direction=SyncDirection.BIDIRECTIONAL,
         heartbeat_interval=None,
     )
-    # The seeded graph carries the broker's real port. Point every connector at the test
-    # broker's port instead -- the same rewrite `wired` does in the roundtrip suite.
-    for _, registration in mw._wiring.registrations:
-        registration.connector.mqtt_broker_port = int(port)
 
     server, thread = _start_server(mw)
     try:

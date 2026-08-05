@@ -153,6 +153,47 @@ class TestRecognition:
 
         assert left.get(INF.hasMQTTValuePath) == "payload.speed"
 
+    def test_a_declared_port_round_trips_as_an_integer_not_a_string(
+        self, scenario3, unit_scope
+    ):
+        """#69's stated acceptance: the first non-string literal any seed here writes.
+
+        write 18831 -> graph -> ClassSpec -> ``binding.get()`` must hand back the integer
+        18831, not the string "18831" -- `_parameter_metadata` used to force every value
+        through `str()`, which was a no-op for every property so far because they were all
+        `xsd:string`. A connector handed a string port fails at the socket layer, not at
+        construction, so this is load-bearing rather than a type-purity nicety.
+        """
+        graphdb, ogm = scenario3
+        graphdb.query(
+            f'INSERT {{ ?n <{INF.hasMQTTBrokerPort}> '
+            f'"18831"^^<http://www.w3.org/2001/XMLSchema#integer> }} '
+            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n }}",
+            update=True,
+        )
+
+        plan = _plan(ogm, unit_scope)
+        left = next(
+            b for b in plan.bindings if str(b.resource_iri) == str(seed.CONVEYOR_BELT_LEFT)
+        )
+
+        port = left.get(INF.hasMQTTBrokerPort)
+        assert port == 18831
+        assert isinstance(port, int)
+
+    def test_an_undeclared_port_defaults_to_1883_on_the_connector(
+        self, scenario3, unit_scope
+    ):
+        """No scenario-3 ABox declares a port -- every existing seed keeps its meaning."""
+        _, ogm = scenario3
+
+        plan = _plan(ogm, unit_scope)
+        speed = next(
+            r for _, r in plan.registrations if r.connector.topic.endswith("left/speed")
+        )
+
+        assert speed.connector.mqtt_broker_port == 1883
+
     def test_the_value_is_parsed_per_the_ontology_datatype(self, scenario3, unit_scope):
         """"Raw scalar. Parsed per the parameter ontology datatype" (#40).
 
@@ -373,6 +414,27 @@ class TestNorthboundProjection:
         assert INF.accessMode.lined in served
         assert seed.TU_HAS_UNIT.lined in served
         assert INF.hasValue.lined in served
+
+    def test_a_declared_broker_port_never_reaches_the_northbound_payload(
+        self, scenario3, unit_scope
+    ):
+        """ADR 0031: the port is a restriction on the MQTT protocol marker's range, so the
+        projection prunes it with the rest of the connection metadata -- no projection code
+        change needed, just this proof that the claim holds now that the term exists."""
+        graphdb, ogm = scenario3
+        graphdb.query(
+            f'INSERT {{ ?n <{INF.hasMQTTBrokerPort}> '
+            f'"18831"^^<http://www.w3.org/2001/XMLSchema#integer> }} '
+            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n }}",
+            update=True,
+        )
+
+        plan = _plan(ogm, unit_scope)
+        served = str(self._served(ogm, plan))
+
+        assert "18831" not in served
+        assert INF.hasMQTTBrokerPort.lined not in served
+        assert str(INF.hasMQTTBrokerPort) in plan.southbound_properties
 
 
 @requires_graphdb
@@ -595,3 +657,61 @@ class TestRESTRecognition:
         assert all(
             r.sync_direction is SyncDirection.TO_PERSISTENCE for _, r in plan.registrations
         )
+
+
+@requires_graphdb
+class TestEnsureTransport:
+    """ADR 0034: the deployment's transport hook, threaded through ``plan_wiring``.
+
+    Scenario 3's four parameters (two belts, two barriers) all declare the same broker
+    address, so this is exactly the shape the ADR's "once per distinct address" rule names:
+    the hook must fire once, not once per parameter and not once per connector.
+    """
+
+    def test_called_once_when_four_parameters_share_one_address(self, scenario3, unit_scope):
+        _, ogm = scenario3
+        calls = []
+
+        _plan(ogm, unit_scope, ensure_transport=lambda host, port: calls.append((host, port)))
+
+        assert calls == [(seed.MQTT_BROKER_IP, 1883)]
+
+    def test_two_distinct_addresses_each_get_ensured(self, scenario3, unit_scope):
+        graphdb, ogm = scenario3
+        graphdb.query(
+            f'DELETE {{ ?n <{INF.hasMQTTBrokerIP}> "{seed.MQTT_BROKER_IP}" }} '
+            f'INSERT {{ ?n <{INF.hasMQTTBrokerIP}> "10.0.0.9" }} '
+            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n . "
+            f'?n <{INF.hasMQTTBrokerIP}> "{seed.MQTT_BROKER_IP}" }}',
+            update=True,
+        )
+        calls = []
+
+        _plan(ogm, unit_scope, ensure_transport=lambda host, port: calls.append((host, port)))
+
+        assert sorted(calls) == sorted(
+            [(seed.MQTT_BROKER_IP, 1883), ("10.0.0.9", 1883)]
+        )
+
+    def test_no_hook_given_calls_nothing(self, scenario3, unit_scope):
+        """An instance constructed without ensure_transport calls nothing -- there is
+        nothing to assert on here beyond the plan succeeding with the default (None)."""
+        _, ogm = scenario3
+
+        plan = _plan(ogm, unit_scope)
+
+        assert len(plan.registrations) == 6
+
+    def test_an_inspector_calls_no_hook(self, scenario3, unit_scope):
+        """autoregister=False builds no connector, so nothing needs transport ensured."""
+        _, ogm = scenario3
+        calls = []
+
+        _plan(
+            ogm,
+            unit_scope,
+            autoregister=False,
+            ensure_transport=lambda host, port: calls.append((host, port)),
+        )
+
+        assert calls == []

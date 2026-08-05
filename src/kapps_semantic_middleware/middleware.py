@@ -16,7 +16,7 @@ import functools
 import inspect
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import anyio
 import httpx
@@ -223,6 +223,7 @@ class SemanticMiddleware(Middleware):
         autoregister_connectors: bool = True,
         connector_sync_direction: SyncDirection = SyncDirection.BIDIRECTIONAL,
         connector_registry: Optional[SemanticConnectorRegistry] = None,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
         activity_feed: bool = False,
         activity_capacity: int = 200,
     ) -> None:
@@ -272,6 +273,10 @@ class SemanticMiddleware(Middleware):
             self.autoregister_connectors = autoregister_connectors
             self.connector_sync_direction = connector_sync_direction
             self.connector_registry = connector_registry or default_registry
+            # The transport seam a binding calls before building its first connector for a
+            # declared address (ADR 0034). None means exactly today's behaviour: the library
+            # never starts, probes, or stops a broker on its own.
+            self.ensure_transport = ensure_transport
             # None until a class_scope is given. Without a consumer's view, there is no
             # root for recognition, and the datamodel fetch stays unscoped, the same way
             # it does for scenarios 1 and 2.
@@ -963,6 +968,7 @@ class SemanticMiddleware(Middleware):
             registry=self.connector_registry,
             flavour=self.connector_sync_direction,
             autoregister=self.autoregister_connectors,
+            ensure_transport=self.ensure_transport,
         )
 
         for binding, registration in self._wiring.registrations:
