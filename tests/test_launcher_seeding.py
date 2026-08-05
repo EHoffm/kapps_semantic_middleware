@@ -204,6 +204,47 @@ class TestLiveSeeding:
         assert len(bindings) == 1
         assert bindings[0]["port"] == 18832
 
+    def test_seed_writes_a_human_readable_label_for_each_unit_and_the_control_station(
+        self, graphdb
+    ):
+        """Every seeded individual carries an rdfs:label (#89 item 5).
+
+        Controller.discover_resources binds ?label straight off rdfs:label; before this
+        was seeded, the SPARQL OPTIONAL never bound and discovery returned label=None for
+        every unit. #82 (not yet built) renders unit identity on every card, so this
+        seeds a real name rather than drop the field from ResourceInfo.
+        """
+        from kapps_ogm import OGM
+        from rdflib.namespace import RDFS
+
+        ogm = OGM(db=graphdb)
+        seed.seed_factory(graphdb, ogm, units=2)
+
+        for n in (1, 2):
+            result = graphdb.query(
+                f"""
+                SELECT ?label WHERE {{
+                    <{seed._mint_transfer_unit_iri(n)}> <{RDFS.label}> ?label .
+                }}
+                """,
+                convert_bindings=True,
+            )
+            bindings = result.get("results", {}).get("bindings", [])
+            assert len(bindings) == 1, f"TransferUnit{n} should carry exactly one rdfs:label"
+            assert str(bindings[0]["label"]) == f"TransferUnit {n}"
+
+        result = graphdb.query(
+            f"""
+            SELECT ?label WHERE {{
+                <{seed.CONTROL_STATION}> <{RDFS.label}> ?label .
+            }}
+            """,
+            convert_bindings=True,
+        )
+        bindings = result.get("results", {}).get("bindings", [])
+        assert len(bindings) == 1
+        assert str(bindings[0]["label"]) == "Control Station"
+
     def test_factory_is_live_detects_fresh_heartbeat(self, graphdb):
         """factory_is_live returns a Service that carries a fresh heartbeat."""
         from datetime import datetime, timezone

@@ -345,6 +345,12 @@ class Controller(SemanticMiddleware):
         whole factory's view (the same "fails visibly rather than silently" standard
         ADR 0033's acceptance criteria hold an already-wired unit to).
         """
+        # Pre-register the fallback persist() would build anyway, once, before the loop
+        # below calls persist() per hit -- silences the base class's "No persistence
+        # factory found" warning without changing which connector gets constructed (#89
+        # item 6; see SemanticMiddleware._suppress_default_persistence_warning).
+        self._suppress_default_persistence_warning("resource")
+
         for resource_iri, wiring in self._view_wirings:
             fetch = functools.partial(
                 self.ogm.fetch, instance_iri=resource_iri, **wiring.northbound_fetch_kwargs()

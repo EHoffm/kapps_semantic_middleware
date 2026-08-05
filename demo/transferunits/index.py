@@ -11,13 +11,25 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .launcher import Factory
 
 app = FastAPI()
 factory: Factory | None = None
 launcher_address: str = ""
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """Answer the browser's automatic favicon request with a bare 204 (#89).
+
+    The launcher ships no icon asset. Left unanswered, every page load logs a 404 for
+    this request -- the only console error on an otherwise clean load. A 204 says
+    "nothing here, and that's fine" without inventing an asset this demo has no
+    branding to put in.
+    """
+    return Response(status_code=204)
 
 # One entry for each box and each arrow on the page. `file` names a BACKEND source file,
 # never a frontend one (ADR 0029). A test asserts that every path here exists on disk, so

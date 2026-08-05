@@ -14,7 +14,8 @@ from pathlib import Path
 
 from graph_db_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
-from rdflib.namespace import RDF
+from rdflib import Literal
+from rdflib.namespace import RDF, RDFS
 
 from kapps_semantic_middleware.seeding import clear_repository, load_shared_ontologies
 from kapps_semantic_middleware.vocabulary import SVC
@@ -182,6 +183,16 @@ def _create_transfer_unit(ogm, n: int) -> IRI:
             ],
         },
     )
+
+    # A human-readable name (#89 item 5). discover_resources binds ?label off exactly
+    # this predicate and returned label=None for every unit before this line existed --
+    # the graph had no rdfs:label on a TransferUnit individual for the SPARQL OPTIONAL to
+    # find. #82 (the control station board) renders unit identity on every card, so this
+    # is seeded rather than dropped from ResourceInfo: a real name for a real card, not an
+    # empty field nothing downstream can build on. A plain triple_add, the same way the
+    # control station's own label goes on below -- ogm.create's class_scope only covers
+    # domain properties, and rdfs:label is not one.
+    ogm.db.triple_add((unit_iri, RDFS.label, Literal(f"TransferUnit {n}")))
     return unit_iri
 
 
@@ -212,6 +223,9 @@ def seed_factory(db, ogm, units: int) -> None:
         _create_transfer_unit(ogm, n)
 
     db.triple_add((CONTROL_STATION, RDF.type, CONTROL_STATION_CLASS))
+    # Same reasoning as a unit's label above (#89 item 5): a real name for the one card
+    # that isn't a TransferUnit.
+    db.triple_add((CONTROL_STATION, RDFS.label, Literal("Control Station")))
 
 
 def factory_is_live(db, max_age_seconds: float = 90.0) -> list[IRI]:

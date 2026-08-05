@@ -21,10 +21,14 @@ from typing import Any, Callable, Dict, List, Optional
 import anyio
 import httpx
 from fastapi import APIRouter
+from fastapi.responses import Response
 from graph_db_interface import IRI
 from pydantic import BaseModel
 
 from aas_middleware import Middleware
+from aas_middleware.connect.connectors.model_connector import ModelConnector
+from aas_middleware.middleware.persistence_factory import PersistenceFactory
+from aas_middleware.middleware.registries import ConnectionInfo
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 
 from kapps_semantic_middleware.connectors.semantic import (
@@ -178,13 +182,18 @@ class SemanticMiddleware(Middleware):
 
     @property
     def app(self):
-        """The FastAPI app, with its root route renamed.
+        """The FastAPI app, with its root route renamed and a quiet favicon route added.
 
         The base class registers ``GET /`` inside its own ``app`` property, so the route
         exists the moment the app does. Starlette matches routes in order and a second
         registration would never be reached, so the original is removed rather than
         shadowed. Guarded by a flag: the base property caches, but this one is consulted
-        on every access.
+        on every access, and neither patch below may run twice on the same app object.
+
+        The favicon route (#89) answers ``GET /favicon.ico`` with a bare 204: this
+        product ships no icon asset, and every browser that requests one otherwise logs
+        a 404 -- the only console error a control station or a unit middleware's page
+        would otherwise show on a clean load.
         """
         app = Middleware.app.fget(self)  # type: ignore[attr-defined]
         if not getattr(app, "_kapps_root_replaced", False):
@@ -199,6 +208,10 @@ class SemanticMiddleware(Middleware):
             @app.get("/", response_model=str)
             async def root() -> str:
                 return welcome
+
+            @app.get("/favicon.ico", include_in_schema=False)
+            async def favicon() -> Response:
+                return Response(status_code=204)
 
             # The schema is generated lazily and cached. Drop any copy built before the
             # swap, so /docs and /openapi.json describe the routes that actually exist.
@@ -996,6 +1009,43 @@ class SemanticMiddleware(Middleware):
                 self.resource_iri,
             )
 
+    def _suppress_default_persistence_warning(self, data_model_name: str) -> None:
+        """Pre-register the exact fallback ``persist()`` would build anyway, so
+        ``aas_middleware``'s "No persistence factory found ... Using default persistence
+        factory" warning never fires for ``data_model_name`` (#89 item 6).
+
+        ``persist()`` (the base class) calls ``add_to_persistence`` with no
+        ``persistence_factory``, which asks the registry for the default one. Nothing in
+        this codebase ever calls the base class's own opt-in
+        (``add_default_persistence``) to register one ahead of time, so every call falls
+        into the registry's "not found" branch, logs the warning, and constructs
+        ``PersistenceFactory(ModelConnector)`` -- benign, since that is the only
+        connector kind ``persist()`` ever needed, but a warning nobody had explained
+        trains people to ignore warnings (the issue's own words), and #86 is exactly the
+        kind of bug that hides behind one.
+
+        Registering that identical factory here, before the first ``persist()`` call,
+        changes no behaviour -- the connector constructed is the same either way -- it
+        only tells the registry the fallback was chosen on purpose. Called directly on
+        ``persistence_registry`` rather than through ``add_default_persistence``: that
+        wrapper additionally requires ``data_model_name`` already present in
+        ``self.data_models``, a bookkeeping step ``Controller._load_view_datamodels``
+        (``demo/transferunits/controller.py``) has no other reason to perform for each
+        view hit it loads. ``object`` stands in for the wrapper's own ``typing.Any``
+        default: the registry's lookup does ``issubclass(persisted_model_type,
+        model_type)``, and ``typing.Any`` is not a class ``issubclass`` accepts.
+
+        Idempotent -- harmless to call more than once, but skipped once this
+        ``data_model_name`` is registered, so a caller need not track whether it already
+        ran.
+        """
+        connection_info = ConnectionInfo(data_model_name=data_model_name)
+        if connection_info in self.persistence_registry.persistence_factories:
+            return
+        self.persistence_registry.add_persistence_factory(
+            connection_info, object, PersistenceFactory(ModelConnector)
+        )
+
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
 
@@ -1035,6 +1085,7 @@ class SemanticMiddleware(Middleware):
                 # up by data_model_name="resource" and this exact resource_iri, and raises
                 # a bare KeyError if it is missing. Scenarios 1 and 2 pass no class_scope,
                 # so self._wiring remains None and they keep the behavior unchanged.
+                self._suppress_default_persistence_warning("resource")
                 await self.persist("resource", instance)
             # The local recursive router, not the framework generator (ADR 0017). It still
             # produces the framework's top-level CRUD -- it calls it -- and then descends the
