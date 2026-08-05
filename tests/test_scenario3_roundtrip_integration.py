@@ -176,6 +176,9 @@ class TestMiddlewareToDevice:
                 [node] = registration.formatter.deserialize(2.75)
                 await connector.consume(registration.formatter.serialize([node]))
                 await unit.wait_for_setpoint(timeout=5.0)
+                # The setpoint ramps the belt rather than snapping it (#83); wait for the ramp
+                # to converge before asserting the exact value.
+                await unit.wait_for_convergence("left", timeout=10.0)
             finally:
                 await connector.disconnect()
 

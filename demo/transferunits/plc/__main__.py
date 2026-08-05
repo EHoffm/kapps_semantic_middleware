@@ -12,7 +12,7 @@ import argparse
 import asyncio
 import socket
 
-from .transfer_unit import TransferUnit
+from .transfer_unit import DEFAULT_RAMP_RATE, TransferUnit
 from .panel import app, configure_plc
 
 
@@ -46,6 +46,16 @@ async def main() -> None:
     # launcher always passes --broker-port <seed.broker_port(unit_index)> explicitly (#79).
     parser.add_argument("--broker-port", type=int, default=1883, help="MQTT broker port")
     parser.add_argument("--panel-port", type=int, default=0, help="Panel HTTP port (0 = free)")
+    # A belt ramps toward its setpoint rather than snapping to it (#83); this is the "slow PID
+    # controller" rate, in speed-units/s^2. Exposed as a flag -- unlike publish_interval -- so a
+    # presentation can slow it down or a lap-time measurement (#82) can speed it up with no code
+    # change.
+    parser.add_argument(
+        "--ramp-rate",
+        type=float,
+        default=DEFAULT_RAMP_RATE,
+        help=f"Belt ramp rate, speed-units/s^2 (default: {DEFAULT_RAMP_RATE})",
+    )
     args = parser.parse_args()
 
     # Determine panel port
@@ -60,6 +70,7 @@ async def main() -> None:
         unit_index=args.unit_index,
         broker=args.broker,
         port=args.broker_port,
+        ramp_rate=args.ramp_rate,
     )
     configure_plc(plc)
 

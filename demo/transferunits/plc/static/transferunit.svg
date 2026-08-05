@@ -3,8 +3,9 @@
 
   The panel addresses these ids:
     belt-left, belt-right                 the body of each chain conveyor
-    belt-left-motion, belt-right-motion   the chain. The panel sets animation-duration and
-                                          animation-play-state from the published speed
+    belt-left-motion, belt-right-motion   the chain. The panel sets animation-duration,
+                                          animation-play-state, and animation-direction
+                                          from the published speed (reverse for negative)
     barrier-front, barrier-back           the barrier group. The panel sets class
                                           "clear" or "occupied"
     barrier-front-hit, barrier-back-hit   the workpiece on the beam. It shows only when

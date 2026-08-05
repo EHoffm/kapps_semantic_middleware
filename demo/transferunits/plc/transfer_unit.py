@@ -44,6 +44,28 @@ DEFAULT_PORT = 1883
 CONNECT_RETRY_INITIAL_SECONDS = 0.2
 CONNECT_RETRY_MAX_SECONDS = 5.0
 
+DEFAULT_RAMP_RATE = 1.0
+# speed-units per second^2 — the belt's actual speed moves toward its setpoint at up to this
+# rate. 1.0 means a typical demo setpoint change (0-3 m/s) settles in a few seconds: slow enough
+# for a human to watch on the panel, fast enough that a controller polling this unit does not
+# wait unreasonably long for a write to converge.
+
+RAMP_TICK_SECONDS = 0.05
+# The ramp loop's own step interval. Independent of `publish_interval` (which governs the
+# unconditional periodic republish loop that already exists) -- this is deliberately tighter, so
+# a listener downstream (a test, a connector) sees the ramp's progress promptly rather than only
+# picking it up on the next slow periodic publish.
+
+THROUGHPUT_PERIOD_AT_UNIT_SPEED = 2.0
+# Seconds for ONE light barrier's block-then-clear half of the throughput simulation's cycle,
+# when the driving belt speed's magnitude is exactly 1.0. The actual half-cycle length is this
+# constant divided by (2 * current speed magnitude) -- a faster belt means a faster cycle.
+
+THROUGHPUT_POLL_SECONDS = 0.1
+# How often the throughput loop re-checks belt speed: both while idle (waiting for a belt to
+# start) and while holding mid-cycle (so a belt that stops is noticed within this granularity
+# rather than only at the end of a stale, already-computed half-cycle).
+
 
 class TransferUnit:
     """A PLC for one TransferUnit, publishing four values and taking two setpoints.
@@ -62,12 +84,14 @@ class TransferUnit:
         port: int = DEFAULT_PORT,
         publish_interval: float = 0.5,
         initial_speeds: Optional[Dict[str, float]] = None,
+        ramp_rate: float = DEFAULT_RAMP_RATE,
     ) -> None:
         self.unit_index = unit_index
         self.unit = f"TransferUnit{unit_index}"
         self.broker = broker
         self.port = port
         self.publish_interval = publish_interval
+        self.ramp_rate = ramp_rate
 
         self.speeds: Dict[str, float] = dict(initial_speeds or {"left": 0.0, "right": 0.0})
         self.setpoints: Dict[str, Optional[float]] = {"left": None, "right": None}
@@ -76,6 +100,7 @@ class TransferUnit:
         self._client: Optional[aiomqtt.Client] = None
         self._tasks: list = []
         self._setpoints_seen = asyncio.Event()
+        self._throughput_task: Optional[asyncio.Task] = None
 
     # --- Topics ------------------------------------------------------------------ #
 
@@ -134,6 +159,7 @@ class TransferUnit:
         self._tasks = [
             asyncio.create_task(self._listen()),
             asyncio.create_task(self._publish_loop()),
+            asyncio.create_task(self._ramp_loop()),
         ]
         logger.info(
             "TransferUnit %s up on %s:%s — publishing %d, subscribed to %d",
@@ -146,6 +172,17 @@ class TransferUnit:
 
     async def stop(self) -> None:
         """Cancel the loops and disconnect."""
+        # Tear down the throughput simulation first, if it is running -- clearing its
+        # barriers is a barrier write and must happen while the client is still connected.
+        if self._throughput_task is not None:
+            self._throughput_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._throughput_task
+            self._throughput_task = None
+            for pos in ("front", "back"):
+                if self.occupied[pos]:
+                    await self.set_occupied(pos, False)
+
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
@@ -176,23 +213,66 @@ class TransferUnit:
         """Move a light barrier and publish it immediately.
 
         The barriers are read-only northbound, so this is the test's way in — it is what a
-        workpiece passing the sensor would do.
+        workpiece passing the sensor would do. The throughput simulation (below) calls this
+        same method rather than assigning ``self.occupied`` directly, for exactly the same
+        reason the panel's manual barrier buttons do: it is the one door a barrier moves
+        through.
         """
         self.occupied[position] = occupied
         await self._publish(self.occupied_topic(position), occupied)
 
     async def set_speed(self, position: str, value: float) -> None:
-        """Set the speed for a belt position and publish it.
+        """Set the commanded target for a belt position.
 
-        This is the REST API entry point for the panel. It sets the actual speed
-        and publishes the new value immediately.
+        This is the REST API entry point for the panel. It used to set the actual speed and
+        publish it immediately; now it only sets the target the belt ramps toward (#83) --
+        ``_ramp_loop`` is the single place that moves ``self.speeds`` and publishes the
+        result, for this write path exactly as for an MQTT setpoint.
         """
-        self.speeds[position] = value
-        await self._publish(self.speed_topic(position), value)
+        self.setpoints[position] = value
 
     async def wait_for_setpoint(self, timeout: float = 5.0) -> None:
         """Block until at least one setpoint has been received. For tests."""
         await asyncio.wait_for(self._setpoints_seen.wait(), timeout=timeout)
+
+    async def wait_for_convergence(self, position: str, timeout: float = 5.0) -> None:
+        """Block until `position`'s actual speed reaches its setpoint. For tests.
+
+        Polls rather than an event: convergence is the ramp's *last* tick, and there is no
+        single moment before it happens that a listener could subscribe to in advance.
+        """
+
+        async def _settled() -> None:
+            while (
+                self.setpoints[position] is None
+                or self.speeds[position] != self.setpoints[position]
+            ):
+                await asyncio.sleep(RAMP_TICK_SECONDS)
+
+        await asyncio.wait_for(_settled(), timeout=timeout)
+
+    async def set_throughput_simulation(self, enabled: bool) -> None:
+        """Start or stop the barrier-cycling throughput simulation (#83).
+
+        A crude stand-in for a workpiece traveling front-to-back while a belt runs. Cancelling
+        rather than flagging: the loop can be mid-sleep inside a half cycle, and a flag it only
+        checked between awaits would leave that sleep to finish on its own clock. Idempotent --
+        calling with the state already in effect is a no-op.
+        """
+        if enabled:
+            if self._throughput_task is None:
+                self._throughput_task = asyncio.create_task(self._throughput_loop())
+        else:
+            if self._throughput_task is not None:
+                self._throughput_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._throughput_task
+                self._throughput_task = None
+                # A stop always leaves a clean, cleared state rather than whatever mid-cycle
+                # state the loop happened to be in.
+                for pos in ("front", "back"):
+                    if self.occupied[pos]:
+                        await self.set_occupied(pos, False)
 
     def snapshot(self) -> dict:
         """Return a snapshot of the current PLC state for the panel."""
@@ -202,10 +282,11 @@ class TransferUnit:
             "speeds": dict(self.speeds),
             "setpoints": dict(self.setpoints),
             "occupied": dict(self.occupied),
+            "throughput_simulation": self._throughput_task is not None,
         }
 
     async def _listen(self) -> None:
-        """Apply incoming setpoints and republish the resulting speed."""
+        """Record incoming setpoints. The ramp loop is what moves the reported speed."""
         assert self._client is not None
         async for message in self._client.messages:
             topic = str(message.topic)
@@ -216,16 +297,85 @@ class TransferUnit:
                 logger.warning("Ignoring unparseable setpoint on %s", topic)
                 continue
 
-            # Record the setpoint before applying it
+            # Record the setpoint. _ramp_loop picks it up on its own tick and moves
+            # self.speeds toward it -- this is no longer an instant assignment (#83).
             self.setpoints[position] = value
             self._setpoints_seen.set()
             logger.info("%s setpoint -> %s", topic, value)
 
-            # Apply the setpoint to actual speed (no controller between them)
-            self.speeds[position] = value
-            # Republish the read topic straight away: a real PLC acknowledges by reporting
-            # its new state, and the round trip is what the integration test observes.
-            await self._publish(self.speed_topic(position), value)
+    async def _ramp_loop(self) -> None:
+        """Move each belt's actual speed toward its setpoint, one tick at a time.
+
+        A belt is a thing with momentum, not a number that snaps (#83): the setpoint moves
+        the target, and this loop is the "slow PID controller" that actually drives the
+        reported speed there. It runs regardless of who last moved the target -- the MQTT
+        path (``_listen``) and the panel's REST path (``set_speed``) both only ever set
+        ``self.setpoints`` now; this is the single place ``self.speeds`` changes.
+
+        The same arithmetic handles a negative target identically to a positive one, so a
+        setpoint that reverses a belt's direction ramps straight through zero with no
+        special-casing anywhere in this method.
+        """
+        while True:
+            await asyncio.sleep(RAMP_TICK_SECONDS)
+            step = self.ramp_rate * RAMP_TICK_SECONDS
+            for position, target in self.setpoints.items():
+                if target is None:
+                    continue  # no setpoint has ever arrived for this belt
+                current = self.speeds[position]
+                if current == target:
+                    continue  # already converged, nothing to do this tick
+                diff = target - current
+                if abs(diff) <= step:
+                    # Snap exactly onto the target -- this is what makes convergence
+                    # float-exact at rest, never an off-by-epsilon overshoot or undershoot.
+                    new_value = target
+                else:
+                    new_value = current + step if diff > 0 else current - step
+                self.speeds[position] = new_value
+                await self._publish(self.speed_topic(position), new_value)
+
+    async def _throughput_loop(self) -> None:
+        """Cycle both light barriers while a belt runs, at a rate that tracks its speed.
+
+        A crude stand-in for a workpiece traveling front-to-back: "the belts are running"
+        means EITHER belt has nonzero speed -- the unit has one shared simulation, not one
+        per belt, and a single moving belt is enough to be moving material through it.
+        """
+        while True:
+            speed = max(abs(self.speeds["left"]), abs(self.speeds["right"]))
+            if speed == 0:
+                if self.occupied["front"]:
+                    await self.set_occupied("front", False)
+                if self.occupied["back"]:
+                    await self.set_occupied("back", False)
+                await asyncio.sleep(THROUGHPUT_POLL_SECONDS)
+                continue
+            half_cycle = THROUGHPUT_PERIOD_AT_UNIT_SPEED / (2 * speed)
+            await self.set_occupied("front", True)
+            if not await self._hold_while_running(half_cycle):
+                continue
+            await self.set_occupied("front", False)
+            await self.set_occupied("back", True)
+            if not await self._hold_while_running(half_cycle):
+                continue
+            await self.set_occupied("back", False)
+
+    async def _hold_while_running(self, duration: float) -> bool:
+        """Sleep up to `duration`, in THROUGHPUT_POLL_SECONDS slices, bailing out early.
+
+        Returns False the moment both belts have stopped -- so a stopped belt is noticed
+        within one poll interval instead of only at the end of a half-cycle computed from a
+        now-stale speed. Returns True if the full duration elapsed with a belt still running.
+        """
+        elapsed = 0.0
+        while elapsed < duration:
+            if self.speeds["left"] == 0 and self.speeds["right"] == 0:
+                return False
+            step = min(THROUGHPUT_POLL_SECONDS, duration - elapsed)
+            await asyncio.sleep(step)
+            elapsed += step
+        return True
 
     async def _publish_loop(self) -> None:
         while True:

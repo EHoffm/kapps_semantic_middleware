@@ -71,6 +71,19 @@ async def set_barrier(position: str, request: Request) -> JSONResponse:
     return JSONResponse(get_plc().snapshot())
 
 
+@app.post("/api/throughput")
+async def set_throughput(request: Request) -> JSONResponse:
+    """Start or stop the throughput simulation."""
+    try:
+        body = await request.json()
+        enabled = bool(body["enabled"])
+    except (KeyError, ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=f"Invalid value: {e}")
+
+    await get_plc().set_throughput_simulation(enabled)
+    return JSONResponse(get_plc().snapshot())
+
+
 #: Marker in panel.html that the unit graphic is substituted into.
 GRAPHIC_SLOT = "<!--UNIT-GRAPHIC-->"
 

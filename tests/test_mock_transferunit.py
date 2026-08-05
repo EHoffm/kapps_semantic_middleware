@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from demo.transferunits.middleware import ensure_transport  # noqa: E402
-from demo.transferunits.plc.transfer_unit import TransferUnit  # noqa: E402
+from demo.transferunits.plc.transfer_unit import DEFAULT_RAMP_RATE, TransferUnit  # noqa: E402
 
 
 async def _collect(broker: str, topics, count, timeout=5.0):
@@ -69,6 +69,14 @@ class TestTopicScheme:
         assert all(t.startswith("TransferUnit7/") for t in unit.published_topics)
         assert all(t.startswith("TransferUnit7/") for t in unit.subscribed_topics)
 
+    def test_ramp_rate_is_configurable(self):
+        """#83: ramp_rate is a constructor argument with a sensible default."""
+        unit_default = TransferUnit()
+        assert unit_default.ramp_rate == DEFAULT_RAMP_RATE
+
+        unit_custom = TransferUnit(ramp_rate=2.5)
+        assert unit_custom.ramp_rate == 2.5
+
 
 @pytest.mark.asyncio
 class TestLiveBehaviour:
@@ -93,6 +101,9 @@ class TestLiveBehaviour:
                 )
                 await unit.wait_for_setpoint()
 
+            # The setpoint ramps the belt rather than snapping it (#83) -- wait for the
+            # ramp to converge before asserting the exact value.
+            await unit.wait_for_convergence("left", timeout=5.0)
             assert unit.speeds["left"] == 1.75
 
             # And the new value reaches the read topic, which is what a middleware sees.
@@ -112,6 +123,7 @@ class TestLiveBehaviour:
                 )
                 await unit.wait_for_setpoint()
 
+            await unit.wait_for_convergence("right", timeout=5.0)
             assert unit.speeds["right"] == 2.5
             assert unit.speeds["left"] == 0.0
 
@@ -144,7 +156,142 @@ class TestLiveBehaviour:
                 )
                 await unit.wait_for_setpoint()
 
+            await unit.wait_for_convergence("left", timeout=5.0)
             assert unit.speeds["left"] == 3.0
+
+
+@pytest.mark.asyncio
+class TestRamping:
+    """#83: setpoints ramp over time, not instantly; reverse works through zero."""
+
+    async def test_a_setpoint_does_not_move_the_speed_instantly(self, mqtt_broker):
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1, ramp_rate=0.5
+        ) as unit:
+            async with aiomqtt.Client(host, port=int(port)) as publisher:
+                await publisher.publish(
+                    "TransferUnit1/ConveyorBelt/left/speed_set", json.dumps(2.0).encode()
+                )
+                await unit.wait_for_setpoint()
+
+            # Still ramping, not yet converged — proof the setpoint moves speed over time.
+            assert unit.speeds["left"] != 2.0
+
+            await unit.wait_for_convergence("left", timeout=10.0)
+            assert unit.speeds["left"] == 2.0
+
+    async def test_a_negative_setpoint_ramps_the_belt_backwards(self, mqtt_broker):
+        """#83: ramp passes through zero into reverse with no special-casing."""
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1
+        ) as unit:
+            async with aiomqtt.Client(host, port=int(port)) as publisher:
+                await publisher.publish(
+                    "TransferUnit1/ConveyorBelt/left/speed_set", json.dumps(-1.5).encode()
+                )
+                await unit.wait_for_setpoint()
+
+            await unit.wait_for_convergence("left", timeout=10.0)
+            assert unit.speeds["left"] == -1.5
+
+    async def test_set_speed_sets_the_target_not_the_actual_value(self, mqtt_broker):
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1
+        ) as unit:
+            await unit.set_speed("left", 3.0)
+
+            # Target moved, actual value has not caught up yet.
+            assert unit.setpoints["left"] == 3.0
+            assert unit.speeds["left"] != 3.0
+
+            await unit.wait_for_convergence("left", timeout=10.0)
+            assert unit.speeds["left"] == 3.0
+
+
+@pytest.mark.asyncio
+class TestThroughputSimulation:
+    """#83: throughput simulation drives plc.set_occupied only (read-only northbound)."""
+
+    async def test_no_cycling_while_stopped(self, mqtt_broker):
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1
+        ) as unit:
+            # Both belts at default 0.0 — no cycling should start.
+            await unit.set_throughput_simulation(True)
+            await asyncio.sleep(0.3)  # Three THROUGHPUT_POLL_SECONDS.
+            assert unit.occupied == {"front": False, "back": False}
+
+    async def test_cycles_while_running(self, mqtt_broker):
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1
+        ) as unit:
+            # Set belt running directly — legitimate test setup, not a production write.
+            unit.speeds["left"] = 5.0
+            await unit.set_throughput_simulation(True)
+
+            # Poll until front barrier observed occupied at least once.
+            async def wait_for_front_occupied():
+                while True:
+                    if unit.occupied["front"] is True:
+                        return
+                    await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(wait_for_front_occupied(), timeout=3.0)
+
+    async def test_stops_when_belts_stop(self, mqtt_broker):
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1
+        ) as unit:
+            unit.speeds["left"] = 5.0
+            await unit.set_throughput_simulation(True)
+
+            # Wait for front occupied once (as in test_cycles_while_running).
+            async def wait_for_front_occupied():
+                while True:
+                    if unit.occupied["front"] is True:
+                        return
+                    await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(wait_for_front_occupied(), timeout=3.0)
+
+            # Stop the belt — cycling should halt and clear.
+            unit.speeds["left"] = 0.0
+
+            # Poll until both barriers clear (at most one poll inside in-flight half-cycle).
+            async def wait_for_all_clear():
+                while True:
+                    if unit.occupied == {"front": False, "back": False}:
+                        return
+                    await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(wait_for_all_clear(), timeout=2.0)
+
+    async def test_disabling_clears_any_open_barrier(self, mqtt_broker):
+        host, port = mqtt_broker.split(":")
+        async with TransferUnit(
+            broker=host, port=int(port), publish_interval=0.1
+        ) as unit:
+            unit.speeds["left"] = 5.0
+            await unit.set_throughput_simulation(True)
+
+            # Wait for front occupied once.
+            async def wait_for_front_occupied():
+                while True:
+                    if unit.occupied["front"] is True:
+                        return
+                    await asyncio.sleep(0.02)
+
+            await asyncio.wait_for(wait_for_front_occupied(), timeout=3.0)
+
+            # Disabling clears synchronously.
+            await unit.set_throughput_simulation(False)
+            assert unit.occupied == {"front": False, "back": False}
 
 
 class TestSurvivesAStartupRace:

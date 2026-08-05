@@ -238,7 +238,7 @@ async def step_6_drive_the_device(unit: SemanticMiddleware, plc: TransferUnit) -
         print(f"  publishing {json.loads(payload)} to {write.connector.topic}")
         await write.connector.consume(payload)
         await plc.wait_for_setpoint(timeout=10.0)
-        print(f"  belt speed after:  {plc.speeds['left']}")
+        print(f"  belt speed just after the setpoint landed: {plc.speeds['left']} (ramping, #83)")
 
         async def until_setpoint_reported():
             while True:
@@ -251,6 +251,10 @@ async def step_6_drive_the_device(unit: SemanticMiddleware, plc: TransferUnit) -
         await write.connector.disconnect()
         await read.connector.disconnect()
 
+    # The setpoint moves the belt gradually now, not at once (#83) -- the loop above already
+    # waited for the read topic to report exactly SETPOINT, which only happens once the ramp has
+    # converged, but wait_for_convergence is the explicit, direct assertion of that same fact.
+    await plc.wait_for_convergence("left", timeout=10.0)
     assert plc.speeds["left"] == SETPOINT
 
 
