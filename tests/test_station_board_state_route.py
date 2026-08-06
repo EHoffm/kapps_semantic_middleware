@@ -1,7 +1,7 @@
 """station_board.py's poll and view routes: the acceptance #82 states in terms of the
 page, held at the seam a test can actually reach (#82).
 
-Four rules live here, none of which the controller-level tests can hold on their own:
+Five rules live here, none of which the controller-level tests can hold on their own:
 
 1. **The backend never collapses.** A shut card is a browser-side display state; every
    connector stays live and every value stays current behind it. This is emphatically
@@ -18,6 +18,9 @@ Four rules live here, none of which the controller-level tests can hold on their
 4. **A bad heuristic is reported in place**, never as a 500. The controller-level half is
    covered in ``test_controller_rebuild_view.py``; this is the route-level half, where a
    500 would take the page down rather than show a message.
+5. **The two deaths look different.** A cleanly stopped unit deregisters and its card
+   leaves; a ``kill -9``'d one keeps its address, so it stays selected and its card reads
+   ``unreachable`` with its last-known values and an age.
 
 No real peer process here. A ``svc:address`` that nothing listens on is enough to make a
 PUT fail for a genuine reason (connection refused) -- the "unit down" case ``rejected``
@@ -28,6 +31,7 @@ a real peer in ``test_controller_view.py::TestDrivingAView``.
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -429,3 +433,154 @@ class TestAWriteStatusReachesTheBoard:
         assert rows, "the belt speed row vanished from the board after a failed write"
         assert rows[0]["status"] == "rejected"
         assert rows[0]["status_error"], "a rejected row must carry the reason on screen"
+
+
+def _set_heartbeat(graphdb, resource_iri, *, seconds_ago: float) -> None:
+    """Give ``resource_iri``'s Service a ``svc:lastHeartbeat`` that many seconds in the
+    past -- the one thing a ``kill -9``'d unit stops doing.
+
+    Deletes any existing heartbeat first, so a test can bring a unit to life and then
+    kill it without minting a second Service.
+    """
+    service_iri = f"{resource_iri}Service"
+    graphdb.query(
+        f"DELETE WHERE {{ <{service_iri}> <{SVC.lastHeartbeat}> ?o }}",
+        update=True,
+    )
+    heartbeat_at = datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+    graphdb.query(
+        f"""
+        INSERT DATA {{
+          <{service_iri}> <{SVC.lastHeartbeat}>
+              "{heartbeat_at.isoformat()}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+        }}
+        """,
+        update=True,
+    )
+
+
+def _find_unit(body, resource_iri: str):
+    """The payload entry for one unit, or ``None`` if the view is not carrying it."""
+    for unit in body["units"]:
+        if unit["resource_iri"] == resource_iri:
+            return unit
+    return None
+
+
+@requires_graphdb
+@pytest.mark.asyncio
+class TestAKilledUnitStaysAndReadsUnreachable:
+    """#82's second death. A ``kill -9``'d unit never gets to deregister, so its
+    ``svc:address`` stays in the graph and the view's live clause goes on matching it --
+    it is not a leaver, and dropping its card would be a lie about what the graph says.
+    What stops is its heartbeat, and that is what the board reports.
+
+    Driven entirely by writing ``svc:lastHeartbeat`` at chosen ages against the real
+    90 s ``staleness_threshold``: no process is killed here, because ``liveness_of``
+    reads the graph and nothing else, and a subprocess would only make the test slower
+    and flakier without testing anything more.
+    """
+
+    async def test_a_unit_that_never_reported_a_heartbeat_reads_unreachable(
+        self, graphdb, ogm, unit_scope
+    ):
+        """Nothing has ever reported in, so there is no age to show -- distinct from a
+        unit that reported and then stopped, which has one."""
+        client, _ = await _board(
+            graphdb, ogm, unit_scope, name="CS-kill1", live=(1,), query=_query_selecting(1)
+        )
+        unit1 = str(seed._mint_transfer_unit_iri(1))
+
+        unit = _find_unit(client.get("/api/state").json(), unit1)
+
+        assert unit is not None, "the unit must still be selected -- it has an address"
+        assert unit["unreachable"] is True
+        assert unit["age_seconds"] is None, "no heartbeat means no age to display"
+
+    async def test_a_fresh_heartbeat_reads_reachable(self, graphdb, ogm, unit_scope):
+        """The control. Without it, every assertion below would pass just as well against
+        a liveness check that was simply broken and always said "unreachable"."""
+        client, _ = await _board(
+            graphdb, ogm, unit_scope, name="CS-kill2", live=(1,), query=_query_selecting(1)
+        )
+        unit1 = str(seed._mint_transfer_unit_iri(1))
+        _set_heartbeat(graphdb, seed._mint_transfer_unit_iri(1), seconds_ago=0)
+
+        unit = _find_unit(client.get("/api/state").json(), unit1)
+
+        assert unit is not None
+        assert unit["unreachable"] is False, "a unit that just reported in is not dead"
+        assert 0 <= unit["age_seconds"] < 60, f"expected a fresh age, got {unit['age_seconds']}"
+
+    async def test_a_heartbeat_older_than_the_staleness_threshold_reads_unreachable(
+        self, graphdb, ogm, unit_scope
+    ):
+        """The ``kill -9`` itself: nothing refreshed the heartbeat, and the board works
+        that out on its own. Nobody tells it the process died -- there is no one left to.
+
+        600 s is comfortably past the 90 s default rather than a hair over it, so this
+        cannot fail on a slow machine.
+        """
+        client, _ = await _board(
+            graphdb, ogm, unit_scope, name="CS-kill3", live=(1,), query=_query_selecting(1)
+        )
+        unit1 = str(seed._mint_transfer_unit_iri(1))
+        _set_heartbeat(graphdb, seed._mint_transfer_unit_iri(1), seconds_ago=600)
+
+        unit = _find_unit(client.get("/api/state").json(), unit1)
+
+        assert unit is not None, "a killed unit keeps its address, so it stays selected"
+        assert unit["unreachable"] is True
+        assert unit["age_seconds"] >= 600, f"expected the written age, got {unit['age_seconds']}"
+
+    async def test_a_killed_unit_keeps_its_card_and_its_last_known_values(
+        self, graphdb, ogm, unit_scope
+    ):
+        """#82 asks for last-known values *greyed*, not gone -- so the payload has to
+        still carry them. Greying is the page's job; the backend's job is not to drop the
+        last thing the unit managed to say."""
+        client, _ = await _board(
+            graphdb, ogm, unit_scope, name="CS-kill4", live=(1,), query=_query_selecting(1)
+        )
+        unit1 = str(seed._mint_transfer_unit_iri(1))
+        _set_heartbeat(graphdb, seed._mint_transfer_unit_iri(1), seconds_ago=600)
+
+        body = client.get("/api/state").json()
+        unit = _find_unit(body, unit1)
+
+        assert unit is not None, f"the killed unit's card left the board: {_unit_iris(body)}"
+        assert unit["parameters"], "the killed unit lost its rows instead of greying them"
+        for row in unit["parameters"]:
+            assert "value" in row
+
+    async def test_the_two_deaths_look_different(self, graphdb, ogm, unit_scope):
+        """The heart of #82's liveness section, and the reason the two are not unified: a
+        unit that deregistered (ADR 0029's clean stop) said goodbye and its card leaves; a
+        unit that was killed never got the chance, so its card stays and says so.
+
+        Both deaths happen between the same two polls, so this cannot pass by one of them
+        simply taking longer to show up.
+        """
+        client, _ = await _board(
+            graphdb, ogm, unit_scope, name="CS-kill5", live=(1, 2), query=_query_selecting(1, 2)
+        )
+        unit1 = str(seed._mint_transfer_unit_iri(1))
+        unit2 = str(seed._mint_transfer_unit_iri(2))
+        _set_heartbeat(graphdb, seed._mint_transfer_unit_iri(1), seconds_ago=0)
+        _set_heartbeat(graphdb, seed._mint_transfer_unit_iri(2), seconds_ago=0)
+
+        before = client.get("/api/state").json()
+        assert _unit_iris(before) == {unit1, unit2}
+        assert [u["unreachable"] for u in before["units"]] == [False, False], (
+            "both units must start alive, or the comparison below proves nothing"
+        )
+
+        _set_heartbeat(graphdb, seed._mint_transfer_unit_iri(1), seconds_ago=600)  # kill -9
+        _unpublish_service(graphdb, seed._mint_transfer_unit_iri(2))  # clean stop
+
+        after = client.get("/api/state").json()
+
+        assert _unit_iris(after) == {unit1}, f"expected only the killed unit, got {_unit_iris(after)}"
+        assert _find_unit(after, unit1)["unreachable"] is True, (
+            "the killed unit stayed but did not report itself unreachable"
+        )
