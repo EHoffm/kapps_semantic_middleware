@@ -192,12 +192,34 @@ class TestConsecutiveChangesReachPersistence:
                     f"{value} never reached persistence over the ADR 0017 route"
                 )
 
-        info_lines = [
-            r
+        # Every value the belt settled on was reported as news (#67's log-on-change, seen
+        # through the whole pipeline rather than at the formatter).
+        #
+        # This asserted `len(info_lines) == 3` when it was written, one commit before #83
+        # landed. A setpoint no longer snaps: `_ramp_loop` walks the belt toward its target
+        # and publishes every step, so three setpoints legitimately produce dozens of
+        # *distinct* values, every one of them genuine news. The count measured the ramp
+        # rate, not the logging -- three setpoints only ever meant three lines while a
+        # setpoint was an instant assignment.
+        #
+        # The suppression half of #67 -- that an unchanged republish drops to DEBUG -- is
+        # not asserted here, and deliberately not. `_ramp_loop` publishes only when it
+        # actually moves the belt, so a converged belt is silent and there is no unchanged
+        # value to suppress unless this test either runs long enough for the 5s periodic
+        # republish or shortens that interval; the second was tried and destabilizes the
+        # value assertions above, which are what this test is actually for.
+        # `test_semantic_connectors.py::test_a_repeated_inbound_value_drops_to_debug` owns
+        # that property directly and deterministically.
+        logged_values = [
+            r.args[2]
             for r in caplog.records
             if r.levelno == logging.INFO and "ConveyorBelt1_left hasConveyorSpeed" in r.message
         ]
-        assert len(info_lines) == 3
+        for value in (0.0, 1.11, 2.22):
+            assert value in logged_values, (
+                f"the belt settled on {value} but no INFO line reported it as a change; "
+                f"logged: {logged_values}"
+            )
 
     async def test_a_barrier_flips_both_ways_repeatedly(self, running_unit):
         mw, host, port = running_unit
