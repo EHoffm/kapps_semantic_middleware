@@ -35,12 +35,13 @@ itself as a ControlStationService so it appears in its own discovery list.
 from __future__ import annotations
 
 import asyncio
+import enum
 import functools
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import anyio
 from aas_middleware.middleware.registries import ConnectionInfo
@@ -138,7 +139,7 @@ class CommandedValue:
     is the *only* place "what did we ask for" is knowable at all -- not a convenience
     cache of something visible elsewhere. Both write paths must fill it: a human via
     ``station_board.py``'s set route, and the algorithm via ``algorithm.run_algorithm_once``,
-    each calling ``Controller.record_commanded`` immediately before ``push()``.
+    each calling ``controller.writes.record_commanded`` immediately before ``push()``.
     """
 
     value: Any
@@ -151,19 +152,34 @@ class CommandedValue:
     """"operator" or "algorithm" -- distinguishes who last commanded this parameter."""
 
 
-SETTLED = "settled"
-"""The actual value came back matching what was commanded."""
+class WriteStatus(str, enum.Enum):
+    """What became of the last write to one parameter (#82).
 
-CONVERGING = "converging"
-"""Accepted, still moving toward the command -- the normal state during #83's ramp."""
+    A plain ``str`` subclass for the same reason ``AlgorithmMode`` is one: a status
+    round-trips through JSON with no translation layer between the tracker, the page's
+    badge and a test's assertion.
 
-DIVERGED = "diverged"
-"""Accepted, but the actual value has *stopped converging*. Not "unequal": #83's ramp
-makes commanded and actual unequal during every set by design (#81, amending #31), so an
-equality test would fire on every write."""
+    #82 words the progression ``sending`` -> ``settled`` | ``rejected`` | ``diverged``.
+    ``sending`` is not a member here because it is not a *judgement* -- it is simply the
+    moment between the click and the first observation, and the page shows it locally.
+    :attr:`CONVERGING` is what that moment becomes as soon as there is something to
+    observe, and under #83's ramp it is where a healthy write spends most of its life.
+    """
 
-REJECTED = "rejected"
-"""The PUT failed outright -- unit down, 4xx, bad payload. Carries a reason."""
+    SETTLED = "settled"
+    """The actual value came back matching what was commanded."""
+
+    CONVERGING = "converging"
+    """Accepted, still moving toward the command -- the normal state during #83's ramp."""
+
+    DIVERGED = "diverged"
+    """Accepted, but the actual value has *stopped converging*. Not "unequal": #83's ramp
+    makes commanded and actual unequal during every set by design (#81, amending #31), so
+    an equality test would fire on every write."""
+
+    REJECTED = "rejected"
+    """The PUT failed outright -- unit down, 4xx, bad payload. Carries a reason."""
+
 
 _SETTLED_RELATIVE_TOLERANCE = 1e-2
 """A value that has made a round trip through MQTT, JSON and a float is never bit-exact,
@@ -171,10 +187,17 @@ so an exact comparison would leave every write reading ``converging`` forever.""
 
 _SETTLED_ABSOLUTE_TOLERANCE = 1e-9
 
-_STILL_POLLS_BEFORE_DIVERGED = 3
-"""How many consecutive observations may show no movement before a write is called
-diverged. One quiet poll is a slow lap -- #82's whole "the tick must exceed one lap"
-constraint says a lap can straddle a poll -- so divergence needs sustained stillness."""
+DEFAULT_STILL_SECONDS = 6.0
+"""How long a value may sit unmoved, short of its command, before the write is called
+diverged.
+
+Measured in *seconds*, not in polls: a poll is a browser asking, so counting polls would
+make two open tabs declare divergence in half the time and a closed page never declare it
+at all. One quiet moment is a slow lap -- #82's "the tick must exceed one lap" constraint
+says a lap can straddle a poll -- so this must exceed a lap while staying under the
+default tick (8.0 s), or the algorithm would overwrite a stuck value before the board
+ever reported it.
+"""
 
 
 def _is_close(a: Any, b: Any) -> bool:
@@ -189,30 +212,42 @@ def _is_close(a: Any, b: Any) -> bool:
 
 @dataclass
 class _Observation:
-    """What the last poll saw for one parameter, and how long it has sat there."""
+    """The last value seen for one parameter, and when it last actually moved."""
 
-    last_value: Any = None
-    still_polls: int = 0
-    seen: bool = False
+    last_value: Any
+    unchanged_since: float
 
 
 class WriteTracker:
     """Per parameter: what was last commanded, and whether the device is converging on it
-    (#82's ``sending`` -> ``settled`` | ``rejected`` | ``diverged``).
+    (#82's write states -- see :class:`WriteStatus`).
 
     This is its own object, not a handful of dicts on :class:`Controller`, because the
     judgement it makes is the one #82 requires to be provable *in a test*: the
     classification began in ``station_board.html``'s script, where pytest cannot reach
     it. Nothing here touches the graph, a connector or the network -- it is a state
-    machine over observations, and the board's poll is what advances it.
+    machine over observations, which is what lets its tests run with no fixtures at all.
 
     The served datamodel carries only the observed value (ADR 0024's locator pattern
     means the graph holds no separate setpoint field), so this is the *only* place "what
     did we ask for" is knowable at all. Both write paths must record: a human via
     ``station_board.py``'s set route, and the algorithm via ``run_algorithm_once``.
+
+    Args:
+        still_seconds: How long a value may sit unmoved, short of its command, before
+            the write is called diverged. See :data:`DEFAULT_STILL_SECONDS`.
+        clock: Monotonic seconds source. Injectable so a test can age a write without
+            sleeping through it.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        still_seconds: float = DEFAULT_STILL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._still_seconds = still_seconds
+        self._clock = clock
         self._commanded: Dict[str, CommandedValue] = {}
         self._rejected: Dict[str, str] = {}
         self._observations: Dict[str, _Observation] = {}
@@ -221,6 +256,20 @@ class WriteTracker:
     def _key(component_iri: Union[str, IRI], field_name: str) -> str:
         return f"{component_iri}#{field_name}"
 
+    @staticmethod
+    def _scalar(value: Any) -> Any:
+        """The comparable form of a written value.
+
+        ``inf:hasValue`` is a one-element list on the datamodel, so both write paths hand
+        over ``[4.2]`` while every observation reads back the scalar ``4.2``. Normalising
+        here rather than at each caller is what keeps the two paths honest: the operator's
+        route and the algorithm's tick disagreed on this exact point, and the algorithm's
+        writes could never reach ``settled`` as a result.
+        """
+        if isinstance(value, (list, tuple)) and len(value) == 1:
+            return value[0]
+        return value
+
     def record_commanded(
         self, component_iri: Union[str, IRI], field_name: str, value: Any, *, origin: str
     ) -> None:
@@ -228,7 +277,9 @@ class WriteTracker:
         and restarts the convergence watch -- a retry after the unit came back must not
         read as rejected forever, nor inherit the previous write's stillness."""
         key = self._key(component_iri, field_name)
-        self._commanded[key] = CommandedValue(value=value, at=time.monotonic(), origin=origin)
+        self._commanded[key] = CommandedValue(
+            value=self._scalar(value), at=self._clock(), origin=origin
+        )
         self._rejected.pop(key, None)
         self._observations.pop(key, None)
 
@@ -254,35 +305,35 @@ class WriteTracker:
 
     def observe(
         self, component_iri: Union[str, IRI], field_name: str, actual: Any
-    ) -> Optional[str]:
-        """Record what this poll observed and return the write's status, or ``None`` if
-        this controller has never commanded this parameter (a value nobody here drove
+    ) -> Optional[WriteStatus]:
+        """Record what was just observed for one parameter and return the write's status,
+        or ``None`` if this controller has never commanded it (a value nobody here drove
         gets no badge -- there is nothing to compare it against).
 
-        Called once per parameter per poll; the poll is what advances the state machine.
+        Called once per parameter per poll. Only *movement* is recorded, and divergence is
+        judged against the clock, so calling this more often -- a second browser tab, a
+        manual refresh -- cannot make a write diverge any sooner.
         """
         key = self._key(component_iri, field_name)
 
         if key in self._rejected:
-            return REJECTED
+            return WriteStatus.REJECTED
 
         commanded = self._commanded.get(key)
         if commanded is None:
             return None
 
-        observation = self._observations.setdefault(key, _Observation())
-        if observation.seen and _is_close(actual, observation.last_value):
-            observation.still_polls += 1
-        else:
-            observation.still_polls = 0
-        observation.last_value = actual
-        observation.seen = True
+        now = self._clock()
+        observation = self._observations.get(key)
+        if observation is None or not _is_close(actual, observation.last_value):
+            observation = _Observation(last_value=actual, unchanged_since=now)
+            self._observations[key] = observation
 
         if _is_close(actual, commanded.value):
-            return SETTLED
-        if observation.still_polls >= _STILL_POLLS_BEFORE_DIVERGED:
-            return DIVERGED
-        return CONVERGING
+            return WriteStatus.SETTLED
+        if now - observation.unchanged_since >= self._still_seconds:
+            return WriteStatus.DIVERGED
+        return WriteStatus.CONVERGING
 
     def drop(self, parameters: Sequence[Tuple[Union[str, IRI], str]]) -> None:
         """Forget every named parameter -- a departed view hit's state must not outlive
@@ -756,42 +807,6 @@ class Controller(SemanticMiddleware):
                 [(binding.resource_iri, binding.field_id) for binding in wiring.bindings]
             )
         logger.info("Dropped departed view hit %s.", resource_iri)
-
-    def record_commanded(
-        self, component_iri: Union[str, IRI], field_name: str, value: Any, *, origin: str
-    ) -> None:
-        """Record what was just written to one parameter, and who wrote it (#82).
-
-        The served datamodel carries only the observed value (ADR 0024's locator
-        pattern), so nothing anywhere else can answer "what did we last ask for" -- both
-        write paths must call this immediately before ``push()``: a human via
-        ``station_board.py``'s set route (``origin="operator"``), and the algorithm via
-        ``run_algorithm_once`` (``origin="algorithm"``).
-
-        Args:
-            component_iri: The IRI of the belt/barrier/etc. that owns the parameter --
-                the same id a fetched datamodel tree's nested node carries, not the root
-                unit's own IRI.
-            field_name: The parameter's mangled field name (``IRI(...).lined``).
-            value: The value that was written.
-            origin: ``"operator"`` or ``"algorithm"``.
-        """
-        self.writes.record_commanded(component_iri, field_name, value, origin=origin)
-
-    def record_rejected(
-        self, component_iri: Union[str, IRI], field_name: str, error: str
-    ) -> None:
-        """Record that a write to one parameter failed outright, with the reason to show
-        (#82's ``rejected``). Called by ``station_board.py``'s set route when ``push()``
-        raises -- server-side, so the reason survives a page reload."""
-        self.writes.record_rejected(component_iri, field_name, error)
-
-    def commanded_for(
-        self, component_iri: Union[str, IRI], field_name: str
-    ) -> Optional[CommandedValue]:
-        """The last :class:`CommandedValue` recorded for one parameter, or ``None`` if
-        nothing has ever been written to it through this controller."""
-        return self.writes.commanded_for(component_iri, field_name)
 
     def wiring_for(self, resource_iri: Union[str, IRI]) -> Optional[WiringPlan]:
         """The :class:`WiringPlan` recognized for one loaded view hit, or ``None`` if it

@@ -91,7 +91,12 @@ class AlgorithmState:
     """The timed mode's interval. Must exceed one lap of PUT -> unit middleware -> MQTT
     -> PLC -> MQTT back -> connector read (#82's own acceptance criterion), or the
     algorithm writes again before it can observe its last write and the board
-    oscillates. Measured, not guessed -- see ``control_station.py``'s ``--tick`` default."""
+    oscillates.
+
+    The default is still *reasoned* rather than measured -- see ``control_station.py``'s
+    ``--tick``. #94 (a belt's setpoint overwritten mid-ramp by a sibling's fan-out echo)
+    stops a belt short of its command, so no honest lap time can be taken until it is
+    fixed; #82's "measure one lap" criterion stays open on that."""
 
     mode: AlgorithmMode = AlgorithmMode.TIMED
     """Which of the two firing rules is currently active. Switchable at runtime."""
@@ -262,12 +267,25 @@ async def run_algorithm_once(controller: Controller) -> Optional[IRI]:
     # datamodel carries only the observed value (ADR 0024's locator pattern), so this is
     # the only place the station board could ever learn "commanded" from, for a write
     # the algorithm made and no human's browser initiated.
-    controller.record_commanded(
+    controller.writes.record_commanded(
         target_belts[0].id, seed.TU_HAS_CONVEYOR_SPEED.lined, speed_value, origin="algorithm"
     )
 
     # Drive the assignment out -- no HTTP call here, push() does the plumbing.
-    await controller.push(target_iri)
+    #
+    # A failed write is recorded and swallowed, not raised: the algorithm's tick runs in a
+    # background loop that catches only CancelledError, so letting a dead unit's PUT
+    # propagate would silently end the loop while the board went on counting down to a
+    # tick that will never come. Recording it puts the same `rejected` badge on the row a
+    # human's failed write gets (#82), which is the visible half of the same event.
+    try:
+        await controller.push(target_iri)
+    except Exception as exc:
+        controller.writes.record_rejected(
+            target_belts[0].id, seed.TU_HAS_CONVEYOR_SPEED.lined, str(exc)
+        )
+        logger.warning("Algorithm write to %s was rejected: %s", target_iri, exc)
+        return target_iri
 
     logger.info("Echoed speed %s from %s onto %s", speed_value, source_iri, target_iri)
     return target_iri

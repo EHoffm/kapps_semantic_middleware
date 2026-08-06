@@ -88,7 +88,7 @@ TEACH: Dict[str, Dict[str, str]] = {
     "param-row": {
         "title": "A parameter row",
         "what": "A plain number box and a set button -- no slider, since the ontology "
-        "gives tu:hasConveyorSpeed no bounds. A write goes sending -> settled | "
+        "gives tu:hasConveyorSpeed no bounds. A write goes converging -> settled | "
         "rejected | diverged. Commanded sits beside actual; diverged means it stopped "
         "converging, not merely unequal.",
         "file": "src/kapps_semantic_middleware/connectors/rest_binding.py",
@@ -356,7 +356,9 @@ def mount_onto(
                         facets[_local_fragment(key)] = _first_value(val)
                 
                 # Commanded value.
-                commanded_val = controller.commanded_for(binding.resource_iri, binding.field_id)
+                commanded_val = controller.writes.commanded_for(
+                    binding.resource_iri, binding.field_id
+                )
                 if commanded_val is not None:
                     commanded_data = {
                         "value": commanded_val.value,
@@ -390,7 +392,7 @@ def mount_onto(
                     "value": value,
                     "facets": facets,
                     "commanded": commanded_data,
-                    "status": status,
+                    "status": status.value if status is not None else None,
                     "status_error": controller.writes.error_for(
                         binding.resource_iri, binding.field_id
                     ),
@@ -508,7 +510,7 @@ def mount_onto(
         5. Get param_list; 422 if empty.
         6. Coerce value into one-element list shape.
         7. setattr(param_list[0], INF.hasValue.lined, new_value).
-        8. controller.record_commanded(...) BEFORE the push.
+        8. controller.writes.record_commanded(...) BEFORE the push.
         9. await controller.push(...); on exception, return {"ok": False, "error": ...} with status 200.
         10. On success, return {"ok": True}.
         """
@@ -575,14 +577,13 @@ def mount_onto(
         # 7. Set the value.
         setattr(param_list[0], INF.hasValue.lined, new_value)
         
-        # 8. Record commanded BEFORE push -- and record the *scalar*, the same shape
-        # /api/state reports the observed value in. The datamodel holds inf:hasValue as a
-        # one-element list; recording the list here would leave every write comparing
-        # [4.2] against 4.2, so nothing could ever reach `settled`.
-        controller.record_commanded(
+        # 8. Record commanded BEFORE push. The tracker normalizes the one-element
+        # inf:hasValue list to the scalar /api/state reports, so both write paths can
+        # hand over whatever shape they already hold.
+        controller.writes.record_commanded(
             matching_binding.resource_iri,
             matching_binding.field_id,
-            _first_value(new_value),
+            new_value,
             origin="operator",
         )
         
@@ -602,7 +603,7 @@ def mount_onto(
             # Recorded on the controller, not just returned: `rejected` has to survive a
             # page reload and be visible to the next poll, and #82 requires it to be
             # distinguishable from `diverged` in a test as well as on screen.
-            controller.record_rejected(
+            controller.writes.record_rejected(
                 matching_binding.resource_iri, matching_binding.field_id, str(exc)
             )
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)

@@ -3,7 +3,7 @@ event-driven quiescence (#82).
 
 No GraphDB and no live peer process here -- ``run_algorithm_loop``/``run_algorithm_once`` only
 ever touch ``controller.units`` (plain attribute access), ``controller.push()`` and
-``controller.record_commanded()``, so a duck-typed fake stands in for both the ``Controller``
+``controller.writes``, so a duck-typed fake stands in for both the ``Controller``
 and its loaded units. The real wiring/fetch/REST path is covered separately, against a live
 GraphDB and a real peer process, in ``tests/test_controller_view.py``.
 """
@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from demo.transferunits import algorithm as algorithm_module  # noqa: E402
 from demo.transferunits import seed  # noqa: E402
 from demo.transferunits.algorithm import AlgorithmMode, AlgorithmState  # noqa: E402
+from demo.transferunits.controller import WriteTracker  # noqa: E402
 from kapps_semantic_middleware.vocabulary import INF  # noqa: E402
 
 
@@ -68,10 +69,9 @@ class FakeController:
         self.units = units
         self.rebuild_lock = asyncio.Lock()
         self.pushed: list[str] = []
-        self.commanded: list[tuple] = []
-
-    def record_commanded(self, component_iri, field_name, value, *, origin):
-        self.commanded.append((str(component_iri), field_name, value, origin))
+        # The real thing, not a stub: it holds no graph, connector or network, so a fake
+        # of it would only be a second implementation of the rules to keep in step.
+        self.writes = WriteTracker()
 
     async def push(self, resource_iri):
         self.pushed.append(str(resource_iri))
