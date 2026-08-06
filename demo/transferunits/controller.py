@@ -151,6 +151,155 @@ class CommandedValue:
     """"operator" or "algorithm" -- distinguishes who last commanded this parameter."""
 
 
+SETTLED = "settled"
+"""The actual value came back matching what was commanded."""
+
+CONVERGING = "converging"
+"""Accepted, still moving toward the command -- the normal state during #83's ramp."""
+
+DIVERGED = "diverged"
+"""Accepted, but the actual value has *stopped converging*. Not "unequal": #83's ramp
+makes commanded and actual unequal during every set by design (#81, amending #31), so an
+equality test would fire on every write."""
+
+REJECTED = "rejected"
+"""The PUT failed outright -- unit down, 4xx, bad payload. Carries a reason."""
+
+_SETTLED_RELATIVE_TOLERANCE = 1e-2
+"""A value that has made a round trip through MQTT, JSON and a float is never bit-exact,
+so an exact comparison would leave every write reading ``converging`` forever."""
+
+_SETTLED_ABSOLUTE_TOLERANCE = 1e-9
+
+_STILL_POLLS_BEFORE_DIVERGED = 3
+"""How many consecutive observations may show no movement before a write is called
+diverged. One quiet poll is a slow lap -- #82's whole "the tick must exceed one lap"
+constraint says a lap can straddle a poll -- so divergence needs sustained stillness."""
+
+
+def _is_close(a: Any, b: Any) -> bool:
+    """Whether two observed values count as the same value."""
+    if isinstance(a, bool) or isinstance(b, bool) or not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        return a == b
+    difference = abs(a - b)
+    if difference < _SETTLED_ABSOLUTE_TOLERANCE:
+        return True
+    return difference / max(abs(a), abs(b), 1.0) < _SETTLED_RELATIVE_TOLERANCE
+
+
+@dataclass
+class _Observation:
+    """What the last poll saw for one parameter, and how long it has sat there."""
+
+    last_value: Any = None
+    still_polls: int = 0
+    seen: bool = False
+
+
+class WriteTracker:
+    """Per parameter: what was last commanded, and whether the device is converging on it
+    (#82's ``sending`` -> ``settled`` | ``rejected`` | ``diverged``).
+
+    This is its own object, not a handful of dicts on :class:`Controller`, because the
+    judgement it makes is the one #82 requires to be provable *in a test*: the
+    classification began in ``station_board.html``'s script, where pytest cannot reach
+    it. Nothing here touches the graph, a connector or the network -- it is a state
+    machine over observations, and the board's poll is what advances it.
+
+    The served datamodel carries only the observed value (ADR 0024's locator pattern
+    means the graph holds no separate setpoint field), so this is the *only* place "what
+    did we ask for" is knowable at all. Both write paths must record: a human via
+    ``station_board.py``'s set route, and the algorithm via ``run_algorithm_once``.
+    """
+
+    def __init__(self) -> None:
+        self._commanded: Dict[str, CommandedValue] = {}
+        self._rejected: Dict[str, str] = {}
+        self._observations: Dict[str, _Observation] = {}
+
+    @staticmethod
+    def _key(component_iri: Union[str, IRI], field_name: str) -> str:
+        return f"{component_iri}#{field_name}"
+
+    def record_commanded(
+        self, component_iri: Union[str, IRI], field_name: str, value: Any, *, origin: str
+    ) -> None:
+        """Record what was just written, and who wrote it. Clears any earlier rejection
+        and restarts the convergence watch -- a retry after the unit came back must not
+        read as rejected forever, nor inherit the previous write's stillness."""
+        key = self._key(component_iri, field_name)
+        self._commanded[key] = CommandedValue(value=value, at=time.monotonic(), origin=origin)
+        self._rejected.pop(key, None)
+        self._observations.pop(key, None)
+
+    def record_rejected(
+        self, component_iri: Union[str, IRI], field_name: str, error: str
+    ) -> None:
+        """Record that a write failed outright, with the reason to show. Recorded here
+        rather than in the page so it survives a reload -- and so a test can see it."""
+        self._rejected[self._key(component_iri, field_name)] = error
+
+    def commanded_for(
+        self, component_iri: Union[str, IRI], field_name: str
+    ) -> Optional[CommandedValue]:
+        """The last :class:`CommandedValue` recorded, or ``None`` if this controller has
+        never written to this parameter."""
+        return self._commanded.get(self._key(component_iri, field_name))
+
+    def error_for(
+        self, component_iri: Union[str, IRI], field_name: str
+    ) -> Optional[str]:
+        """The reason the last write was rejected, or ``None``."""
+        return self._rejected.get(self._key(component_iri, field_name))
+
+    def observe(
+        self, component_iri: Union[str, IRI], field_name: str, actual: Any
+    ) -> Optional[str]:
+        """Record what this poll observed and return the write's status, or ``None`` if
+        this controller has never commanded this parameter (a value nobody here drove
+        gets no badge -- there is nothing to compare it against).
+
+        Called once per parameter per poll; the poll is what advances the state machine.
+        """
+        key = self._key(component_iri, field_name)
+
+        if key in self._rejected:
+            return REJECTED
+
+        commanded = self._commanded.get(key)
+        if commanded is None:
+            return None
+
+        observation = self._observations.setdefault(key, _Observation())
+        if observation.seen and _is_close(actual, observation.last_value):
+            observation.still_polls += 1
+        else:
+            observation.still_polls = 0
+        observation.last_value = actual
+        observation.seen = True
+
+        if _is_close(actual, commanded.value):
+            return SETTLED
+        if observation.still_polls >= _STILL_POLLS_BEFORE_DIVERGED:
+            return DIVERGED
+        return CONVERGING
+
+    def drop(self, parameters: Sequence[Tuple[Union[str, IRI], str]]) -> None:
+        """Forget every named parameter -- a departed view hit's state must not outlive
+        it, or a unit that leaves and rejoins shows a stale command.
+
+        Takes the parameters explicitly rather than matching an IRI prefix: the keys are
+        *component* IRIs (``ConveyorBelt1_left``), not the unit's own (``TransferUnit1``),
+        so a prefix match on the unit IRI silently matches nothing at all. The caller
+        reads them off the leaver's own :class:`WiringPlan`.
+        """
+        for component_iri, field_name in parameters:
+            key = self._key(component_iri, field_name)
+            self._commanded.pop(key, None)
+            self._rejected.pop(key, None)
+            self._observations.pop(key, None)
+
+
 class Controller(SemanticMiddleware):
     """A resource-mode middleware that holds its own datamodels (ADR 0033, ticket #80).
 
@@ -272,9 +421,9 @@ class Controller(SemanticMiddleware):
         # resumes", not a separate flag that could drift out of step with it.
         self.rebuild_lock = asyncio.Lock()
 
-        # What was last commanded on one parameter, keyed by "{component_iri}#{field}"
-        # (see record_commanded's docstring for why this exists at all).
-        self._commanded: Dict[str, CommandedValue] = {}
+        # What was last commanded on each parameter and whether the device is converging
+        # on it (see WriteTracker's docstring for why this exists at all).
+        self.writes = WriteTracker()
 
     def view(self, sparql_query: str) -> List[IRI]:
         """Run the caller's SPARQL query -- the view (ADR 0033 step 1) -- and return
@@ -599,9 +748,13 @@ class Controller(SemanticMiddleware):
             self.persistence_registry.connection_types.pop(persist_connector_id, None)
 
         self.units.pop(key, None)
-        self._commanded = {
-            k: v for k, v in self._commanded.items() if not k.startswith(f"{key}#")
-        }
+        if wiring is not None:
+            # Driven off the leaver's own bindings: the tracker's keys are *component*
+            # IRIs (ConveyorBelt1_left), never the unit's own, so a prefix match on
+            # `key` here would silently forget nothing at all.
+            self.writes.drop(
+                [(binding.resource_iri, binding.field_id) for binding in wiring.bindings]
+            )
         logger.info("Dropped departed view hit %s.", resource_iri)
 
     def record_commanded(
@@ -623,16 +776,22 @@ class Controller(SemanticMiddleware):
             value: The value that was written.
             origin: ``"operator"`` or ``"algorithm"``.
         """
-        self._commanded[f"{component_iri}#{field_name}"] = CommandedValue(
-            value=value, at=time.monotonic(), origin=origin
-        )
+        self.writes.record_commanded(component_iri, field_name, value, origin=origin)
+
+    def record_rejected(
+        self, component_iri: Union[str, IRI], field_name: str, error: str
+    ) -> None:
+        """Record that a write to one parameter failed outright, with the reason to show
+        (#82's ``rejected``). Called by ``station_board.py``'s set route when ``push()``
+        raises -- server-side, so the reason survives a page reload."""
+        self.writes.record_rejected(component_iri, field_name, error)
 
     def commanded_for(
         self, component_iri: Union[str, IRI], field_name: str
     ) -> Optional[CommandedValue]:
         """The last :class:`CommandedValue` recorded for one parameter, or ``None`` if
         nothing has ever been written to it through this controller."""
-        return self._commanded.get(f"{component_iri}#{field_name}")
+        return self.writes.commanded_for(component_iri, field_name)
 
     def wiring_for(self, resource_iri: Union[str, IRI]) -> Optional[WiringPlan]:
         """The :class:`WiringPlan` recognized for one loaded view hit, or ``None`` if it

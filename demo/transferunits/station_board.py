@@ -374,6 +374,13 @@ def mount_onto(
                 holder_fragment = _local_fragment(str(binding.resource_iri))
                 assignment_expr = f'{holder_fragment}.{binding.field_id}[0]["inf:hasValue"][0] = {value!r}'
                 
+                # The write's status, judged server-side: this poll *is* the observation
+                # that advances "has it stopped converging?". The page renders this
+                # verdict rather than reaching its own, so the rule that `diverged` means
+                # stopped converging (not merely unequal) is testable -- #82 requires
+                # rejected and diverged to be distinguishable in a test.
+                status = controller.writes.observe(binding.resource_iri, binding.field_id, value)
+
                 parameters_data.append({
                     "holder_iri": str(binding.resource_iri),
                     "field_id": binding.field_id,
@@ -383,6 +390,10 @@ def mount_onto(
                     "value": value,
                     "facets": facets,
                     "commanded": commanded_data,
+                    "status": status,
+                    "status_error": controller.writes.error_for(
+                        binding.resource_iri, binding.field_id
+                    ),
                     "pruned": pruned_list,
                     "assignment_expression": assignment_expr,
                 })
@@ -564,11 +575,14 @@ def mount_onto(
         # 7. Set the value.
         setattr(param_list[0], INF.hasValue.lined, new_value)
         
-        # 8. Record commanded BEFORE push.
+        # 8. Record commanded BEFORE push -- and record the *scalar*, the same shape
+        # /api/state reports the observed value in. The datamodel holds inf:hasValue as a
+        # one-element list; recording the list here would leave every write comparing
+        # [4.2] against 4.2, so nothing could ever reach `settled`.
         controller.record_commanded(
             matching_binding.resource_iri,
             matching_binding.field_id,
-            new_value,
+            _first_value(new_value),
             origin="operator",
         )
         
@@ -585,6 +599,12 @@ def mount_onto(
                 resource_iri_str, holder_iri_str, matching_binding.field_id, param_list[0]
             )
         except Exception as exc:
+            # Recorded on the controller, not just returned: `rejected` has to survive a
+            # page reload and be visible to the next poll, and #82 requires it to be
+            # distinguishable from `diverged` in a test as well as on screen.
+            controller.record_rejected(
+                matching_binding.resource_iri, matching_binding.field_id, str(exc)
+            )
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)
 
         # 10. Success.

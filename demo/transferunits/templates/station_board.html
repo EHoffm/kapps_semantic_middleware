@@ -129,8 +129,11 @@ const TEACH = __TEACH__;
 let frozen = false;
 let dirty = false;
 let lastState = null;
+// Which cards are open is the *only* state this page keeps for itself, and it is
+// display-only: every connector stays live and every value stays current behind a shut
+// card. This is not ADR 0032's collapsed monitor row, which genuinely holds no data
+// because it has not fetched.
 const expandedCards = new Set();
-const rowHistory = {}; // keyed by holder_iri#field_id -> {lastValue, lastChangePoll, consecutiveUnchanged}
 let pollCount = 0;
 
 async function post(url, body) {
@@ -187,13 +190,9 @@ async function togglePause() {
 }
 
 async function setParam(resourceIri, holderIri, fieldId, value) {
-  const res = await post('/api/set', {resource_iri: resourceIri, holder_iri: holderIri, field_id: fieldId, value});
-  if (!res.ok) {
-    const key = holderIri + '#' + fieldId;
-    rowHistory[key] = rowHistory[key] || {};
-    rowHistory[key].rejected = true;
-    rowHistory[key].rejectedError = res.error || 'Rejected';
-  }
+  // A rejection is recorded on the controller by the set route itself, so the next poll
+  // carries it -- nothing to remember here, and it survives a reload.
+  await post('/api/set', {resource_iri: resourceIri, holder_iri: holderIri, field_id: fieldId, value});
   poll();
 }
 
@@ -206,38 +205,25 @@ function formatValue(val, facets) {
   return String(val);
 }
 
-function isClose(a, b) {
-  if (typeof a !== 'number' || typeof b !== 'number') return a === b;
-  const diff = Math.abs(a - b);
-  const max = Math.max(Math.abs(a), Math.abs(b), 1);
-  return diff / max < 1e-2 || diff < 1e-9;
-}
+// The verdict itself is the server's (controller.py's WriteTracker). "Has this write
+// stopped converging?" is a domain judgement, and #82 requires it to be provable in a
+// test -- pytest cannot reach a function that lives in here. This only dresses it.
+function getRowStatus(param) {
+  const status = param.status;
+  if (!status) return {status: null, text: '', showTarget: false};
 
-function getRowStatus(key, commanded, currentValue) {
-  const hist = rowHistory[key] || {};
-  
-  if (hist.rejected) {
-    return {status: 'rejected', text: 'rejected: ' + (hist.rejectedError || ''), showTarget: false};
+  if (status === 'rejected') {
+    return {status: 'rejected', text: 'rejected: ' + (param.status_error || ''), showTarget: false};
   }
-  
-  if (commanded === null || commanded === undefined) {
-    return {status: null, text: '', showTarget: false};
-  }
-  
-  const cmdVal = commanded.value !== undefined ? commanded.value : commanded;
-  
-  if (isClose(currentValue, cmdVal)) {
+  if (status === 'settled') {
     return {status: 'settled', text: 'settled', showTarget: false};
   }
-  
-  if (hist.lastValue !== undefined && !isClose(currentValue, hist.lastValue)) {
-    return {status: 'converging', text: 'converging → ' + formatValue(cmdVal, {}), showTarget: true};
-  }
-  
-  if (hist.consecutiveUnchanged >= 2) {
+
+  const commanded = param.commanded;
+  const cmdVal = commanded ? commanded.value : undefined;
+  if (status === 'diverged') {
     return {status: 'diverged', text: 'diverged (stuck)', showTarget: true};
   }
-  
   return {status: 'converging', text: 'converging → ' + formatValue(cmdVal, {}), showTarget: true};
 }
 
@@ -314,21 +300,7 @@ function render(s) {
                <div class="body">`;
     
     for (const param of (unit.parameters || [])) {
-      const rowKey = param.holder_iri + '#' + param.field_id;
-      const hist = rowHistory[rowKey] = rowHistory[rowKey] || {};
-      
-      const prevValue = hist.lastValue;
-      const currValue = param.value;
-      
-      if (prevValue !== undefined && !isClose(prevValue, currValue)) {
-        hist.lastChangePoll = pollCount;
-        hist.consecutiveUnchanged = 0;
-      } else if (prevValue !== undefined) {
-        hist.consecutiveUnchanged = (hist.consecutiveUnchanged || 0) + 1;
-      }
-      hist.lastValue = currValue;
-      
-      const statusInfo = getRowStatus(rowKey, param.commanded, currValue);
+      const statusInfo = getRowStatus(param);
       const canEdit = param.access_mode === 'readwrite';
       const disabled = !s.algorithm.paused;
       
