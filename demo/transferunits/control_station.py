@@ -1,16 +1,25 @@
 """The control station runner for the factory demo.
 
-It serves the Controller (ticket #43) as a resource-mode middleware. Uvicorn runs on
-the main thread, and owns the process event loop, the same way the middleware runner
-does (ADR 0029). The process reads GRAPHDB_* from its environment.
+It serves the Controller (ticket #43) as a resource-mode middleware, with the station
+board's own routes and template (ticket #82, ADR 0029's split) grafted onto the same
+app. Uvicorn runs on the main thread, and owns the process event loop, the same way the
+middleware runner does (ADR 0029). The process reads GRAPHDB_* from its environment.
 
-The view mechanism (ADR 0033, ticket #80) now runs here: ``main()`` calls
+This file is the *runner* half of the #82 split: it names no FastAPI route of its own
+(a guard test, ``tests/test_station_board_guard.py``, holds that split the way
+``tests/test_launcher_index_guard.py`` holds ``index.py``/``launcher.py``'s). Routes and
+the template live in ``station_board.py``; this file only constructs the Controller, the
+algorithm's shared runtime state, and grafts one onto the other before serving.
+
+The view mechanism (ADR 0033, ticket #80) runs here: ``main()`` calls
 ``controller.view()`` with the algorithm's SPARQL query, then ``controller.wire_view()``
 to recognize and register REST connectors for every hit. This must happen synchronously
 before the server starts serving, because connector registration must precede the app's
 lifespan connecting everything (see ``Controller.wire_view``'s docstring for why). Once
-the app starts, each wired hit's northbound datamodel loads into ``controller.units``,
-and a background loop runs the demonstration algorithm every few seconds.
+the app starts, each wired hit's northbound datamodel loads into ``controller.units``.
+Every later re-run of the view -- the editable heuristic's "run"/"reset", and every
+poll -- goes through ``Controller.rebuild_view`` instead (ticket #82), reached from
+``station_board.py``'s routes, never from here again.
 """
 
 from __future__ import annotations
@@ -23,10 +32,36 @@ import socket
 from graph_db_interface import GraphDB
 from kapps_ogm import OGM
 
-from . import algorithm, seed
+from . import algorithm, seed, station_board
 from .controller import Controller
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TICK_SECONDS = 8.0
+"""The timed mode's default interval (#82's own acceptance criterion: it must exceed one
+lap of PUT -> unit middleware -> MQTT -> PLC -> MQTT back -> connector read).
+
+Reasoned rather than cleanly measured. A live run against a real factory (2 units, this
+ticket's own build) surfaced a pre-existing defect: #83's ramp, once it moves a belt
+through more than one tick, gets its own setpoint overwritten mid-ramp by what reads back
+as a self-echo through the unit's bidirectional MQTT wiring (a value the ramp is still
+moving through gets re-committed as the new target, so the belt freezes short of where it
+was actually sent) -- reproduced with no controller and no algorithm involved at all, by
+driving a PLC's own panel directly, so it is not this ticket's own mechanism at fault.
+That defect makes an honest, clean "time until the peer reports the commanded value"
+measurement impossible right now; it blocks #83's own acceptance criteria as much as it
+blocks this one and belongs filed against #83, not patched here as a side effect of
+picking a tick.
+
+The default above is chosen from what *is* verifiable independently of that bug: the REST
+connector's own poll cadence is the dominant, known term
+(``rest_binding.DEFAULT_POLL_INTERVAL_SECONDS``, 2 s) --the connector cannot report a
+change faster than it polls for one -- plus MQTT's push-based round trip (sub-second,
+unlike REST) plus a margin for the ramp's own settling once #83's echo is fixed
+(``transfer_unit.DEFAULT_RAMP_RATE`` is 1 m/s of belt speed per second, so an ordinary
+multi-m/s move settles in a few seconds). 8 s comfortably exceeds every verified term with
+room for the currently-unverifiable one; revisit once #83's defect is fixed and a clean
+measurement becomes possible."""
 
 
 def bind_free_socket(host: str) -> socket.socket:
@@ -55,7 +90,7 @@ async def run_server(
     await server.serve(sockets=[sock] if sock is not None else None)
 
 
-def _wire_algorithm(controller: Controller) -> None:
+def _wire_algorithm(controller: Controller, state: algorithm.AlgorithmState) -> None:
     """Register the demonstration algorithm's start-up/shutdown callback pair.
 
     Mirrors ``SemanticMiddleware``'s own heartbeat convention
@@ -68,7 +103,9 @@ def _wire_algorithm(controller: Controller) -> None:
     algorithm_task: list[asyncio.Task] = []
 
     async def _start_algorithm() -> None:
-        algorithm_task.append(asyncio.create_task(algorithm.run_algorithm_loop(controller)))
+        algorithm_task.append(
+            asyncio.create_task(algorithm.run_algorithm_loop(controller, state))
+        )
 
     async def _stop_algorithm() -> None:
         if algorithm_task:
@@ -92,6 +129,16 @@ async def main() -> None:
     )
     parser.add_argument("--host", type=str, default="127.0.0.1", help="The host to bind")
     parser.add_argument("--port", type=int, default=0, help="The port to bind (0 = free)")
+    parser.add_argument(
+        "--tick",
+        type=float,
+        default=DEFAULT_TICK_SECONDS,
+        help=(
+            "Timed mode's interval in seconds (default: %(default)s). Must exceed one "
+            "lap of the loop (PUT -> unit middleware -> MQTT -> PLC -> MQTT back -> "
+            "connector read), or the board oscillates (#82)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.port == 0:
@@ -119,10 +166,28 @@ async def main() -> None:
     # ADR 0033 steps 1-4: run the view, then wire a driving REST connector for every
     # hit. Synchronous, and before run_server -- connector registration must precede
     # the app's lifespan connecting everything (Controller.wire_view's own docstring).
-    hits = controller.view(algorithm.build_view_query())
+    default_query = algorithm.build_view_query()
+    hits = controller.view(default_query)
     logger.info("The view found %d live, even-indexed unit(s)", len(hits))
     controller.wire_view(hits, class_scope=algorithm.unit_class_scope())
-    _wire_algorithm(controller)
+
+    state = algorithm.AlgorithmState(tick_seconds=args.tick)
+    _wire_algorithm(controller, state)
+
+    # Graft the board's own routes and template onto this same app (#82, ADR 0029's
+    # split): the board reads controller.units and calls controller.push()/rebuild_view()
+    # in-process, so it must share this app and this event loop rather than run as a
+    # second server the way the PLC's panel does for its own, unrelated, device object.
+    # station_board.py's own root route replaces the one SemanticMiddleware.app already
+    # installed, the same way that property replaced the base framework's -- Starlette
+    # matches in order, so the original is removed rather than shadowed (see
+    # station_board.mount_onto's own docstring).
+    station_board.mount_onto(
+        controller.app,
+        controller=controller,
+        algorithm_state=state,
+        default_query=default_query,
+    )
 
     print(f"The control station runs on http://{args.host}:{port}/", flush=True)
     await run_server(args.host, port, controller, sock)

@@ -34,9 +34,12 @@ itself as a ControlStationService so it appears in its own discovery list.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import anyio
@@ -100,6 +103,52 @@ class ResourceInfo:
     def is_live(self) -> bool:
         """Live iff svc:address is present (MVP liveness, ticket #43)."""
         return self.address is not None
+
+
+@dataclass
+class ViewDiff:
+    """What one ``rebuild_view()`` call changed, or why it changed nothing (#82).
+
+    A malformed heuristic and a zero-hit heuristic are both reported here rather than
+    raised: ``error`` set is the malformed case (the caller shows it in place, never a
+    500); every list empty with ``error`` unset is the legitimate "selected nothing"
+    outcome, not a failure. ``station_board.py``'s ``/api/view/run`` turns this into the
+    page's inline message either way.
+    """
+
+    joiners: List[IRI] = field(default_factory=list)
+    """Hits new to this rebuild -- fetched, pruned, wired and loaded before return."""
+
+    leavers: List[IRI] = field(default_factory=list)
+    """Hits the previous rebuild had that this one does not -- torn down before return."""
+
+    unchanged: List[IRI] = field(default_factory=list)
+    """Hits present both times -- left alone, per #82's "leave the unchanged alone"."""
+
+    error: Optional[str] = None
+    """Set when the heuristic itself failed (malformed SPARQL). None otherwise."""
+
+
+@dataclass
+class CommandedValue:
+    """What was last written to one parameter, and who wrote it (#82).
+
+    The served datamodel carries only the observed value (ADR 0024's locator pattern
+    means the graph, and so the fetched tree, holds no separate setpoint field), so this
+    is the *only* place "what did we ask for" is knowable at all -- not a convenience
+    cache of something visible elsewhere. Both write paths must fill it: a human via
+    ``station_board.py``'s set route, and the algorithm via ``algorithm.run_algorithm_once``,
+    each calling ``Controller.record_commanded`` immediately before ``push()``.
+    """
+
+    value: Any
+    at: float
+    """``time.monotonic()`` at the moment this was recorded, for a UI's "how long has
+    this been converging" display -- monotonic rather than wall-clock because nothing
+    here compares it across a process restart."""
+
+    origin: str
+    """"operator" or "algorithm" -- distinguishes who last commanded this parameter."""
 
 
 class Controller(SemanticMiddleware):
@@ -210,6 +259,23 @@ class Controller(SemanticMiddleware):
         self._view_wirings: List[Tuple[IRI, WiringPlan]] = []
         self._view_load_scheduled = False
 
+        # Filled by the first wire_view() call and reused by every later rebuild_view()
+        # call, so a caller re-running the heuristic never has to repeat the class scope
+        # or the registry it wired with the first time (#82).
+        self._view_class_scope: Any = None
+        self._view_resource_class: Optional[IRI] = None
+        self._view_registry: Optional[SemanticConnectorRegistry] = None
+
+        # Held for the duration of one rebuild_view() call. algorithm.run_algorithm_once
+        # checks `.locked()` and skips its tick rather than racing a rebuild in progress
+        # -- the lock itself *is* #82's "the algorithm auto-pauses across a rebuild and
+        # resumes", not a separate flag that could drift out of step with it.
+        self.rebuild_lock = asyncio.Lock()
+
+        # What was last commanded on one parameter, keyed by "{component_iri}#{field}"
+        # (see record_commanded's docstring for why this exists at all).
+        self._commanded: Dict[str, CommandedValue] = {}
+
     def view(self, sparql_query: str) -> List[IRI]:
         """Run the caller's SPARQL query -- the view (ADR 0033 step 1) -- and return
         every IRI it binds to ``?resource``, in result order, deduplicated.
@@ -277,6 +343,15 @@ class Controller(SemanticMiddleware):
         """
         registry = registry or _VIEW_REGISTRY
 
+        # Recorded so a later rebuild_view() call -- which only ever receives new query
+        # text, per #82's editable-heuristic box -- can re-wire a joiner exactly the way
+        # this call wired its own hits, with no second copy of these arguments anywhere.
+        self._view_class_scope = class_scope
+        self._view_resource_class = (
+            IRI(str(resource_class)) if resource_class is not None else None
+        )
+        self._view_registry = registry
+
         # Register the loader BEFORE any add_synced_connector call below, and only
         # once, ever. Each add_synced_connector call schedules its own on_start_up
         # callback (`initiate_sync`) that looks up the "resource" persistence connector
@@ -324,26 +399,58 @@ class Controller(SemanticMiddleware):
                 resource_iri,
             )
 
-    async def _load_view_datamodels(self) -> None:
-        """Fetch and persist every view hit's northbound datamodel (ADR 0033 step 3).
+    async def _load_one_hit(self, resource_iri: IRI, wiring: WiringPlan) -> bool:
+        """Fetch, prune and persist one view hit's northbound datamodel into ``self.units``
+        (ADR 0033 step 3).
 
-        Runs once, from ``on_start_up``, after ``wire_view`` has already registered
-        each hit's connectors. ``WiringPlan.northbound_fetch_kwargs`` is the same
-        pruned fetch ``SemanticMiddleware._load_resource_datamodel`` runs for its own
-        resource (ticket #78): the materialized instance carries no ``inf:hasMQTT*``
-        property, regardless of what the graph holds for the unit's own middleware.
+        Extracted from what used to be ``_load_view_datamodels``'s only loop body (#82):
+        the startup bulk loader below and ``rebuild_view``'s joiner path both need this
+        exact fetch-and-persist step, and a second copy could drift from the first.
+        ``WiringPlan.northbound_fetch_kwargs`` is the same pruned fetch
+        ``SemanticMiddleware._load_resource_datamodel`` runs for its own resource (ticket
+        #78): the materialized instance carries no ``inf:hasMQTT*`` property, regardless
+        of what the graph holds for the unit's own middleware.
 
         ``persist`` registers the "resource" persistence connector each connector
         ``wire_view`` added was built against (keyed by this hit's own IRI as
         ``model_id``), which is what makes ``push()`` and the background read poll able
         to find it.
 
-        One hit's fetch failing (the resource vanished between ``wire_view()`` and
-        startup, or a transient graph error) is caught and logged rather than left to
-        propagate: an uncaught exception here would abort ``on_start_up`` entirely, and
-        take down every *other* hit's loading with it -- one dead unit must not sink the
-        whole factory's view (the same "fails visibly rather than silently" standard
-        ADR 0033's acceptance criteria hold an already-wired unit to).
+        A fetch failure (the resource vanished between ``wire_view()`` and this call, or
+        a transient graph error) is caught and logged rather than left to propagate: an
+        uncaught exception here would abort the caller's whole loop, and take down every
+        *other* hit's loading with it -- one dead unit must not sink the whole factory's
+        view (the same "fails visibly rather than silently" standard ADR 0033's
+        acceptance criteria hold an already-wired unit to).
+
+        Returns:
+            Whether the hit was actually loaded. ``False`` on a fetch failure or an empty
+            tree; both are logged, neither raises.
+        """
+        fetch = functools.partial(
+            self.ogm.fetch, instance_iri=resource_iri, **wiring.northbound_fetch_kwargs()
+        )
+        try:
+            node = await anyio.to_thread.run_sync(fetch)
+        except Exception:
+            logger.exception("View hit %s could not be fetched; not loaded.", resource_iri)
+            return False
+        instance = getattr(node, "instance", None)
+        if instance is None:
+            logger.warning(
+                "View hit %s has no materializable datamodel; not loaded.", resource_iri
+            )
+            return False
+        await self.persist("resource", instance)
+        self.units[str(resource_iri)] = instance
+        return True
+
+    async def _load_view_datamodels(self) -> None:
+        """Fetch and persist every view hit's northbound datamodel (ADR 0033 step 3).
+
+        Runs once, from ``on_start_up``, after ``wire_view`` has already registered
+        each hit's connectors. See ``_load_one_hit`` for the per-hit mechanics this
+        delegates to.
         """
         # Pre-register the fallback persist() would build anyway, once, before the loop
         # below calls persist() per hit -- silences the base class's "No persistence
@@ -351,28 +458,226 @@ class Controller(SemanticMiddleware):
         # item 6; see SemanticMiddleware._suppress_default_persistence_warning).
         self._suppress_default_persistence_warning("resource")
 
+        loaded = 0
         for resource_iri, wiring in self._view_wirings:
-            fetch = functools.partial(
-                self.ogm.fetch, instance_iri=resource_iri, **wiring.northbound_fetch_kwargs()
-            )
-            try:
-                node = await anyio.to_thread.run_sync(fetch)
-            except Exception:
-                logger.exception(
-                    "View hit %s could not be fetched; not loaded.", resource_iri
-                )
-                continue
-            instance = getattr(node, "instance", None)
-            if instance is None:
-                logger.warning(
-                    "View hit %s has no materializable datamodel; not loaded.", resource_iri
-                )
-                continue
-            await self.persist("resource", instance)
-            self.units[str(resource_iri)] = instance
+            if await self._load_one_hit(resource_iri, wiring):
+                loaded += 1
 
-        if self.units:
-            logger.info("Loaded %d resource(s) from the view onto this controller.", len(self.units))
+        if loaded:
+            logger.info("Loaded %d resource(s) from the view onto this controller.", loaded)
+
+    async def rebuild_view(self, sparql_query: str) -> ViewDiff:
+        """Re-run the view and reconcile ``self.units`` against the new hit set: fetch +
+        prune + load the joiners, close connectors and drop the leavers, leave the
+        unchanged alone (#82's "live differential rebuild").
+
+        Call this on every poll and on an explicit "run" -- both are the same operation
+        here, so the card set tracks the graph whether or not anyone presses anything.
+        ``sparql_query`` replaces whatever heuristic the previous call ran; there is no
+        separate "the query changed" branch, because comparing the new hit set against
+        ``self.units`` already produces the right answer whether the query text moved or
+        only the graph did.
+
+        A malformed heuristic raises inside ``view()`` (bad SPARQL syntax); caught here
+        and returned as ``ViewDiff(error=...)`` rather than propagated, so a route calling
+        this never 500s on a typo in the editable box. A zero-hit heuristic is not an
+        error -- it is a ``ViewDiff`` whose ``joiners``/``unchanged`` are both empty and
+        whose ``leavers`` may be everything, and the caller reports that in place too.
+
+        Guarded by ``self.rebuild_lock`` for its wiring/teardown section: see the lock's
+        own docstring for why nothing else pauses the algorithm separately.
+
+        Args:
+            sparql_query: A SPARQL ``SELECT`` binding at least ``?resource`` -- the same
+                shape ``view()`` already expects.
+
+        Returns:
+            What changed, or why nothing did.
+        """
+        try:
+            hits = self.view(sparql_query)
+        except Exception as e:
+            logger.warning("View heuristic failed; not rebuilding: %s", e)
+            return ViewDiff(error=str(e))
+
+        hit_by_key = {str(iri): iri for iri in hits}
+        new_keys = set(hit_by_key)
+        current_keys = set(self.units)
+        joiner_keys = new_keys - current_keys
+        leaver_keys = current_keys - new_keys
+        unchanged_keys = new_keys & current_keys
+
+        async with self.rebuild_lock:
+            for key in leaver_keys:
+                await self._unwire_hit(IRI(key))
+
+            if joiner_keys:
+                joiner_iris = [hit_by_key[key] for key in joiner_keys]
+                self.wire_view(
+                    joiner_iris,
+                    class_scope=self._view_class_scope,
+                    resource_class=self._view_resource_class,
+                    registry=self._view_registry,
+                )
+                for resource_iri, wiring in self._view_wirings:
+                    if str(resource_iri) in joiner_keys and str(resource_iri) not in self.units:
+                        await self._load_one_hit(resource_iri, wiring)
+
+        self._current_view_query = sparql_query
+        logger.info(
+            "View rebuilt: %d joiner(s), %d leaver(s), %d unchanged.",
+            len(joiner_keys),
+            len(leaver_keys),
+            len(unchanged_keys),
+        )
+        return ViewDiff(
+            joiners=[hit_by_key[k] for k in joiner_keys],
+            leavers=[IRI(k) for k in leaver_keys],
+            unchanged=[hit_by_key[k] for k in unchanged_keys],
+        )
+
+    async def _unwire_hit(self, resource_iri: IRI) -> None:
+        """Tear down one departed view hit: cancel its connectors' receive loops,
+        disconnect them, and drop every trace of it so a later rebuild's diff sees it as
+        gone rather than unchanged (#82: "close connectors and drop the leavers").
+
+        ``aas_middleware``'s own ``ConnectionRegistry.remove_connection`` is explicitly a
+        partial cleanup -- its own source comment says "also delete connector and
+        connection type" as a TODO -- so this pops all three of its dicts itself, for
+        both ``connection_registry`` (the REST read/write connectors ``wire_view``
+        registered for this hit) and ``persistence_registry`` (the "resource" connector
+        ``persist()`` built for it). Root ADR 0001 keeps this fix here rather than
+        patched into the sibling: it is a missing feature the base class's own TODO
+        already names, not a correctness bug blocking anything else this project builds
+        on that library. What it does not reach: the FastAPI routes
+        ``add_synced_connector`` mounted for this hit's connectors stay registered --
+        Starlette has no route-removal API at all, so a departed unit's parameter routes
+        stay mounted but pointless. Accepted; the board's own display comes from
+        ``self.units`` and never from route introspection.
+        """
+        key = str(resource_iri)
+        wiring: Optional[WiringPlan] = None
+        remaining: List[Tuple[IRI, WiringPlan]] = []
+        for iri, w in self._view_wirings:
+            if str(iri) == key:
+                wiring = w
+            else:
+                remaining.append((iri, w))
+        self._view_wirings = remaining
+
+        if wiring is not None:
+            for binding, registration in wiring.registrations:
+                connector_id = (
+                    f"{binding.resource_iri}#{binding.field_id}#{registration.suffix}"
+                )
+                connector = self.connection_registry.connectors.get(connector_id)
+                if connector is not None:
+                    for task in getattr(connector, "_background_tasks", []):
+                        task.cancel()
+                    try:
+                        await connector.disconnect()
+                    except Exception:
+                        logger.debug(
+                            "Disconnect of %s raised on teardown; ignoring.", connector_id
+                        )
+                self.connection_registry.connectors.pop(connector_id, None)
+                self.connection_registry.connection_types.pop(connector_id, None)
+                self.connection_registry.connections.pop(
+                    ConnectionInfo(
+                        data_model_name="resource",
+                        model_id=key,
+                        contained_model_id=str(binding.resource_iri),
+                        field_id=binding.field_id,
+                    ),
+                    None,
+                )
+
+        persist_info = ConnectionInfo(data_model_name="resource", model_id=key)
+        persist_connector_id = self.persistence_registry.connections.pop(persist_info, None)
+        if persist_connector_id is not None:
+            self.persistence_registry.connectors.pop(persist_connector_id, None)
+            self.persistence_registry.connection_types.pop(persist_connector_id, None)
+
+        self.units.pop(key, None)
+        self._commanded = {
+            k: v for k, v in self._commanded.items() if not k.startswith(f"{key}#")
+        }
+        logger.info("Dropped departed view hit %s.", resource_iri)
+
+    def record_commanded(
+        self, component_iri: Union[str, IRI], field_name: str, value: Any, *, origin: str
+    ) -> None:
+        """Record what was just written to one parameter, and who wrote it (#82).
+
+        The served datamodel carries only the observed value (ADR 0024's locator
+        pattern), so nothing anywhere else can answer "what did we last ask for" -- both
+        write paths must call this immediately before ``push()``: a human via
+        ``station_board.py``'s set route (``origin="operator"``), and the algorithm via
+        ``run_algorithm_once`` (``origin="algorithm"``).
+
+        Args:
+            component_iri: The IRI of the belt/barrier/etc. that owns the parameter --
+                the same id a fetched datamodel tree's nested node carries, not the root
+                unit's own IRI.
+            field_name: The parameter's mangled field name (``IRI(...).lined``).
+            value: The value that was written.
+            origin: ``"operator"`` or ``"algorithm"``.
+        """
+        self._commanded[f"{component_iri}#{field_name}"] = CommandedValue(
+            value=value, at=time.monotonic(), origin=origin
+        )
+
+    def commanded_for(
+        self, component_iri: Union[str, IRI], field_name: str
+    ) -> Optional[CommandedValue]:
+        """The last :class:`CommandedValue` recorded for one parameter, or ``None`` if
+        nothing has ever been written to it through this controller."""
+        return self._commanded.get(f"{component_iri}#{field_name}")
+
+    def wiring_for(self, resource_iri: Union[str, IRI]) -> Optional[WiringPlan]:
+        """The :class:`WiringPlan` recognized for one loaded view hit, or ``None`` if it
+        was never wired (or has since been dropped by ``rebuild_view``).
+
+        A display-only accessor for a station-board-style consumer that needs each
+        parameter's access mode, human label, or what ``prune_southbound`` stripped for
+        it (``WiringPlan.southbound_by_property``) -- reading ``self._view_wirings``
+        directly from outside this class would reach into a private list this class is
+        free to reshape; this is the seam such a caller should use instead.
+        """
+        key = str(resource_iri)
+        for iri, wiring in self._view_wirings:
+            if str(iri) == key:
+                return wiring
+        return None
+
+    def liveness_of(self, resource_iri: Union[str, IRI]) -> Tuple[bool, Optional[float]]:
+        """Whether a still-selected view hit is reachable, and the age of its last
+        heartbeat in seconds (#82's two deaths).
+
+        A cleanly stopped unit deregisters and drops its ``svc:address`` entirely, so
+        ``view()`` stops selecting it -- ``rebuild_view`` sees it as a leaver, and its
+        card leaves within one poll. A ``kill -9``'d unit keeps its address: ``view()``
+        keeps selecting it, so it stays in ``self.units`` ("leave the unchanged alone"),
+        but nothing refreshes its heartbeat. This reuses ``self.staleness_threshold`` --
+        the same window ``SemanticMiddleware`` already tracks for its own watchdog (ADR
+        0007) -- rather than a second threshold invented for the board.
+
+        Returns:
+            ``(unreachable, age_seconds)``. ``age_seconds`` is ``None`` when no heartbeat
+            was ever recorded (unreachable is then ``True``).
+        """
+        info = self._get_service_info(IRI(str(resource_iri)))
+        last_heartbeat = info.get("lastHeartbeat")
+        if not last_heartbeat:
+            return True, None
+        try:
+            heartbeat_at = datetime.fromisoformat(str(last_heartbeat))
+        except ValueError:
+            return True, None
+        if heartbeat_at.tzinfo is None:
+            heartbeat_at = heartbeat_at.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - heartbeat_at).total_seconds()
+        return age_seconds > self.staleness_threshold, age_seconds
 
     async def push(self, resource_iri: Union[str, IRI]) -> None:
         """Drive an in-place assignment on a loaded view datamodel out to its owner
@@ -399,6 +704,66 @@ class Controller(SemanticMiddleware):
         connector = self.persistence_registry.get_connection(connection_info)
         model = await connector.provide()
         await connector.consume(model)
+
+    async def push_parameter(
+        self,
+        resource_iri: Union[str, IRI],
+        component_iri: Union[str, IRI],
+        field_name: str,
+        node: Any,
+    ) -> None:
+        """Drive one specific parameter's write leg directly, bypassing ``push()``'s
+        persistence-level fan-out (#82).
+
+        ``push()`` re-consumes the whole resource through its persistence connector,
+        which fans the new value out to every synced connector sharing it
+        (``PersistedConnector._notify_synced_connectors``). That fan-out catches and
+        only logs a sibling connector's failure, by the base framework's own design --
+        its docstring's own reasoning is that one connector's failure must not silently
+        end every other connector's sync (kapps_semantic_middleware#86). Correct for the
+        fan-out's own purpose, but it means ``push()`` can never actually tell its
+        caller a PUT failed: the exception never reaches this far. That is exactly what
+        #82's "rejected" state needs to know, so a human-initiated write goes through
+        this method instead, straight to the one connector responsible for this exact
+        parameter -- a genuine failure (the peer down, a 4xx) then propagates to the
+        caller rather than being swallowed and merely logged.
+
+        Only the operator's own set control (``station_board.py``'s ``/api/set`` route)
+        uses this. The algorithm keeps using ``push()``: a background loop's own write
+        has nowhere useful to report a failure to, and ``push()``'s silent-fan-out
+        behaviour costs it nothing it was relying on.
+
+        Args:
+            resource_iri: The root view hit that owns ``component_iri``.
+            component_iri: The IRI of the belt/barrier/etc. that holds the parameter.
+            field_name: The parameter's mangled field name (``IRI(...).lined``).
+            node: The parameter's own current pydantic node (already mutated by the
+                caller's ``setattr`` -- this method sends exactly this value, it does
+                not re-derive one).
+
+        Raises:
+            KeyError: No write connector is registered for this exact parameter --
+                either it is read-only, or ``resource_iri`` was never wired.
+        """
+        wiring = self.wiring_for(resource_iri)
+        if wiring is None:
+            raise KeyError(f"{resource_iri} is not a wired view hit")
+
+        for binding, registration in wiring.registrations:
+            if (
+                str(binding.resource_iri) == str(component_iri)
+                and binding.field_id == field_name
+                and registration.suffix == "write"
+            ):
+                body = (
+                    registration.formatter.serialize([node])
+                    if registration.formatter is not None
+                    else [node]
+                )
+                await registration.connector.consume(body)
+                return
+
+        raise KeyError(f"No write connector for {component_iri}#{field_name}")
 
     def discover_resources(self, resource_class: Any) -> List[ResourceInfo]:
         """List all individuals of resource_class with their service metadata.

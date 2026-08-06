@@ -127,6 +127,12 @@ class TestBothCallSitesSuppressBeforePersisting:
         )
 
     def test_controller_load_view_datamodels_suppresses_before_the_persist_loop(self):
+        """_load_view_datamodels's own persist() call moved into _load_one_hit (#82: the
+        per-hit fetch-and-persist step is shared with rebuild_view's joiner path), so the
+        property this test pins now spans two functions: the suppression call must
+        precede the loop that calls _load_one_hit, and that method must still be where
+        persist() actually runs.
+        """
         sys_path_marker = str(REPO_ROOT)
         import sys
 
@@ -134,10 +140,15 @@ class TestBothCallSitesSuppressBeforePersisting:
             sys.path.insert(0, sys_path_marker)
         from demo.transferunits.controller import Controller
 
-        source = inspect.getsource(Controller._load_view_datamodels)
-        suppress_at = source.index("_suppress_default_persistence_warning")
-        persist_at = source.index('self.persist("resource"')
+        loader_source = inspect.getsource(Controller._load_view_datamodels)
+        suppress_at = loader_source.index("_suppress_default_persistence_warning")
+        # The actual call, not the docstring's own mention of the method name (which
+        # precedes the code and would otherwise make this check pass vacuously).
+        load_one_hit_call_at = loader_source.index("await self._load_one_hit(")
+        assert suppress_at < load_one_hit_call_at, (
+            "_load_view_datamodels must suppress the warning before it calls _load_one_hit"
+        )
 
-        assert suppress_at < persist_at, (
-            "_load_view_datamodels must suppress the warning before its persist() loop runs"
+        assert 'self.persist("resource"' in inspect.getsource(Controller._load_one_hit), (
+            "_load_one_hit must still be where the per-hit persist() call actually runs"
         )

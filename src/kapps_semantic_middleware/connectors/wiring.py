@@ -79,6 +79,16 @@ class WiringPlan:
     southbound_properties: frozenset
     """The prune set that was applied, kept for assertions and diagnostics."""
 
+    southbound_by_property: Dict[str, frozenset]
+    """The same prune set, broken out per recognized parameter property rather than
+    unioned across all of them. ``plan_wiring`` already computes this as a cache
+    (``southbound_by_property``, one ontology round trip per distinct property rather
+    than one per binding) and used to discard it once ``southbound_properties`` was
+    built. Kept here instead: a consumer that shows what pruning stripped *per
+    parameter* -- ticket #82's station board, answering ticket #78's deferred display
+    question -- needs exactly this breakdown, and recomputing it a second time would cost
+    the same ontology queries this cache exists to avoid paying twice."""
+
     def northbound_fetch_kwargs(self) -> Dict[str, Any]:
         """The arguments that materialize this resource's northbound view."""
         return {
@@ -175,6 +185,7 @@ def plan_wiring(
         bindings=bindings,
         registrations=registrations,
         southbound_properties=southbound,
+        southbound_by_property=southbound_by_property,
     )
 
 

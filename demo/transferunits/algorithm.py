@@ -17,21 +17,30 @@ building a real one is domain work, not middleware work. The graph carries no pl
 layout, so nothing here can route anything, and that is the MVP boundary rather than
 an oversight.
 
+The background loop's own runtime knobs -- mode, pause, tick length (#82) -- are
+:class:`AlgorithmState`, not module state: a demo runs one controller per process, but
+nothing here should assume that, so the state a station-board route flips lives on an
+object ``control_station.py`` constructs and threads through, not on this module.
+
 Usage::
 
     # In control_station.py's main():
     hits = controller.view(build_view_query())
     controller.wire_view(hits, class_scope=unit_class_scope())
+    state = AlgorithmState(tick_seconds=args.tick)
     # ... server starts, datamodels load into controller.units ...
-    # Background loop runs run_algorithm_once every 5 seconds.
+    # Background loop runs run_algorithm_loop(controller, state).
 """
 
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 import random
-from typing import Optional
+import time
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
 
 from graph_db_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
@@ -42,6 +51,88 @@ from . import seed
 from .controller import Controller
 
 logger = logging.getLogger(__name__)
+
+WATCH_INTERVAL_SECONDS = 0.5
+"""How often event-driven mode samples the loaded units' light barriers for a change,
+and how often either mode re-checks whether it may run at all (paused, or a view
+rebuild in progress). Deliberately much finer than any tick -- this is a cheap read of
+objects already held in memory (``controller.units``), not a network call."""
+
+
+class AlgorithmMode(str, enum.Enum):
+    """The two ways the demonstration algorithm's background loop can fire (#82).
+
+    A plain ``str`` subclass so a mode round-trips through JSON with no translation
+    layer between the loop, the page's toggle and a test's assertion.
+    """
+
+    TIMED = "timed"
+    """A tick every ``AlgorithmState.tick_seconds``, visible and periodic."""
+
+    EVENT_DRIVEN = "event_driven"
+    """Quiescent until a light barrier's reading changes, then exactly one reaction."""
+
+
+@dataclass
+class AlgorithmState:
+    """Runtime knobs for the background loop, shared between it and every station-board
+    route that reads or flips one (#82).
+
+    One instance is constructed in ``control_station.py``'s ``main()`` and threaded
+    through to both ``run_algorithm_loop`` and ``station_board.configure_board`` --
+    the single shared object is what lets a page toggle and the loop agree with no
+    polling of each other. Pause/mode are plain mutable fields rather than
+    ``asyncio.Event``s: both are read once per watch tick (every
+    ``WATCH_INTERVAL_SECONDS``), which is already fine-grained enough that a flag the
+    loop notices next tick costs nothing a demonstration would ever notice.
+    """
+
+    tick_seconds: float
+    """The timed mode's interval. Must exceed one lap of PUT -> unit middleware -> MQTT
+    -> PLC -> MQTT back -> connector read (#82's own acceptance criterion), or the
+    algorithm writes again before it can observe its last write and the board
+    oscillates. Measured, not guessed -- see ``control_station.py``'s ``--tick`` default."""
+
+    mode: AlgorithmMode = AlgorithmMode.TIMED
+    """Which of the two firing rules is currently active. Switchable at runtime."""
+
+    paused: bool = False
+    """The human-facing global pause (#82: "pause to drive"). While true, neither mode
+    fires a tick, and every set control on the page is enabled -- station_board.py
+    reads this one field to decide which state to show; there is no second flag to keep
+    in sync with it."""
+
+    last_tick_at: Optional[float] = None
+    """``time.monotonic()`` of the last completed tick, or ``None`` before the first
+    one. Lets the page distinguish "about to tick" from "never ticked yet"."""
+
+    waiting_since: Optional[float] = None
+    """Event-driven mode only: ``time.monotonic()`` of when it started watching for a
+    change with none seen yet. ``None`` whenever timed mode is active, or the instant
+    after a reaction fires. Backs the page's explicit "waiting for a change" state
+    (#82: idle must not read as broken)."""
+
+
+def _barrier_snapshot(controller: Controller) -> Dict[str, Tuple[bool, ...]]:
+    """``{unit_iri: (occupied_front_or_only_barrier, ...)}`` for every loaded unit, for
+    event-driven mode's own change detection.
+
+    Reads ``controller.units`` directly -- the same objects the REST connectors' own
+    background poll keeps current -- rather than issuing any request of its own; this
+    function makes no network call and touches no domain object the algorithm itself
+    could not already reach.
+    """
+    snapshot: Dict[str, Tuple[bool, ...]] = {}
+    for unit_iri, unit in controller.units.items():
+        barriers = getattr(unit, seed.TU_HAS_LIGHT_BARRIER.lined, None) or []
+        readings = []
+        for barrier in barriers:
+            occupied_param = getattr(barrier, seed.TU_IS_OCCUPIED.lined, None) or []
+            if occupied_param:
+                value = getattr(occupied_param[0], INF.hasValue.lined, None) or []
+                readings.append(bool(value[0]) if value else False)
+        snapshot[unit_iri] = tuple(readings)
+    return snapshot
 
 
 def build_view_query() -> str:
@@ -167,6 +258,14 @@ async def run_algorithm_once(controller: Controller) -> Optional[IRI]:
         return None
     setattr(target_speed_param[0], INF.hasValue.lined, speed_value)
 
+    # Record what this write is asking for before driving it out (#82): the served
+    # datamodel carries only the observed value (ADR 0024's locator pattern), so this is
+    # the only place the station board could ever learn "commanded" from, for a write
+    # the algorithm made and no human's browser initiated.
+    controller.record_commanded(
+        target_belts[0].id, seed.TU_HAS_CONVEYOR_SPEED.lined, speed_value, origin="algorithm"
+    )
+
     # Drive the assignment out -- no HTTP call here, push() does the plumbing.
     await controller.push(target_iri)
 
@@ -174,23 +273,86 @@ async def run_algorithm_once(controller: Controller) -> Optional[IRI]:
     return target_iri
 
 
-async def run_algorithm_loop(controller: Controller, *, interval: float = 5.0) -> None:
-    """Run the algorithm periodically in the background, mirroring the heartbeat loop shape.
+async def run_algorithm_loop(controller: Controller, state: AlgorithmState) -> None:
+    """Run the algorithm in the background, honouring ``state``'s mode and pause (#82).
 
     An ``async def`` with ``try: while True: ... except asyncio.CancelledError: pass`` --
     the exact pattern ``SemanticMiddleware`` uses for its own heartbeat (see
-    ``middleware.py``'s ``_heartbeat_loop``). ``interval`` defaults to 5.0 seconds,
-    slower than the REST connector's own 2-second poll cadence (``rest_binding.py``'s
-    ``DEFAULT_POLL_INTERVAL_SECONDS``), so a push has settled before the next tick reads
-    anything.
+    ``middleware.py``'s ``_heartbeat_loop``).
+
+    Two firing rules:
+
+    - **Timed**: one tick every ``state.tick_seconds``, waited out in
+      ``WATCH_INTERVAL_SECONDS``-sized chunks so a pause, a rebuild or a runtime mode
+      switch is noticed well inside one tick rather than only after it.
+    - **Event-driven**: samples ``controller.units``' light barriers every
+      ``WATCH_INTERVAL_SECONDS`` and fires exactly one tick the instant a reading
+      differs from the previous sample -- never on the very first sample after a mode
+      switch or a startup, since there is nothing yet to compare it against.
+
+    Both rules are gated the same way on every watch tick: ``state.paused`` (the
+    human's "pause to drive") and ``controller.rebuild_lock.locked()`` (#82: "the
+    algorithm auto-pauses across a rebuild and resumes" -- the lock already marks
+    exactly a rebuild's duration, so this needs no second flag to track that
+    separately, and cannot drift out of step with it).
 
     Args:
         controller: The Controller instance to run the algorithm against.
-        interval: Seconds between ticks. Defaults to 5.0.
+        state: The shared runtime knobs -- constructed once in ``control_station.py``.
     """
+    previous_barrier_snapshot: Dict[str, Tuple[bool, ...]] = {}
     try:
         while True:
-            await run_algorithm_once(controller)
-            await asyncio.sleep(interval)
+            if state.paused or controller.rebuild_lock.locked():
+                await asyncio.sleep(WATCH_INTERVAL_SECONDS)
+                continue
+
+            if state.mode is AlgorithmMode.TIMED:
+                state.waiting_since = None
+                # Sleep BEFORE ticking, not after: entering timed mode (at startup, or on
+                # a runtime mode switch) must not fire an immediate reaction -- a viewer
+                # who just switched to timed mode watches one full, visible tick_seconds
+                # elapse first, the same way the interval reads on every tick after the
+                # first.
+                #
+                # Sleep in WATCH_INTERVAL_SECONDS-sized chunks rather than one bare
+                # `asyncio.sleep(state.tick_seconds)`: a single long sleep is exactly as
+                # slow to notice a pause, a rebuild or a runtime mode switch as
+                # `tick_seconds` itself, which is 8s by default and the issue's own
+                # example widens it to 15s for a presentation -- "the toggle switches
+                # between them at runtime" (#82's own acceptance criterion) must not mean
+                # "eventually, once the current tick finishes". Chunking below
+                # WATCH_INTERVAL_SECONDS costs nothing when tick_seconds is itself
+                # shorter (the `min` collapses to one chunk, unchanged from a bare sleep).
+                elapsed = 0.0
+                interrupted = False
+                while elapsed < state.tick_seconds:
+                    chunk = min(WATCH_INTERVAL_SECONDS, state.tick_seconds - elapsed)
+                    await asyncio.sleep(chunk)
+                    elapsed += chunk
+                    if (
+                        state.paused
+                        or controller.rebuild_lock.locked()
+                        or state.mode is not AlgorithmMode.TIMED
+                    ):
+                        interrupted = True
+                        break
+                if interrupted:
+                    continue
+                await run_algorithm_once(controller)
+                state.last_tick_at = time.monotonic()
+                continue
+
+            # Event-driven: quiescent until a barrier reading changes (#82: idle must
+            # show an explicit "waiting for a change" state rather than read as broken).
+            if state.waiting_since is None:
+                state.waiting_since = time.monotonic()
+            snapshot = _barrier_snapshot(controller)
+            if previous_barrier_snapshot and snapshot != previous_barrier_snapshot:
+                await run_algorithm_once(controller)
+                state.last_tick_at = time.monotonic()
+                state.waiting_since = None
+            previous_barrier_snapshot = snapshot
+            await asyncio.sleep(WATCH_INTERVAL_SECONDS)
     except asyncio.CancelledError:
         pass
