@@ -1,0 +1,54 @@
+# The sibling checkouts this project is known to work against.
+#
+# `uv.lock` CANNOT record this. Root ADR 0001 wires the three siblings as editable *path*
+# dependencies, and uv locks such a dependency as `source = { editable = "../name" }` -- a path,
+# with no revision. So the lockfile pins the *location* of each sibling and nothing about its
+# content. Whatever commit happens to be checked out there is what gets imported.
+#
+# That is why a fresh machine does not reproduce a working demo: every sibling below is on an
+# unmerged feature branch, and a `main` checkout of any of them fails differently.
+#
+# Verify a machine with:  python scripts/check_siblings.py
+# Set one up with:        see SIBLINGS.md
+
+[graph_db_interface]
+path = "../graph_db_interface"
+url = "https://github.com/SAWeindel/graph_db_interface.git"
+remote = "saweindel"
+branch = "fix/bnode-identity-in-triples-update"
+commit = "da08373"
+why = """
+Blank-node identity in `triples_update`. `main` (2.0.1) mints a fresh blank node per
+serialization, which orphans a parameter's connection metadata, and rejects a host:port form in
+`mint_service_iri`. Root ADR 0003 (anonymous node identity is specified, not patched) is the
+record. Note the branch lives on the SAWeindel fork, NOT on origin (JaFeKl) -- a clone of origin
+alone will not find it.
+"""
+
+[kapps_ogm]
+path = "../kapps_ogm"
+url = "https://github.com/SAWeindel/kapps_ogm.git"
+remote = "origin"
+branch = "feature/merge-anonymous-ranges"
+commit = "7be21a2"
+why = """
+Conjunctive `rdfs:range`. `main` (0.1.2) raises on a class with several declared ranges, which
+blocks both additive extension of the fixed `tu:` properties and ranges on the interface
+superproperties -- the seed step fails on `isOccupied`. Root ADR 0002 records this as a kapps_ogm
+defect; this branch is the fix.
+"""
+
+[aas_middleware_inf]
+path = "../aas_middleware_inf"
+url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git"
+remote = "origin"
+branch = "rest_generalization"
+commit = "a6edf1c"
+why = """
+Two sync-layer correctness fixes made under root ADR 0001's bugfix allowance, both recorded in
+that repo's CHANGELOG: #92 (a persistence-write notification was formatted before it was narrowed,
+and a read could echo back out its own write leg) and #94 (a write now names the field that moved,
+so an untouched parameter is not commanded -- ADR 0035). Without them the demo's northbound sync
+and its ramping belts are both broken. Private GitLab: access is required, there is no public
+mirror.
+"""
