@@ -46,10 +46,22 @@ ticket #77). Three questions were left open for whoever picked this up:
   a cadence is not addressing.
 
 **Lazy import, same rule as MQTT** (ADR 0023 / ADR 0028): importing this module, and
-recognising and building a ``RESTBinding``, must not require a working network stack.
-``httpx`` is in fact a plain dependency of this project today, so the guard below is
-currently more a statement of the rule than a live necessity — but the rule outlives that
-fact, and an inspecting instance must keep receiving the projection regardless.
+recognising and building a ``RESTBinding``, must not require a working network stack, so that
+an inspecting instance keeps receiving the projection on a host that cannot reach anything.
+
+**That rule does not currently hold on this module's import path, and the guard below is
+unreachable.** Corrected 2026-08-07 on #77, which had recorded the box as merely untested.
+Importing this module pulls in ``aas_middleware.connect.connectors.aas_client_connector``,
+which does a bare ``import httpx`` at module level — and does not declare ``httpx`` in its own
+manifest at all. With httpx absent the import therefore dies several frames above the ``try``
+below, and the ``# pragma: no cover`` on it is accurate rather than lazy. The MQTT half is
+genuinely different: ``aiomqtt`` really is an optional extra there, and ``mqtt_binding``
+really does degrade to ``MqttClientConnector = None``.
+
+The guard stays. It is correct in isolation, it is what makes the rule true again the moment
+the eager import upstream goes away, and its error message is reachable and asserted
+(``tests/test_optional_transport_stacks.py``). What is *not* claimed here any more is that
+absence has ever been survivable on this path.
 """
 
 from __future__ import annotations
@@ -119,10 +131,15 @@ except ImportError:  # pragma: no cover - depends on httpx being installed
 def _httpx_module():
     """The ``httpx`` module, or an actionable error if it is absent.
 
-    Called from inside the connector's async methods, never at import or recognition time.
-    Importing this module, and recognising and building a ``RESTBinding``, must not require a
-    working network stack (ADR 0023 / ADR 0028) -- the failure is deferred to the moment
-    something actually tries to talk to a peer.
+    Called from inside the connector's async methods, never at import or recognition time, so
+    that the failure is deferred to the moment something actually tries to talk to a peer
+    (ADR 0023 / ADR 0028).
+
+    **The deferral is real; the absence it defers is not reachable here.** See the module
+    docstring: an eager, undeclared ``import httpx`` upstream in ``aas_middleware`` means this
+    module cannot be imported without httpx in the first place. The message below is
+    nonetheless asserted, by swapping the module global -- the strongest check available while
+    that stays true, and weaker than #77's box asked for.
     """
     if httpx is None:  # pragma: no cover - depends on the optional install
         raise ImportError(

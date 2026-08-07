@@ -69,6 +69,10 @@ SETPOINT = 1.75
 """A speed the seed never writes and no belt ever settles on by itself, so this value appearing
 in the feed cannot be an echo of the initial state or of a ramp passing through."""
 
+SECOND_SETPOINT = 2.5
+"""The value the loop test drives, distinct from ``SETPOINT`` so that a board already showing
+the first one cannot pass the second test without the belt having moved again."""
+
 EXPECTED_BROKER_PORTS = {STOPPED_UNIT: 18831, SURVIVING_UNIT: 18832}
 """#79's box names two literal numbers: "Two brokers listen, on 18831 and 18832."
 
@@ -97,6 +101,12 @@ FEED_TIMEOUT_SECONDS = 30.0
 """How long the activity feed gets to report a setpoint. The stream replays its whole buffer to
 a new reader before streaming anything new, so a record logged before the test connected still
 arrives; this covers the PUT's own trip through persistence and out to the write leg."""
+
+LOOP_TIMEOUT_SECONDS = 60.0
+"""How long the return half gets, from an accepted command to the unit's middleware observing
+the belt at it. Dominated by #83's ramp, which is distance over rate -- 2.5 m/s is about 2.5 s
+at ``DEFAULT_RAMP_RATE`` -- plus the PLC's 0.5 s republish. ``test_lap_measurement.py`` measures
+this properly and tabulates it; this is a bound around it, not a measurement."""
 
 STOP_TIMEOUT_SECONDS = 20.0
 """How long a stopped unit gets to actually be gone. ``Factory.stop_unit`` already waits on its
@@ -477,6 +487,111 @@ class TestTheFactoryComesUp:
         )
 
 
+@dataclass(frozen=True)
+class DrivenBelt:
+    """One belt, commanded from the control station, and the addresses that reach it again."""
+
+    station: str
+    """The control station's address -- where the board's own routes live."""
+
+    unit_iri: str
+    holder_iri: str
+    field_id: str
+    """What the board needs back to identify the same parameter on a later call."""
+
+    position: str
+    """Which belt of the unit the board offered -- "left" or "right". Every topic of that
+    belt is a pure function of it (ADR 0023's scheme), so both directions are derivable."""
+
+    set_topic: str
+    """The MQTT topic that command travels on, derived rather than guessed."""
+
+    middleware: str
+    """The unit's own middleware -- the process whose feed carries both directions."""
+
+
+def _drive_a_belt(factory: FactoryHandle, value: float) -> DrivenBelt:
+    """Command one belt of the surviving unit from the control station, as a person would.
+
+    Shared by the two tests below, which assert different things about the same act: that the
+    command reaches the device's topic (#88's box), and that the device's own reading comes
+    back to the screen the command was given on (milestone 1's own sentence). Driving twice
+    from one helper keeps them independent -- neither reads the other's leftovers -- while the
+    lookup, which is the fiddly half, is written once.
+    """
+    snapshot = factory.state()
+    station = snapshot["controller"]["address"]
+
+    # The board refuses a hand-driven set while the algorithm runs (#82), and says so with a
+    # 409 rather than by writing anyway.
+    paused = httpx.post(
+        _url(station, "api/algorithm/pause"), json={"paused": True}, timeout=10.0
+    )
+    paused.raise_for_status()
+
+    board = httpx.get(_url(station, "api/state"), timeout=30.0)
+    board.raise_for_status()
+    units_on_board = board.json()["units"]
+
+    unit_iri = str(seed._mint_transfer_unit_iri(SURVIVING_UNIT))
+    unit = _first(
+        [u for u in units_on_board if u["resource_iri"] == unit_iri],
+        f"unit {SURVIVING_UNIT} is not on the board; it holds "
+        f"{[u['resource_iri'] for u in units_on_board]}",
+    )
+
+    speed = _first(
+        [p for p in unit["parameters"] if p["field_id"] == seed.TU_HAS_CONVEYOR_SPEED.lined],
+        f"no conveyor speed among unit {SURVIVING_UNIT}'s parameters: "
+        f"{[p['field_id'] for p in unit['parameters']]}",
+    )
+
+    # ConveyorBelt2_left -> left. The board reports which belt it is offering, and the topic
+    # that belt's setpoint travels on is a pure function of that (ADR 0023's scheme, minted by
+    # seed._mqtt_topic), so the expected line is derived rather than guessed.
+    holder = speed["holder_iri"]
+    local_name = holder.rsplit("#", 1)[-1]
+    assert "_" in local_name, (
+        f"the board offered a belt named {local_name}, which carries no position, so no "
+        "setpoint topic can be derived from it"
+    )
+    position = local_name.rsplit("_", 1)[-1]
+
+    driven = httpx.post(
+        _url(station, "api/set"),
+        json={
+            "resource_iri": unit_iri,
+            "holder_iri": holder,
+            "field_id": speed["field_id"],
+            "value": value,
+        },
+        timeout=30.0,
+    )
+    assert driven.status_code == 200, (
+        f"the board refused to drive {local_name}: {driven.status_code} {driven.text}"
+    )
+    assert driven.json().get("ok") is True, (
+        f"the board accepted the write but it did not reach the unit: {driven.json()}"
+    )
+
+    return DrivenBelt(
+        station=station,
+        unit_iri=unit_iri,
+        holder_iri=holder,
+        field_id=speed["field_id"],
+        position=position,
+        set_topic=seed._mqtt_topic(SURVIVING_UNIT, "ConveyorBelt", position, "speed_set"),
+        middleware=_first(
+            [
+                u["middleware"]["address"]
+                for u in snapshot["unit"]
+                if u["index"] == SURVIVING_UNIT
+            ],
+            f"unit {SURVIVING_UNIT} has no middleware address in the launcher's snapshot",
+        ),
+    )
+
+
 class TestTheFeedCarriesRealLines:
     """This class tests #88's last box: the activity feed shows real lines during a run.
 
@@ -496,77 +611,90 @@ class TestTheFeedCarriesRealLines:
         line is logged unconditionally at INFO (``mqtt_binding.py``: "a setpoint is always
         news"), so its absence is a break in that path rather than a quiet feed.
         """
-        snapshot = factory.state()
-        station = snapshot["controller"]["address"]
-
-        # The board refuses a hand-driven set while the algorithm runs (#82), and says so with
-        # a 409 rather than by writing anyway.
-        paused = httpx.post(
-            _url(station, "api/algorithm/pause"), json={"paused": True}, timeout=10.0
-        )
-        paused.raise_for_status()
-
-        board = httpx.get(_url(station, "api/state"), timeout=30.0)
-        board.raise_for_status()
-        units_on_board = board.json()["units"]
-
-        unit_iri = str(seed._mint_transfer_unit_iri(SURVIVING_UNIT))
-        unit = _first(
-            [u for u in units_on_board if u["resource_iri"] == unit_iri],
-            f"unit {SURVIVING_UNIT} is not on the board; it holds "
-            f"{[u['resource_iri'] for u in units_on_board]}",
-        )
-
-        speed = _first(
-            [p for p in unit["parameters"] if p["field_id"] == seed.TU_HAS_CONVEYOR_SPEED.lined],
-            f"no conveyor speed among unit {SURVIVING_UNIT}'s parameters: "
-            f"{[p['field_id'] for p in unit['parameters']]}",
-        )
-
-        # ConveyorBelt2_left -> left. The board reports which belt it is offering, and the
-        # topic that belt's setpoint travels on is a pure function of that (ADR 0023's scheme,
-        # minted by seed._mqtt_topic), so the expected line is derived rather than guessed.
-        holder = speed["holder_iri"]
-        local_name = holder.rsplit("#", 1)[-1]
-        assert "_" in local_name, (
-            f"the board offered a belt named {local_name}, which carries no position, so no "
-            "setpoint topic can be derived from it"
-        )
-        position = local_name.rsplit("_", 1)[-1]
-        set_topic = seed._mqtt_topic(SURVIVING_UNIT, "ConveyorBelt", position, "speed_set")
-
-        driven = httpx.post(
-            _url(station, "api/set"),
-            json={
-                "resource_iri": unit_iri,
-                "holder_iri": holder,
-                "field_id": speed["field_id"],
-                "value": SETPOINT,
-            },
-            timeout=30.0,
-        )
-        assert driven.status_code == 200, (
-            f"the board refused to drive {local_name}: {driven.status_code} {driven.text}"
-        )
-        assert driven.json().get("ok") is True, (
-            f"the board accepted the write but it did not reach the unit: {driven.json()}"
-        )
-
-        middleware = _first(
-            [u["middleware"]["address"] for u in snapshot["unit"] if u["index"] == SURVIVING_UNIT],
-            f"unit {SURVIVING_UNIT} has no middleware address in the launcher's snapshot",
-        )
+        belt = _drive_a_belt(factory, SETPOINT)
 
         # `->` is the outbound marker mqtt_binding writes; the same feed carries `<-` lines
         # for every value the belt publishes back, and the ramp passes through this setpoint on
         # its way there, so the direction is what separates the command from its echo.
+        #
+        # Matched as one `topic = value` run rather than as three loose fragments, because a
+        # unit's two topics differ by a suffix -- `.../speed` is a prefix of `.../speed_set` --
+        # so fragments that merely co-occur in a line cannot tell the two apart.
         carried, seen = _feed_search(
-            middleware, ("->", set_topic, str(SETPOINT)), FEED_TIMEOUT_SECONDS
+            belt.middleware,
+            ("->", f"{belt.set_topic} = {SETPOINT}"),
+            FEED_TIMEOUT_SECONDS,
         )
         assert carried, (
             f"unit {SURVIVING_UNIT}'s feed never carried the setpoint {SETPOINT} on "
-            f"{set_topic}. In {FEED_TIMEOUT_SECONDS}s it carried {len(seen)} line(s): "
+            f"{belt.set_topic}. In {FEED_TIMEOUT_SECONDS}s it carried {len(seen)} line(s): "
             f"{seen[-10:]}"
+        )
+
+
+class TestTheLoopCloses:
+    """This class tests the return half of milestone 1's own sentence:
+
+    > *"The loop runs end to end: PLC, MQTT, middleware, graph, controller, REST, back to the
+    > PLC."*
+
+    The class above proves a command leaves the control station and reaches the device's
+    topic. This one proves the device's *own* reading comes back and is observed -- the belt
+    really moved, and its middleware really saw it move.
+
+    **It stops at the unit's middleware, and that is a property of the design rather than a
+    gap in the test.** Under ADR 0024's locator pattern a parameter has one value slot, and a
+    PUT writes the commanded value straight into it -- at the unit's middleware, and (because
+    ``/api/set`` assigns in place before pushing) at the controller too. So the value the board
+    renders reads as the setpoint the instant the command is accepted, whatever the belt is
+    doing, and "the controller sees the device" is not distinguishable at the board from "the
+    controller sees its own command". ``test_lap_measurement.py`` records the same limit and
+    times its lap against the device and the inbound publish for exactly this reason.
+
+    The first version of this test did read the board back, and passed in 0.12 s against its
+    own write. The inbound log line is the last point on this path where the two are still
+    telling apart.
+    """
+
+    def test_the_device_s_own_speed_comes_back_and_is_observed(
+        self, factory: FactoryHandle
+    ) -> None:
+        """Command a belt, and wait for the unit's middleware to report observing it there.
+
+        Every hop is in this one wait: the PUT reaches the unit's middleware, its write leg
+        publishes to the device's set topic, the PLC ramps toward it (#83's momentum, so the
+        belt climbs rather than jumps), it publishes its *actual* speed on its own topic, and
+        the unit middleware's read leg observes that and logs it.
+
+        Matched on ``<-`` and the **actual** topic, never the set topic: the two differ by one
+        ``_set`` segment, and matching the wrong one would find the command again and prove
+        nothing about the device. A second setpoint, distinct from the one the class above
+        drove, so a line already in the feed cannot satisfy this.
+
+        The topic is matched as one ``topic = value`` run rather than as loose fragments, and
+        that is load-bearing here rather than tidiness: ``.../speed`` is a **prefix** of
+        ``.../speed_set``, so a line about the command contains the actual topic too. Probed --
+        with the fragments loose, swapping ``<-`` for ``->`` still passed, which means the
+        topic was proving nothing and the direction marker was carrying the whole test.
+        """
+        belt = _drive_a_belt(factory, SECOND_SETPOINT)
+        actual_topic = seed._mqtt_topic(
+            SURVIVING_UNIT, "ConveyorBelt", belt.position, "speed"
+        )
+
+        # `= 2.5` rather than a parsed float: the ramp snaps exactly onto its target on the
+        # last step (#83, "float-exact at rest"), so the settled publish reprs as the setpoint
+        # itself, while every value on the way there is visibly short of it.
+        observed, seen = _feed_search(
+            belt.middleware,
+            ("<-", f"{actual_topic} = {SECOND_SETPOINT}"),
+            LOOP_TIMEOUT_SECONDS,
+        )
+        assert observed, (
+            f"unit {SURVIVING_UNIT}'s middleware never observed its belt reach "
+            f"{SECOND_SETPOINT} on {actual_topic}. The command was accepted, so the break is "
+            f"on the way back: the publish out, the PLC's ramp, or the read leg. In "
+            f"{LOOP_TIMEOUT_SECONDS}s the feed carried {len(seen)} line(s): {seen[-10:]}"
         )
 
 

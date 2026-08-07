@@ -111,6 +111,15 @@ class TestTheModulesImportWithoutTheirStack:
         on that guard is honest: the branch is unreachable while ``aas_middleware`` is a
         dependency.
 
+        **And that upstream import is undeclared** (found 2026-08-07, while correcting #77's
+        record). ``httpx`` appears nowhere in ``aas_middleware``'s own manifest -- not as a
+        dependency, not as an extra -- while ``import aas_middleware`` reaches that module
+        eagerly. It is the same class of sibling defect this project's ``pyproject.toml``
+        already names for ``aiomqtt``: importing a module the manifest never mentions. Filed
+        rather than fixed here: declaring it would make the manifest honest without making
+        #77's box any more meetable, and making the import lazy upstream is a feature change
+        rather than the bugfix root ADR 0001 permits.
+
         This test pins the *actual* state, so that making httpx genuinely optional upstream
         turns this red and sends the reader back to #77's box rather than leaving a claim
         nobody rechecks. Contrast the MQTT case above, which really is optional and really
