@@ -41,27 +41,32 @@ DEFAULT_TICK_SECONDS = 8.0
 """The timed mode's default interval (#82's own acceptance criterion: it must exceed one
 lap of PUT -> unit middleware -> MQTT -> PLC -> MQTT back -> connector read).
 
-Reasoned rather than cleanly measured. A live run against a real factory (2 units, this
-ticket's own build) surfaced a pre-existing defect: #83's ramp, once it moves a belt
-through more than one tick, gets its own setpoint overwritten mid-ramp by what reads back
-as a self-echo through the unit's bidirectional MQTT wiring (a value the ramp is still
-moving through gets re-committed as the new target, so the belt freezes short of where it
-was actually sent) -- reproduced with no controller and no algorithm involved at all, by
-driving a PLC's own panel directly, so it is not this ticket's own mechanism at fault.
-That defect makes an honest, clean "time until the peer reports the commanded value"
-measurement impossible right now; it blocks #83's own acceptance criteria as much as it
-blocks this one and belongs filed against #83, not patched here as a side effect of
-picking a tick.
+**Measured 2026-08-07**, once #94 made a lap completable at all. Before that fix the belt
+froze short of its setpoint, so a lap never finished and this value shipped reasoned rather
+than measured. ``tests/test_lap_measurement.py`` (marked ``lap``, deselected by default)
+reproduces the table below against a real GraphDB, a real broker and a real middleware:
 
-The default above is chosen from what *is* verifiable independently of that bug: the REST
-connector's own poll cadence is the dominant, known term
-(``rest_binding.DEFAULT_POLL_INTERVAL_SECONDS``, 2 s) --the connector cannot report a
-change faster than it polls for one -- plus MQTT's push-based round trip (sub-second,
-unlike REST) plus a margin for the ramp's own settling once #83's echo is fixed
-(``transfer_unit.DEFAULT_RAMP_RATE`` is 1 m/s of belt speed per second, so an ordinary
-multi-m/s move settles in a few seconds). 8 s comfortably exceeds every verified term with
-room for the currently-unverifiable one; revisit once #83's defect is fixed and a clean
-measurement becomes possible."""
+    ramp (m/s)   device settled   observed back
+          0.05           0.06 s          0.02 s
+          0.5            0.52 s          0.52 s
+          1.5            1.54 s          1.52 s
+          3.0            3.06 s          3.05 s
+
+**A lap is ramp distance over ramp rate, plus about 20 ms.** Transport -- PUT, MQTT out,
+PLC, MQTT back, connector read -- is the 0.02 s row and is negligible. Everything else is
+#83's momentum (``transfer_unit.DEFAULT_RAMP_RATE``, 1 m/s per second), so the lap is a
+function of *distance* and has no single value. That is why it had to be measured rather
+than assumed, and why the criterion is "exceeds one lap" rather than "equals" it.
+
+8 s clears the slowest measured lap by 2.6x, which buys headroom for a commanded change of
+roughly 8 m/s. The ontology puts no bounds on ``tu:hasConveyorSpeed``
+(``transferunit.ttl:88``), so no tick is correct for *every* conceivable command; this one
+covers every move the demo's own seed and UI can produce. A deployment that commands larger
+jumps, or lowers the ramp rate, should raise it.
+
+The earlier reasoning from ``rest_binding.DEFAULT_POLL_INTERVAL_SECONDS`` (2 s) turned out
+to be measuring the wrong path: that is the *controller's* REST poll of a peer, not the
+unit's own MQTT round trip, and it does not appear in a lap at all."""
 
 
 def bind_free_socket(host: str) -> socket.socket:

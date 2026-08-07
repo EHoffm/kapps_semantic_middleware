@@ -37,9 +37,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers"]
+addopts = ["--strict-markers", "-m", "not lap"]
 markers = [
     "live: needs a reachable GraphDB (the GRAPHDB_* env vars). Applied automatically to any test that requests the `graphdb` fixture, so `-m 'not live'` selects the tier that runs anywhere.",
+    "lap: measures a control lap rather than asserting anything, and its timings are machine-dependent. Deselected by default (see `addopts`); run it with `-m lap -s` when the algorithm's tick needs revisiting (#82, #94).",
 ]
 # pytest-asyncio warns when this is unset and defaults it to "function". Stated explicitly so
 # the default is a decision rather than a warning; the async fixtures here are per-test.

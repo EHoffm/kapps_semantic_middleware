@@ -62,6 +62,42 @@ def methods_at(app, path: str) -> set:
     }
 
 
+@pytest.fixture(autouse=True)
+def isolate_connector_sync_manager():
+    """Empty aas_middleware's process-wide connector registry before every test.
+
+    ``ConnectorSyncManager`` is a singleton (`_instance` in
+    `aas_middleware/middleware/sync/connector_sync_manager.py`) whose
+    ``persistence_to_synced`` is a plain dict of **strong** references, and it has no
+    remove, clear, unregister or deregister method anywhere. Nothing ever takes a
+    connector out of it. So every ``SemanticMiddleware`` constructed in a pytest process
+    leaves its connectors there for the rest of the run, keyed by
+    *(data_model_name, model_id)* -- and any later middleware over the same resource
+    inherits them, because ``PersistedConnector._notify_synced_connectors`` fans out over
+    whatever that key holds.
+
+    The symptom is not a slow test. It is a *wrong* one: a second file serving
+    ``TransferUnit1`` had its writes fanned out to a previous file's dead write legs, which
+    published onto the live broker and froze a belt one ramp step short -- the exact
+    signature of the bug ``test_southbound_echo_integration.py`` exists to prevent, from a
+    cause entirely outside the code under test. Pointing the two files at different brokers
+    only converted it into a PUT that hung on an unreachable one.
+
+    Isolating here rather than in one file because the collision is between *any* two tests
+    that build a middleware over the same resource, and the next such pair would rediscover
+    it. The leak itself is a real defect and is filed separately; a middleware that owns its
+    whole process, which is what the factory demo runs (ADR 0029), never meets it.
+    """
+    from aas_middleware.middleware.sync.connector_sync_manager import (
+        connector_sync_manager,
+    )
+
+    connector_sync_manager.persistence_to_synced.clear()
+    connector_sync_manager.connection_to_persistence.clear()
+    connector_sync_manager.synced_connectors.clear()
+    yield
+
+
 @pytest.fixture(scope="session")
 def graphdb():
     """A live GraphDB client from the environment, or skip the test.

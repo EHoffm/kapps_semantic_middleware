@@ -154,16 +154,21 @@ class MQTTParameterFormatter:
 
         Raises if nothing has ever been observed for this parameter (ADR 0024's
         locator pattern: the graph holds no ``inf:hasValue`` until a connector
-        fills it). This is reachable in practice: the framework's cross-field
-        notify fan-out (``PersistedConnector._notify_synced_connectors``) asks
-        *every* write leg on a resource to re-derive its own slice whenever *any*
-        field on that resource changes, including a sibling parameter nothing has
-        set yet. A bare ``None`` would encode as the JSON scalar ``null``, not a
+        fills it). A bare ``None`` would encode as the JSON scalar ``null``, not a
         valid device value, and a receiver expecting a number or boolean chokes on
-        it. The caller's best-effort fan-out (``persisted_connector.py``) already
-        catches and logs a per-sibling failure exactly like this one, so raising
-        here is the same "nothing safe to send" outcome silently accepting `None`
-        would have hidden as a network-level failure at the device.
+        it. The caller's best-effort fan-out (``persisted_connector.py``) catches
+        and logs a per-connector failure, so raising here is the same "nothing safe
+        to send" outcome that silently accepting ``None`` would have hidden as a
+        network-level failure at the device.
+
+        This used to be the ordinary case rather than the guard it reads as. The
+        fan-out asked *every* write leg on a resource to re-derive its slice
+        whenever *any* field changed, so a parameter nothing had ever set was
+        routinely asked to publish. ADR 0035 scoped the fan-out to the field that
+        actually moved (``changed``), so a write leg is now only asked when its own
+        parameter was written -- and a write carries the value with it. The guard
+        stays because "asked to publish something never observed" is still a real
+        error state, and one worth naming rather than encoding as ``null``.
         """
         value = self._value_of(data)
         if value is None:

@@ -147,6 +147,15 @@ def _make_put_handler(
     precise. Only the one field mutates. Every sibling stays byte-identical. A downstream
     diff-based commit writes nothing for the siblings. See that file lines around the field-level
     branch.
+
+    The precision has to survive the ``consume`` call as well, and it did not (#94). A
+    persistence connector is keyed by *(data_model_name, model_id)*, so every connector on
+    this resource hangs off the one this handler fetches. Handing it the whole model with no
+    further word meant the fan-out asked *every* write leg on the resource to re-derive its
+    slice -- including a sibling parameter this PUT never touched, whose write leg then
+    published its last *observed* value onto its *set* topic as though someone had commanded
+    it. ``changed`` carries the same field identity the mutation above already used, so the
+    fan-out reaches this parameter's write leg and no other.
     """
     async def put_parameter(body):
         try:
@@ -161,7 +170,21 @@ def _make_put_handler(
             else:
                 setattr(_owner_of(model, owner_id, field_id), field_id, body)
 
-            await connector.consume(model)
+            # `contained_model_id=owner_id` unconditionally, including when the parameter
+            # sits on the root: `middleware._wire_semantic_connectors` registers every
+            # binding with `contained_model_id=str(binding.resource_iri)`, so a root-owned
+            # parameter's connector carries the root's own id there rather than `None`.
+            # Leaving it `None` here would widen the scope to every field on the resource
+            # and quietly restore the defect.
+            await connector.consume(
+                model,
+                changed=ConnectionInfo(
+                    data_model_name=data_model_name,
+                    model_id=root_id,
+                    contained_model_id=owner_id,
+                    field_id=field_id,
+                ),
+            )
             # A PUT is always news. Something northbound chose to act. Log after the
             # consume. The line means "applied" rather than "attempted" (#67).
             logger.info("PUT applied: %s on %s = %r", field_id, owner_id, body)
