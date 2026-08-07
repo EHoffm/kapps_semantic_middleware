@@ -265,7 +265,9 @@ def mount_onto(
         index.py's boxes, so it carries its own dict rather than importing that one)."""
         template_path = Path(__file__).parent / "templates" / "station_board.html"
         page = template_path.read_text(encoding="utf-8")
-        return HTMLResponse(page.replace("__TEACH__", json.dumps(TEACH)))
+        page = page.replace("__TEACH__", json.dumps(TEACH))
+        page = page.replace("__QUERIES__", json.dumps(algorithm.named_view_queries()))
+        return HTMLResponse(page)
     
     # Reset OpenAPI schema so /docs and /openapi.json describe the routes that actually exist.
     app.openapi_schema = None
