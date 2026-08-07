@@ -1,107 +1,211 @@
-# TransferUnit Factory
+# The TransferUnit Factory demo
 
-A running multi-process demo (ADR 0029). One command seeds a knowledge graph, spawns N
-TransferUnits, and a controller that discovers and drives them purely through the graph.
+This demo builds a very small factory on your computer and lets you drive it from a web browser.
 
-Milestone 1 runs **2N+2** processes: one PLC+panel and one middleware per unit, plus one control
-station. (The target topology is 2N+3 — a monitor joins in milestone 2; see
-`../../src/kapps_semantic_middleware/docs/adr/0029-the-factory-is-one-process-per-participant.md`.)
+Nothing here is real hardware. Every machine is a Python program that pretends to be one. But the
+parts talk to each other the same way real ones would, so what you see is the real behaviour.
 
-```
-launcher            fixed port, the only bookmarkable one; seeds the graph, spawns, serves the
-                    index page, tears down
-├── plc-1           MockTransferUnit + its panel     (no GRAPHDB_* in its environment, ever)
-├── middleware-1    SemanticMiddleware                (uvicorn owns the process's only loop)
-├── plc-2           …
-├── middleware-2    …
-└── control-station SemanticMiddleware wrapping the Controller (#43), northbound consumer
-```
+## What you will see
 
-## Run it
+The demo starts **6 programs** at once. Each one is a separate process, like a separate machine on
+a factory floor.
 
-Requires a running GraphDB with `GRAPHDB_URL` / `GRAPHDB_USERNAME` / `GRAPHDB_PASSWORD` /
-`GRAPHDB_REPOSITORY` set in the environment. Nothing else needs to be running first — each unit
-brings up its own MQTT broker, on `18830 + <unit index>` (unit 1 → `18831`, unit 2 → `18832`, …),
-the moment its middleware registers that unit's first MQTT connector (ADR 0029 as amended, ADR
-0034). No broker is shared, and nothing in this demo listens on `1883`.
+| program | what it pretends to be |
+| --- | --- |
+| **PLC 1** and **PLC 2** | Two conveyor machines. Each has 2 belts and 2 light barriers. Each has its own small web page. |
+| **Middleware 1** and **Middleware 2** | One "translator" per machine. It reads the machine over MQTT and offers it to the network over HTTP. |
+| **Control station** | An operator screen. It finds the machines by asking a database, then drives them. |
+| **Launcher** | Starts all of the above and shows you a picture of them. |
 
-```
-python -m demo.transferunits --units 2
-```
+A **TransferUnit** is one conveyor machine: 2 belts and 2 light barriers.
 
-- `--units N` — how many TransferUnits to seed and spawn (default 2).
-- `--force` — clear and reseed even if a live factory is already running.
+**The point of the demo:** the control station is never told where the machines are. It asks a
+knowledge graph (a database of facts), finds whatever is there, and drives it. You can stop a
+machine and it disappears from the screen. Nothing is hardcoded.
 
-This opens the index page at `http://127.0.0.1:8080/` — a live topology picture of every
-participant, since every other port in the factory is dynamic. Point at a box or a wire to read
-what it is and which backend file to open; a failed box opens to show its last output. One `stop`
-button per unit, and one `stop the factory` button. Stopping one unit stops that unit's PLC,
-middleware and broker together, and leaves every other unit's MQTT traffic untouched.
+---
 
-Every child's command line is also printed as it's spawned, so any one process can be
-copy-pasted into a debugger and run alone against the already-seeded graph, e.g. for unit 2:
+## Before you start
 
-```
-python -m demo.transferunits.plc --unit-index 2 --broker 127.0.0.1 --broker-port 18832 --panel-port 0
-python -m demo.transferunits.middleware --unit-index 2 --port 0
-python -m demo.transferunits.control_station --port 0
+You need three things.
+
+### 1. Python and `uv`
+
+`uv` installs the project and its libraries. If you do not have it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-The PLC tolerates being started before its broker exists — it retries the connection with a
-backoff, since the middleware brings that broker up concurrently rather than before it.
+### 2. The four repositories, side by side
 
-Press Ctrl+C to stop. Teardown is ordered: every middleware and the control station are SIGTERMed
-first, so each deregisters (`svc:Service` removed) while its PLC is still answering; then the PLCs.
+This project needs three other projects next to it, in the **same parent folder**:
 
-## Running it over SSH
+```
+your-code-folder/
+├── kapps_semantic_middleware/   <- this project
+├── graph_db_interface/
+├── kapps_ogm/
+└── aas_middleware_inf/
+```
 
-Only the Launcher's fixed port (`8080`) is dependable — every other port is self-allocated at
-random (ADR 0029), so it never reaches an IDE's own port auto-forwarding. To make it work over an
-SSH connection (e.g. VS Code / Cursor Remote-SSH):
+**This matters, and it is the most common reason the demo does not start.** Each of the three other
+projects must sit on a specific branch. Follow **[../../SIBLINGS.md](../../SIBLINGS.md)** — it has
+the exact commands to copy.
 
-- Forward the Launcher's port (`127.0.0.1:8080`).
-- Set `remote.autoForwardPortsSource` to `output` or `hybrid`. Every child's address line is
-  echoed to the Launcher's own stdout as it's spawned, prefixed with the child's identity (e.g.
-  `middleware-1 The middleware runs on http://127.0.0.1:41288/`) — with that setting, the IDE
-  matches those lines and forwards each port they name.
-- Open the index page through the forwarded Launcher port. Its links are built from the browsing
-  host and the child's real port, not from the hardcoded `127.0.0.1` the child itself reports, so
-  they follow the same tunnel.
+Then check it:
 
-**Known limitation**: if a child's port is already taken on your machine, the IDE forwards it to a
-*different* local port than the one named in the echoed line, but the index page's link is still
-built from the remote port — that one link points at the wrong local port. The robust fix is to
-reverse-proxy every child UI under the Launcher's single fixed port; that was considered and not
-chosen. Forward the mismatched port by hand if this bites, or free up the local port and restart.
+```bash
+python scripts/check_siblings.py
+```
 
-## Layout
+If it prints green ticks, you are ready. If not, it prints exactly what to run.
 
-- `__main__.py` — the entry point: builds the Factory, wires it into the index page, runs uvicorn
-  on the Launcher's fixed port.
-- `launcher.py` — the `Factory`: seeds, spawns, tracks (starting/slow/live/failed/stopped), and
-  stops every child process. No HTTP route here (ADR 0029) — a guard test enforces it.
-- `index.py` — the index page's routes and its live-state/output/stop API. No subprocess and no
-  seed here — a guard test enforces it.
-- `templates/index.html` — the topology picture, the teaching layer, and the polling JS. Grown
-  from the throwaway prototype #68 specified (`prototype_index.py`, deleted once this page shipped).
-- `middleware.py` — the runner: one resource-mode `SemanticMiddleware` per unit. Also fills the
-  library's transport seam (ADR 0034) with `ensure_transport`: this unit's own in-process MQTT
-  broker, on a daemon thread that dies with the process.
-- `control_station.py` — the runner for the Controller (#43), wrapped as middleware; now also runs
-  the view mechanism and algorithm loop alongside the app lifespan (ADR 0033).
-- `controller.py` — SPARQL-driven discovery and actuation: `view(query)` returns matching resource
-  IRIs, `wire_view(hits, class_scope=...)` registers REST connectors for each hit's parameters,
-  `await push(iri)` drives in-place assignments out to their owners over REST.
-- `algorithm.py` — the Control Expert's own code: the SPARQL view query (even-unit-index heuristic),
-  the unit `ClassScope`, and a deliberately meaningless periodic algorithm (ADR 0033 step 5) that
-  reads a barrier on one live unit and sets a conveyor belt's speed on another, purely to demonstrate
-  reach — never a real material-flow controller (the graph carries no plant layout, so nothing here
-  could route anything even if it tried).
-- `seed.py` — index-derived IRI minting, MQTT topics and each unit's own broker port for N units
-  (ADR 0030), plus the one control station individual.
-- `plc/` — the mock PLC and its own panel UI, one process per unit (ADR 0029's process split).
-- `factory.ttl`, `transferunit.ttl` — the demo's own ontology (control station class, TransferUnit
-  shape).
+### 3. A GraphDB database
 
-See `CONTEXT.md` for the domain language (Factory, Unit index, Launcher, Runner, Control station,
-Panel, Live factory) and the ADRs it points at for the decisions behind this shape.
+GraphDB stores the knowledge graph. The demo reads and writes it. Put these four values in your
+environment (for example in a `.env` file, or with `export`):
+
+```bash
+export GRAPHDB_URL=https://your-graphdb-server
+export GRAPHDB_USERNAME=your-username
+export GRAPHDB_PASSWORD=your-password
+export GRAPHDB_REPOSITORY=the-repository-name
+```
+
+> **Warning.** The demo **writes into** the repository you name here, and `--force` **deletes and
+> rewrites** the demo's data in it. Use a repository you are allowed to overwrite. Do not point this
+> at anything you care about.
+
+You do **not** need to install an MQTT broker. Each machine starts its own, inside its own process.
+
+---
+
+## Start it
+
+From the `kapps_semantic_middleware` folder:
+
+```bash
+uv sync                                   # install everything (only needed once)
+uv run python -m demo.transferunits --units 2
+```
+
+Then open **<http://127.0.0.1:8080/>** in your browser.
+
+That address is fixed and always the same. Every other program picks a free port at random, so the
+launcher page is your way in — it lists every program and links to it.
+
+Two options:
+
+- `--units 2` — how many machines to build. Try `--units 3`.
+- `--force` — wipe the demo's old data and start fresh. Use it if a previous run did not shut down
+  cleanly.
+
+## Stop it
+
+Press **Ctrl+C** in the terminal. Or press **stop the factory** on the launcher page.
+
+Both shut the programs down in the right order, so each machine removes itself from the knowledge
+graph on the way out. If you just close the terminal window instead, the graph keeps stale entries
+and the next run may complain — that is what `--force` clears.
+
+---
+
+## What to try, in order
+
+### 1. Look at the launcher page — <http://127.0.0.1:8080/>
+
+A picture of all 6 programs and how they connect. Hover over any box to read what it is and which
+source file it comes from.
+
+### 2. Open a machine's own page
+
+Click a **PLC** box. This is the machine's own control panel, the kind of screen that sits on the
+machine itself. Set a belt speed and watch it move.
+
+**Belts have momentum.** A belt does not jump to a new speed. It ramps up at 1 m/s per second, so
+asking for 3 m/s takes about 3 seconds. This is on purpose — a real belt has mass.
+
+### 3. Open the control station — the station board
+
+Click the **control station** box. This screen never talked to the machines directly. It ran a
+database query, found them, and connected.
+
+Try this:
+
+1. Press **pause**. The station board runs an automatic program on a timer; you must pause it before
+   you can drive a machine by hand.
+2. Expand a machine's card and type a new belt speed, then press **set**.
+3. Watch the value. It says `sending`, then climbs, then reaches your number and says `settled`.
+4. Turn on **show IRIs**. Every row now also shows its full name in the knowledge graph, the exact
+   Python line that sets it, and which private details were hidden from the network.
+
+### 4. Prove the discovery is real
+
+With the demo still running, press **stop** on one unit in the launcher page. Go back to the station
+board. Within a few seconds that machine is gone from the screen. Nobody edited any configuration —
+the machine removed itself from the graph, and the station board simply stopped finding it.
+
+---
+
+## When something goes wrong
+
+| what you see | what it usually means |
+| --- | --- |
+| `ModuleNotFoundError`, or strange errors on start | The three sibling projects are missing or on the wrong branch. Run `python scripts/check_siblings.py`. |
+| An error mentioning `GRAPHDB_` | The four environment variables are not set, or the database is unreachable. |
+| "a live factory is already running" | A previous run did not shut down. Start again with `--force`. |
+| A box on the launcher page turns red | That program crashed. **Click the red box** — it opens and shows that program's last output. |
+| The page loads but no values change | Give it a few seconds. Machines publish their state on a timer. |
+
+Every program's output also appears in the terminal you started from, with a name in front of each
+line (`plc-1`, `middleware-2`, `control`), so you can see which program said what.
+
+---
+
+## Running it on a remote server over SSH
+
+Only port **8080** is fixed. Every other port is chosen at random when the program starts, so your
+editor cannot know them in advance.
+
+- Forward port `8080`.
+- In VS Code or Cursor, set `remote.autoForwardPortsSource` to `output` or `hybrid`. Each program
+  prints its address when it starts, and with that setting the editor reads those lines and forwards
+  each port automatically.
+- Open the launcher page through the forwarded port. Its links are built from the address you are
+  browsing with, so they follow the same tunnel.
+
+**Known limitation.** If one of those random ports is already busy on your own machine, your editor
+forwards it to a *different* local port, but the launcher's link still names the remote one. That
+one link will be wrong. Forward that port by hand, or free the port and restart.
+
+---
+
+## For developers: what each file does
+
+The demo is deliberately split so that each file has one job. Guard tests fail if the split is
+broken.
+
+| file | job |
+| --- | --- |
+| `__main__.py` | The entry point. Builds the factory and serves the launcher page. |
+| `launcher.py` | Starts, tracks and stops the child programs. **No web routes here.** |
+| `index.py` | The launcher page's web routes. **No process handling here.** |
+| `templates/index.html` | The topology picture and its polling code. |
+| `middleware.py` | Runs one middleware per machine, and starts that machine's MQTT broker. |
+| `control_station.py` | Runs the control station process and its timed algorithm. |
+| `station_board.py` | The station board's web routes and template. |
+| `controller.py` | Finding machines by query, and driving them over HTTP. |
+| `algorithm.py` | The example automatic program. It reads a barrier on one machine and sets a belt speed on another — only to show that it can reach them. It is not a real controller. |
+| `seed.py` | Writes the starting facts for N machines into the knowledge graph. |
+| `plc/` | The pretend machine and its own panel page. |
+| `factory.ttl`, `transferunit.ttl` | The vocabulary: what a TransferUnit is made of. |
+
+**The full loop this demo proves:**
+
+```
+PLC → MQTT → middleware → knowledge graph → control station → HTTP → back to the PLC
+```
+
+`CONTEXT.md` in this folder explains the words used here (Factory, Unit index, Launcher, Runner,
+Control station, Panel, Live factory) and points at the decision records behind each choice.
