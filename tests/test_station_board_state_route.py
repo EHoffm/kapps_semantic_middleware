@@ -30,6 +30,7 @@ a real peer in ``test_controller_view.py::TestDrivingAView``.
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -251,6 +252,49 @@ class TestTheExpertToggle:
             assert any("MQTT" in marker for marker in row["pruned"]), (
                 f"expected the stripped MQTT markers, got {row['pruned']}"
             )
+
+    async def test_the_payload_never_carries_what_it_reports_as_pruned(
+        self, graphdb, ogm, unit_scope
+    ):
+        """A row that lists a marker under ``pruned`` must not ship its value.
+
+        This was false until #78's scope-down: ``facets`` excluded two keys by name and
+        carried everything else, so the same response announced
+        ``"pruned": ["hasMQTTBrokerIP", ...]`` beside
+        ``"facets": {"hasMQTTBrokerIP": "127.0.0.1", ...}``. The controller drives peers
+        over REST and holds no MQTT connector, so a broker address on this page is ADR
+        0028's boundary leaking from the consumer side.
+
+        Two assertions, because the marker *names* must still appear: ``pruned`` exists to
+        name them. What must not appear is their **values**. So the key check is
+        per-row (facets and pruned must not intersect), and the value check is against the
+        whole serialised body -- a future field that re-adds the broker address under some
+        other key should fail here rather than pass by renaming itself.
+        """
+        client, _ = await _board(
+            graphdb, ogm, unit_scope, name="CS-noleak", live=(1,), query=_query_selecting(1)
+        )
+
+        body = client.get("/api/state").json()
+        rows = _rows(body)
+        assert rows, "no parameter rows to check"
+
+        reported_pruned = {marker for row in rows for marker in row["pruned"]}
+        assert reported_pruned, "nothing reported as pruned, so this proves nothing"
+
+        for row in rows:
+            leaked = set(row["facets"]) & set(row["pruned"])
+            assert not leaked, (
+                f"{row['field_id']} reports {sorted(leaked)} as pruned and ships them as facets"
+            )
+
+        serialised = json.dumps(body)
+        assert seed.MQTT_BROKER_IP not in serialised, (
+            "the peer unit's broker address reached the browser"
+        )
+        assert "/speed_set" not in serialised, (
+            "a peer unit's MQTT set topic reached the browser"
+        )
 
 
 @requires_graphdb

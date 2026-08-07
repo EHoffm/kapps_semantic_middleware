@@ -85,7 +85,7 @@
 </main>
 
 <div class="bar">
-  <span>Commanded speed appears only when divergent from actual</span>
+  <span>A ramping belt shows what it is ramping to. Highlighted means it stopped short.</span>
 </div>
 
 <script>
@@ -135,10 +135,16 @@ function render(s) {
     if (label) label.textContent = pos + '  ' + speed.toFixed(2) + ' m/s';
 
     const box = document.getElementById('cmd-' + pos);
-    const diverged = cmd !== null && Math.abs(cmd - speed) > 1e-9;
-    box.classList.toggle('diverged', diverged);
-    // Commanded speed line appears ONLY when divergent from actual
-    if (diverged) {
+    // `diverged` means STOPPED CONVERGING, not unequal (#81, which amended #31 to say
+    // so; #93 item 3). Under #83's ramp the two are unequal during every set by design,
+    // so the old `abs(cmd - speed) > 1e-9` painted every healthy ramp as a fault.
+    // The verdict is the server's -- panel.py's ConvergenceTracker judges it on the
+    // clock, so opening a second tab cannot make a belt diverge sooner.
+    const status = (s.belt_status || {})[pos];
+    box.classList.toggle('diverged', status === 'diverged');
+    if (status === 'diverged') {
+      box.textContent = 'stopped at ' + speed.toFixed(2) + ', commanded ' + cmd.toFixed(2) + ' m/s';
+    } else if (status === 'converging') {
       box.textContent = 'ramping to ' + cmd.toFixed(2) + ' m/s';
     } else {
       box.textContent = '';

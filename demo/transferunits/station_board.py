@@ -348,13 +348,41 @@ def mount_onto(
                 raw_value = getattr(param_node, INF.hasValue.lined, None)
                 value = raw_value[0] if raw_value else None
                 
-                # Facets — every metadata key except accessMode and address.
+                # What pruning stripped for this exact parameter (#78's picked surface).
+                # Computed before the facets below, because the facets are defined in
+                # terms of it.
+                pruned_set = wiring.southbound_by_property.get(str(binding.parameter_property), frozenset())
+                pruned_list = sorted(_local_fragment(p) for p in pruned_set)
+
+                # Facets -- the parameter's own descriptive properties, and only those.
+                #
+                # Excluded on two different grounds, which is why this is not one set.
+                # `accessMode` and `address` are *rendered elsewhere* on the row, so
+                # repeating them as facets would duplicate them. The southbound markers
+                # are excluded because they are **not this consumer's to show**: the
+                # controller reaches its peers over REST and has no MQTT connector, so a
+                # broker address on this page is the ADR 0028 boundary leaking from the
+                # consumer side (ticket #78).
+                #
+                # Derived from the ontology's own prune set rather than from a literal
+                # list, so a protocol marker declared southbound later is excluded here
+                # with no code change -- the same fail-closed property ADR 0028 gives the
+                # serving path, and the reason this is not a hardcoded allow-list: #82
+                # requires a parameter added to the seed to render with no code change,
+                # which an allow-list would break.
+                #
+                # Note this does not make the binding stop *holding* them. The controller
+                # still has the peer's broker address in `ParameterBinding.metadata` for
+                # the life of the process. Fixing that needs kapps_ogm to fetch a
+                # parameter node partially -- specified as SAWeindel/kapps_ogm#23, and
+                # recorded as accepted debt on #78.
+                rendered_elsewhere = {str(INF.accessMode), str(SVC.address)}
                 facets: Dict[str, Any] = {}
-                excluded_keys = {str(INF.accessMode), str(SVC.address)}
                 for key, val in binding.metadata.items():
-                    if key not in excluded_keys:
-                        facets[_local_fragment(key)] = _first_value(val)
-                
+                    if key in rendered_elsewhere or key in pruned_set:
+                        continue
+                    facets[_local_fragment(key)] = _first_value(val)
+
                 # Commanded value.
                 commanded_val = controller.writes.commanded_for(
                     binding.resource_iri, binding.field_id
@@ -367,10 +395,6 @@ def mount_onto(
                     }
                 else:
                     commanded_data = None
-                
-                # Pruned properties.
-                pruned_set = wiring.southbound_by_property.get(str(binding.parameter_property), frozenset())
-                pruned_list = sorted(_local_fragment(p) for p in pruned_set)
                 
                 # Assignment expression — literal "inf:hasValue" substring (illustrative CURIE).
                 holder_fragment = _local_fragment(str(binding.resource_iri))

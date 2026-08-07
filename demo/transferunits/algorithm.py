@@ -1,7 +1,12 @@
 """The Control Expert's own algorithm code for the TransferUnit factory demo.
 
-This module is the **only** place in this demo allowed to name domain terms like
-``tu:TransferUnit``, ``tu:hasConveyorBelt``, etc. The generic ``Controller`` mechanism
+This module is the only place in the demo's **runtime control path** allowed to name
+domain terms like ``tu:TransferUnit``, ``tu:hasConveyorBelt``. The claim is narrower than
+"the only place in this demo", which it used to say and which was never true: ``seed.py``
+names them throughout, as it must -- it stands in for the TransferUnit Expert writing the
+factory into the graph, which is the other half of ADR 0033's two experts (#93 item 5).
+The line this draws is between the *Control* Expert's code and the generic mechanism it
+runs on. The generic ``Controller`` mechanism
 in ``controller.py`` deliberately knows nothing about any domain class -- it executes
 the view, wires connectors, and loads datamodels, but the *what* (which class, which
 heuristic) lives here, not there. This separation realizes ADR 0033's core claim: the
@@ -197,6 +202,33 @@ def unit_class_scope() -> ClassScope:
     )
 
 
+def _first_belt_speed(unit, unit_iri: IRI, role: str):
+    """``(belt, speed_parameter)`` for a unit's first conveyor belt, or ``(None, None)``.
+
+    Collapses what were four near-identical ``getattr`` -> ``if not`` -> ``warning`` ->
+    ``return None`` blocks, twice over for source and target (#93 item 5). It also takes
+    the three-deep walk with it: reaching a value means
+    ``getattr(getattr(belts[0], ...)[0], INF.hasValue.lined)``, and repeating that by hand
+    is how the two copies drifted in the first place.
+
+    ``role`` is the word the warning uses ("Source" / "Target"), so a skipped tick still
+    says *which* unit was incomplete -- the whole value of the four separate messages.
+    """
+    belts = getattr(unit, seed.TU_HAS_CONVEYOR_BELT.lined, None) or []
+    if not belts:
+        logger.warning("%s unit %s has no conveyor belts; skipping tick.", role, unit_iri)
+        return None, None
+
+    speed_param = getattr(belts[0], seed.TU_HAS_CONVEYOR_SPEED.lined, None) or []
+    if not speed_param:
+        logger.warning(
+            "%s belt on %s has no speed parameter; skipping tick.", role, unit_iri
+        )
+        return None, None
+
+    return belts[0], speed_param[0]
+
+
 async def run_algorithm_once(controller: Controller) -> Optional[IRI]:
     """Execute one tick of the demonstration algorithm (ADR 0033 step 5).
 
@@ -241,34 +273,24 @@ async def run_algorithm_once(controller: Controller) -> Optional[IRI]:
             logger.info("Barrier on %s reads %s", source_iri, occupied_value)
 
     # Read the source unit's first conveyor belt's current hasConveyorSpeed value.
-    source_belts = getattr(source_unit, seed.TU_HAS_CONVEYOR_BELT.lined)
-    if not source_belts:
-        logger.warning("Source unit %s has no conveyor belts; skipping tick.", source_iri)
+    _, source_speed_param = _first_belt_speed(source_unit, source_iri, "Source")
+    if source_speed_param is None:
         return None
-    source_speed_param = getattr(source_belts[0], seed.TU_HAS_CONVEYOR_SPEED.lined)
-    if not source_speed_param:
-        logger.warning("Source belt on %s has no speed parameter; skipping tick.", source_iri)
-        return None
-    speed_value = list(getattr(source_speed_param[0], INF.hasValue.lined))
+    speed_value = list(getattr(source_speed_param, INF.hasValue.lined))
 
     # Echo the source's speed onto the target unit's first conveyor belt. A fresh list
     # (not the source's own) -- the two units must not end up sharing one mutable list.
-    target_belts = getattr(target_unit, seed.TU_HAS_CONVEYOR_BELT.lined)
-    if not target_belts:
-        logger.warning("Target unit %s has no conveyor belts; skipping tick.", target_iri)
+    target_belt, target_speed_param = _first_belt_speed(target_unit, target_iri, "Target")
+    if target_speed_param is None:
         return None
-    target_speed_param = getattr(target_belts[0], seed.TU_HAS_CONVEYOR_SPEED.lined)
-    if not target_speed_param:
-        logger.warning("Target belt on %s has no speed parameter; skipping tick.", target_iri)
-        return None
-    setattr(target_speed_param[0], INF.hasValue.lined, speed_value)
+    setattr(target_speed_param, INF.hasValue.lined, speed_value)
 
     # Record what this write is asking for before driving it out (#82): the served
     # datamodel carries only the observed value (ADR 0024's locator pattern), so this is
     # the only place the station board could ever learn "commanded" from, for a write
     # the algorithm made and no human's browser initiated.
     controller.writes.record_commanded(
-        target_belts[0].id, seed.TU_HAS_CONVEYOR_SPEED.lined, speed_value, origin="algorithm"
+        target_belt.id, seed.TU_HAS_CONVEYOR_SPEED.lined, speed_value, origin="algorithm"
     )
 
     # Drive the assignment out -- no HTTP call here, push() does the plumbing.
@@ -282,7 +304,7 @@ async def run_algorithm_once(controller: Controller) -> Optional[IRI]:
         await controller.push(target_iri)
     except Exception as exc:
         controller.writes.record_rejected(
-            target_belts[0].id, seed.TU_HAS_CONVEYOR_SPEED.lined, str(exc)
+            target_belt.id, seed.TU_HAS_CONVEYOR_SPEED.lined, str(exc)
         )
         logger.warning("Algorithm write to %s was rejected: %s", target_iri, exc)
         return target_iri

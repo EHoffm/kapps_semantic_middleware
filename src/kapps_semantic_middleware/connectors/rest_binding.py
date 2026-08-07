@@ -94,7 +94,19 @@ _UNSET = object()
 
 
 def _is_a_change(value: Any, previous: Any) -> bool:
-    """Whether a polled value is news, for change-only INFO logging."""
+    """Whether a polled value is news, for change-only INFO logging.
+
+    Kept as a named function rather than inlined to its two call sites (#93 item 5 offered
+    the inlining), for one reason: ``mqtt_binding`` has a function of the same name that is
+    **not** a bare ``!=`` -- it treats NaN as equal to itself, because IEEE-754 says
+    ``nan != nan`` and a sensor stuck at NaN would otherwise report every republish as a
+    change and flood the feed the comparison exists to keep readable.
+
+    The two are deliberately not shared, and the divergence is the point worth seeing: this
+    one polls a peer middleware's REST route, which serves JSON, so a NaN cannot survive the
+    encoding to reach here. Inlining ``value != previous`` would erase the question of
+    whether that reasoning still holds the next time this file grows a value type.
+    """
     return value != previous
 
 

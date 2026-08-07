@@ -28,7 +28,7 @@ steps (ADR 0033, ``CONTEXT.md``):
 
 The controller still discovers resources by class IRI via ``discover_resources`` (ticket
 #43), independent of the view mechanism above, and still derives REST parameter paths
-via ``_build_parameter_path`` (moved to ``rest_binding.py``, ticket #77). It registers
+via ``rest_binding.build_parameter_path`` (moved there by ticket #77). It registers
 itself as a ControlStationService so it appears in its own discovery list.
 """
 
@@ -444,7 +444,12 @@ class Controller(SemanticMiddleware):
             heartbeat_interval=heartbeat_interval,
             staleness_threshold=staleness_threshold,
             class_scope=None,  # No device interface to prune
-            autoregister_connectors=False,  # No connectors for the controller itself
+            # Not "no connectors" -- `wire_view` registers a REST connector per driveable
+            # parameter of every view hit, six per unit in this demo. What this flag turns
+            # off is recognition *at construction*, against this controller's own resource:
+            # a control station is not a device and has no parameters of its own to bind.
+            # Its connectors come from the view, which does not exist yet at this point.
+            autoregister_connectors=False,
             activity_feed=activity_feed,
             activity_capacity=activity_capacity,
         )
@@ -1046,37 +1051,6 @@ class Controller(SemanticMiddleware):
 
         return result
 
-    @staticmethod
-    def _build_parameter_path(
-        resource_class_local_name: str,
-        resource_iri: IRI,
-        steps: Sequence[Tuple[str, str]],
-        terminal_field: str,
-    ) -> str:
-        """Build the structural REST path for a parameter from known (field, child_id) hops.
-
-        Delegates to ``rest_binding.build_parameter_path`` (ticket #77): the algorithm names
-        no domain term and the REST semantic connector needs the identical derivation at
-        recognition time, so it moved to ``src/`` rather than being duplicated or rewritten
-        (ADR 0033). This wrapper is kept because it is this class's own public surface and
-        existing callers address it as ``Controller._build_parameter_path``.
-
-        The caller already knows each hop's child id. This method only assembles path
-        segments. It does not search a tree. For a version that searches and
-        validates a fetched tree, see _derive_parameter_path.
-
-        Args:
-            resource_class_local_name: Fragment of the resource's class IRI (e.g. "TransferUnit").
-            resource_iri: The root resource's own IRI.
-            steps: Sequence of (field_name, child_id) hops to navigate the tree.
-            terminal_field: The final field name (the parameter itself).
-
-        Returns:
-            The structural URL path.
-        """
-        return _rest_build_parameter_path(
-            resource_class_local_name, resource_iri, steps, terminal_field
-        )
 
     @staticmethod
     def _derive_parameter_path(
@@ -1091,7 +1065,7 @@ class Controller(SemanticMiddleware):
         Mirrors rest_router.py's _accumulate_routes logic. It operates on a plain
         dict/list JSON tree, not on pydantic models.
         This method checks that every hop's child id exists in the tree, then
-        builds the path. Use this method, not _build_parameter_path, when the ids
+        builds the path. Use this method, not rest_binding.build_parameter_path, when the ids
         come from outside the tree and need a check.
 
         A terminal parameter is a field whose value is a list of dicts WITHOUT an "id" key
@@ -1126,6 +1100,6 @@ class Controller(SemanticMiddleware):
 
             current_level = child_dict
 
-        return Controller._build_parameter_path(
+        return _rest_build_parameter_path(
             resource_class_local_name, resource_iri, steps, terminal_field
         )

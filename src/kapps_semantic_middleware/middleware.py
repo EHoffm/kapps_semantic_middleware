@@ -1038,6 +1038,19 @@ class SemanticMiddleware(Middleware):
         Idempotent -- harmless to call more than once, but skipped once this
         ``data_model_name`` is registered, so a caller need not track whether it already
         ran.
+
+        **Kept here rather than fixed upstream, knowingly** (#93 item 5 raised this as a
+        root ADR 0001 question). Every fact this method uses -- that the fallback is
+        ``PersistenceFactory(ModelConnector)``, that the lookup does
+        ``issubclass(persisted_model_type, model_type)`` -- belongs to ``aas_middleware``,
+        so this is a reimplementation of a sibling's internals in a downstream repo, and it
+        drifts silently the moment that fallback changes. Root ADR 0001 would permit fixing
+        it there, but the sibling is not *defective*: it warns about a real choice it made,
+        and suppressing that warning for every consumer is a feature change, not a bugfix.
+        The failure mode if it drifts is benign and loud enough -- the warning returns --
+        rather than a wrong value, which is why this is a recorded bet rather than a fix.
+        Revisit it with map #57's follow-on map #96, which takes ownership of this exact
+        registry.
         """
         connection_info = ConnectionInfo(data_model_name=data_model_name)
         if connection_info in self.persistence_registry.persistence_factories:
