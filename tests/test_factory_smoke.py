@@ -408,13 +408,21 @@ def factory() -> Iterator[FactoryHandle]:
         except (ProcessLookupError, subprocess.TimeoutExpired):
             pass
 
-        # Only then the net. Nothing above is guaranteed if the launcher died mid-spawn, and
-        # an orphaned PLC keeps a broker port bound against the next run.
-        if proc.poll() is None:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+        # Only then the net -- and unconditionally, which is the correction. This used to be
+        # guarded by `if proc.poll() is None`, so it fired only while the *launcher* was
+        # still alive. Orphans arise in exactly the opposite case: the launcher exits
+        # cleanly and its five children, in their own session, do not. Measured after a run
+        # that skipped the `/api/stop` above -- the launcher was gone, the guard was
+        # therefore false, and three children kept unit 1's broker port bound. That port is
+        # also conftest.py's MQTT_TEST_PORT, so twelve unrelated tests in the *non-live*
+        # tier then failed with "Broker startup failed".
+        #
+        # Signalling an already-reaped group raises ProcessLookupError, which is the normal
+        # path when everything did stop, and is caught.
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 class TestTheFactoryComesUp:

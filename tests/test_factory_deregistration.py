@@ -26,6 +26,7 @@ already proven next door.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -58,6 +59,37 @@ READY_TIMEOUT_SECONDS = 180.0
 
 STOP_TIMEOUT_SECONDS = 60.0
 """A clean stop waits on the ordered teardown of ADR 0029, not on a signal."""
+
+
+def _kill_factory(proc: subprocess.Popen) -> None:
+    """Take down the launcher *and everything it spawned*, whatever state the test left.
+
+    Killing only the launcher is not enough. It is started with ``start_new_session=True``,
+    so its five children sit in their own process group and outlive it -- they keep unit 1's
+    broker port bound, and that port is also ``conftest.py``'s ``MQTT_TEST_PORT``. Orphans
+    therefore do not merely linger: they make twelve unrelated tests in the *non-live* tier
+    fail with "Broker startup failed" on the next run. Measured, after a run of this file
+    that deliberately skipped the clean stop.
+
+    So the process group is the fallback, and it fires on every path out of the fixture --
+    including the paths where ``/api/stop`` was never reached because a wait timed out.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+    try:
+        proc.wait(timeout=30.0)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.wait(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _unit_service_addresses(db) -> List[str]:
@@ -142,12 +174,7 @@ def stopped_factory(graphdb) -> Iterator[None]:
         httpx.post(_url(launcher_url, "api/stop"), timeout=STOP_TIMEOUT_SECONDS)
         yield
     finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=30.0)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            proc.kill()
-            proc.wait(timeout=10.0)
+        _kill_factory(proc)
 
 
 def test_a_clean_stop_leaves_no_unit_reachable(stopped_factory, graphdb):
