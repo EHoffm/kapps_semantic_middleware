@@ -42,6 +42,30 @@ CORE_ONTOLOGY = IRI("https://w3id.org/circularfactory/Core")
 SVC_ONTOLOGY = IRI("https://w3id.org/circularfactory/Service")
 MES_ONTOLOGY = IRI("https://w3id.org/circularfactory/MES")
 
+# The three W3C namespaces. Here for the same reason as everything else in this file: ADR 0021
+# wants one home for every ontology IRI, and these were previously spelled out at five separate
+# use sites across the library and the demo.
+RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#"
+OWL_NS = "http://www.w3.org/2002/07/owl#"
+
+
+class RDFS:
+    """The `rdfs:` terms this middleware writes into a query or reads out of one."""
+
+    label = IRI("label", base=RDFS_NS)
+    subPropertyOf = IRI("subPropertyOf", base=RDFS_NS)
+    range = IRI("range", base=RDFS_NS)
+
+
+META_TYPE_NAMESPACES = (OWL_NS, RDFS_NS, RDF_NS)
+"""Namespaces of the types every individual carries that say nothing about what it *is*.
+
+An OGM ``ClassSpec`` resolved against one of these fails outright, and ``owl:NamedIndividual``
+in particular is asserted on everything the OGM writes. Anything starting with one of these
+is filtered out when the code asks the graph what an individual actually is.
+"""
+
 
 class CFC:
     """Terms from the Core ontology (`cfc:`) that the middleware references."""
@@ -159,6 +183,7 @@ class INF:
     hasMQTTTopic = IRI("hasMQTTTopic", base=INF_NS)  # topic the device publishes readings on
     hasMQTTSetTopic = IRI("hasMQTTSetTopic", base=INF_NS)  # setpoint topic; readwrite only
     hasMQTTBrokerIP = IRI("hasMQTTBrokerIP", base=INF_NS)  # broker carrying both topics
+    hasMQTTBrokerPort = IRI("hasMQTTBrokerPort", base=INF_NS)  # xsd:integer; absent means 1883 (ADR 0031)
     hasMQTTValuePath = IRI("hasMQTTValuePath", base=INF_NS)  # JSON envelope path; absent = raw scalar
 
 

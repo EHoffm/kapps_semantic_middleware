@@ -14,17 +14,17 @@ from pathlib import Path
 
 from graph_db_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
-from rdflib.namespace import RDF
+from rdflib import Literal
+from rdflib.namespace import RDF, RDFS
 
 from kapps_semantic_middleware.seeding import clear_repository, load_shared_ontologies
-from kapps_semantic_middleware.vocabulary import SVC
+from kapps_semantic_middleware.vocabulary import INF, SVC
 
 
 # --- Namespaces ------------------------------------------------------------- #
 
 TU_NS = "https://www.sfb1574.kit.edu/ontologies/TransferUnit#"
 TUI_NS = "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#"
-INF_NS = "https://www.sfb1574.kit.edu/ontologies/CrcInterfaces#"
 FAC_NS = "https://www.sfb1574.kit.edu/ontologies/Factory#"
 FACI_NS = "https://www.sfb1574.kit.edu/ontologies/FactoryInstances#"
 
@@ -45,11 +45,12 @@ TU_IS_OCCUPIED = IRI(f"{TU_NS}isOccupied")
 TU_HAS_UNIT = IRI(f"{TU_NS}hasUnit")
 
 # --- Interface property IRIs (inf:) ------------------------------------------ #
-
-INF_ACCESS_MODE = IRI(f"{INF_NS}accessMode")
-INF_HAS_MQTT_TOPIC = IRI(f"{INF_NS}hasMQTTTopic")
-INF_HAS_MQTT_SET_TOPIC = IRI(f"{INF_NS}hasMQTTSetTopic")
-INF_HAS_MQTT_BROKER_IP = IRI(f"{INF_NS}hasMQTTBrokerIP")
+#
+# Reached through `vocabulary.INF`, never minted here. ADR 0021 puts every ontology IRI in
+# one place, and `inf:` is *library* vocabulary: the connectors match on these very terms,
+# so a demo that spelled them itself could drift out of step with the code that reads them.
+# The `tu:` and `fac:` IRIs above are different -- those are domain terms this demo owns,
+# and ADR 0030 keeps them here on purpose.
 
 # --- Control station ---------------------------------------------------------- #
 
@@ -58,6 +59,27 @@ CONTROL_STATION_CLASS = IRI(f"{FAC_NS}ControlStation")
 CONTROL_STATION_SERVICE_CLASS = IRI(f"{FAC_NS}ControlStationService")
 
 MQTT_BROKER_IP = "127.0.0.1"
+
+# Every unit's own broker (ADR 0029 as amended, ADR 0030 as amended). Not 1883 + n: 1900 is
+# SSDP/UPnP and is live on most Linux desktops, so --units 17 would break on a
+# machine-specific collision that presents as a broker fault. 18830 is a quiet, unassigned
+# stretch of the registered range that never touches 1883 itself.
+BROKER_PORT_BASE = 18830
+
+
+def broker_port(n: int) -> int:
+    """The port of unit n's own MQTT broker. Unit 1 -> 18831, unit 2 -> 18832, ...
+
+    Both readers -- the middleware, off inf:hasMQTTBrokerPort on the graph, and the PLC, off
+    the launcher's --broker-port flag -- must know this before either process starts, so it is
+    a pure function of the unit index, exactly like every IRI and every topic (ADR 0030).
+
+    Unit 1's port, 18831, coincides with tests/conftest.py's MQTT_TEST_PORT -- picked there,
+    separately, as an unlikely-to-collide high port. Harmless: the demo's own launcher and the
+    test suite's live-broker fixtures never run in the same process at once. Noted here so the
+    match reads as coincidence, not a shared constant someone forgot to factor out.
+    """
+    return BROKER_PORT_BASE + n
 
 
 def _mint_transfer_unit_iri(n: int) -> IRI:
@@ -95,14 +117,15 @@ def _create_belt(ogm, n: int, position: str) -> IRI:
             TU_HAS_CONVEYOR_SPEED: [
                 {
                     TU_HAS_UNIT: ["m/s"],
-                    INF_ACCESS_MODE: ["readwrite"],
-                    INF_HAS_MQTT_TOPIC: [
+                    INF.accessMode: ["readwrite"],
+                    INF.hasMQTTTopic: [
                         _mqtt_topic(n, "ConveyorBelt", position, "speed")
                     ],
-                    INF_HAS_MQTT_SET_TOPIC: [
+                    INF.hasMQTTSetTopic: [
                         _mqtt_topic(n, "ConveyorBelt", position, "speed_set")
                     ],
-                    INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
+                    INF.hasMQTTBrokerIP: [MQTT_BROKER_IP],
+                    INF.hasMQTTBrokerPort: [broker_port(n)],
                 }
             ]
         },
@@ -120,11 +143,12 @@ def _create_barrier(ogm, n: int, position: str) -> IRI:
         data={
             TU_IS_OCCUPIED: [
                 {
-                    INF_ACCESS_MODE: ["read"],
-                    INF_HAS_MQTT_TOPIC: [
+                    INF.accessMode: ["read"],
+                    INF.hasMQTTTopic: [
                         _mqtt_topic(n, "LightBarrier", position, "occupied")
                     ],
-                    INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
+                    INF.hasMQTTBrokerIP: [MQTT_BROKER_IP],
+                    INF.hasMQTTBrokerPort: [broker_port(n)],
                 }
             ]
         },
@@ -158,6 +182,16 @@ def _create_transfer_unit(ogm, n: int) -> IRI:
             ],
         },
     )
+
+    # A human-readable name (#89 item 5). discover_resources binds ?label off exactly
+    # this predicate and returned label=None for every unit before this line existed --
+    # the graph had no rdfs:label on a TransferUnit individual for the SPARQL OPTIONAL to
+    # find. #82 (the control station board) renders unit identity on every card, so this
+    # is seeded rather than dropped from ResourceInfo: a real name for a real card, not an
+    # empty field nothing downstream can build on. A plain triple_add, the same way the
+    # control station's own label goes on below -- ogm.create's class_scope only covers
+    # domain properties, and rdfs:label is not one.
+    ogm.db.triple_add((unit_iri, RDFS.label, Literal(f"TransferUnit {n}")))
     return unit_iri
 
 
@@ -188,6 +222,9 @@ def seed_factory(db, ogm, units: int) -> None:
         _create_transfer_unit(ogm, n)
 
     db.triple_add((CONTROL_STATION, RDF.type, CONTROL_STATION_CLASS))
+    # Same reasoning as a unit's label above (#89 item 5): a real name for the one card
+    # that isn't a TransferUnit.
+    db.triple_add((CONTROL_STATION, RDFS.label, Literal("Control Station")))
 
 
 def factory_is_live(db, max_age_seconds: float = 90.0) -> list[IRI]:

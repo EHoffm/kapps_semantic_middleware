@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterable,
@@ -125,6 +126,30 @@ class ParameterBinding:
     (ADR 0023). It comes from the **full** spec, not the pruned northbound one. The node the
     binding writes must still be the shape the graph expects."""
 
+    root_iri: Optional[IRI] = None
+    """The top-level resource individual recognition started from (e.g. the TransferUnit).
+
+    ``resource_iri`` above is the *holder* of the parameter, a belt or a barrier. REST
+    addressing (ADR 0017) is structural and relative to the **root**, not the holder, so a
+    binding one level of nesting deep needs both. ``None`` only for a ``ParameterBinding``
+    built by hand outside recognition (as the MQTT tests do); nothing that reads
+    ``root_iri`` is reachable from one of those."""
+
+    root_class_local_name: Optional[str] = None
+    """The root resource's class IRI, mangled (``IRI(...).lined``), the ``{Model}``
+    segment of an ADR 0017 route. Not the bare fragment: ``kapps_ogm``'s
+    ``ClassSpec.to_pydantic_model`` names the materialized class after the whole mangled
+    IRI (``class_spec.py``), so this must match that or a REST connector's own PUT/GET
+    404s against the real served route (kapps_semantic_middleware#80). Paired with
+    ``root_iri``; see its docstring."""
+
+    path_steps: Tuple[Tuple[str, str], ...] = ()
+    """``(field_name, child_iri)`` hops from ``root_iri`` down to ``resource_iri``, mirroring
+    ``rest_router.py``'s ``_accumulate_routes``. Empty when ``resource_iri`` already is the
+    root. ``field_name`` is the mangled form (``IRI(prop).lined``), matching what the served
+    route actually uses; ``child_iri`` is the raw individual IRI, mangled by
+    ``rest_binding.build_parameter_path`` itself."""
+
     def get(self, prop: IRI) -> Any:
         """The single value of one metadata property, or ``None``."""
         return first(self.metadata.get(str(prop)))
@@ -138,6 +163,27 @@ class ParameterBinding:
         """
         raw = self.get(INF.accessMode)
         return raw if raw in AccessMode.ALL else AccessMode.READ
+
+    @property
+    def label(self) -> str:
+        """A short human-readable label for a log line, e.g. "Belt1 hasConveyorSpeed".
+
+        Full mangled IRIs are correct in route paths (ADR 0021) but unreadable in a log line
+        a human watches scroll past. Display-only: never parse it, never use it to address
+        anything. Shared here rather than restated per binding descriptor — every binding
+        builds one of these for its formatter's log lines.
+        """
+        resource_fragment = (
+            self.resource_iri.fragment
+            if hasattr(self.resource_iri, "fragment") and self.resource_iri.fragment
+            else str(self.resource_iri)
+        )
+        param_fragment = (
+            self.parameter_property.fragment
+            if hasattr(self.parameter_property, "fragment") and self.parameter_property.fragment
+            else str(self.parameter_property)
+        )
+        return f"{resource_fragment} {param_fragment}"
 
 
 class BindingDescriptor(Protocol):
@@ -171,9 +217,17 @@ class BindingDescriptor(Protocol):
 
     @staticmethod
     def build(
-        binding: ParameterBinding, direction: SyncDirection
+        binding: ParameterBinding,
+        direction: SyncDirection,
+        *,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
     ) -> Iterable[Registration]:
-        """Turn one resolved parameter into the registrations that realize it."""
+        """Turn one resolved parameter into the registrations that realize it.
+
+        ``ensure_transport``, when given, is the deployment's transport hook (ADR 0034),
+        already deduped by ``plan_wiring`` to fire once per distinct ``(host, port)`` across
+        this resource's whole wiring. A binding with nothing to bring up (REST, ADR 0033)
+        simply never calls it."""
         ...
 
 
@@ -191,17 +245,20 @@ class SemanticConnectorRegistry:
     (ADR 0020, ADR 0028).
     """
 
-    def __init__(self, descriptors: Optional[Sequence[BindingDescriptor]] = None) -> None:
-        self._by_property: Dict[str, BindingDescriptor] = {}
+    def __init__(self, descriptors: Optional[Sequence[Type[BindingDescriptor]]] = None) -> None:
+        self._by_property: Dict[str, Type[BindingDescriptor]] = {}
         for descriptor in descriptors or ():
             self.register(descriptor)
 
-    def register(self, descriptor: BindingDescriptor) -> BindingDescriptor:
+    def register(self, descriptor: Type[BindingDescriptor]) -> Type[BindingDescriptor]:
         """Add a descriptor, replace any earlier one for the same interface property.
 
         We deliberately replace rather than refuse. A domain expert may override the
         built-in MQTT binding with a site-specific one. This is a supported use of the
         seam. The expert should not have to unregister first.
+
+        Takes the descriptor **class**, not an instance of it. Every member of
+        ``BindingDescriptor`` is a ``ClassVar``, so the class itself is the configuration.
         """
         key = str(descriptor.interface_property)
         existing = self._by_property.get(key)
@@ -209,13 +266,13 @@ class SemanticConnectorRegistry:
             logger.info(
                 "Replace the binding registered for %s (%s -> %s)",
                 key,
-                type(existing).__name__,
-                type(descriptor).__name__,
+                existing.__name__,
+                descriptor.__name__,
             )
         self._by_property[key] = descriptor
         return descriptor
 
-    def for_interface_property(self, iri: IRI) -> Optional[BindingDescriptor]:
+    def for_interface_property(self, iri: IRI) -> Optional[Type[BindingDescriptor]]:
         """The descriptor that registers for exactly this interface property, if any."""
         return self._by_property.get(str(iri))
 
@@ -236,7 +293,7 @@ class SemanticConnectorRegistry:
     def __len__(self) -> int:
         return len(self._by_property)
 
-    def __iter__(self) -> Iterator[BindingDescriptor]:
+    def __iter__(self) -> Iterator[Type[BindingDescriptor]]:
         return iter(self._by_property.values())
 
 

@@ -10,4 +10,4 @@ All five canonical role names used as-is: `needs-triage`, `needs-info`, `ready-f
 
 ### Domain docs
 
-Multi-context layout: `CONTEXT-MAP.md` at the root points to four contexts (Core Middleware, SHACL Interop, Example Scenarios, Module Requirements). See `docs/agents/domain.md`.
+Multi-context layout: `CONTEXT-MAP.md` at the root points to five contexts (Core Middleware, SHACL Interop, Example Scenarios, TransferUnit Factory, Module Requirements). See `docs/agents/domain.md`.

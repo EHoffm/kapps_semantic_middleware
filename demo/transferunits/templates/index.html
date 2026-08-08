@@ -40,6 +40,9 @@
   .addr { font:12px/1.7 ui-monospace,monospace; margin-top:3px }
   .addr a { color:#0b5cad; text-decoration:none }
   .addr a:hover { text-decoration:underline }
+  .addr a.activity { margin-left:6px; font-size:11px; border:1px solid var(--line);
+                      border-radius:3px; padding:0 4px; color:var(--muted) }
+  .addr a.activity:hover { color:#0b5cad; text-decoration:none }
   .none { color:var(--stopped) }
   .src { font-size:10px; border:1px solid var(--line); border-radius:3px; padding:0 4px;
          color:var(--muted); margin-left:5px; cursor:help }
@@ -85,13 +88,38 @@ const TEACH = __TEACH__;
 const SOURCES = __SOURCES__;
 let frozen = false;
 
+// A loopback address is this launcher's own dynamically-allocated child port (#85) — swap
+// its host for the browsing host, so a page reached through a tunnel links through the
+// same tunnel. A non-loopback address (e.g. a remote knowledge graph) is left alone.
+function hrefFor(address) {
+  try {
+    const src = new URL(address);
+    if (src.hostname !== '127.0.0.1' && src.hostname !== 'localhost') return address;
+    const dst = new URL(location.href);
+    dst.pathname = src.pathname;
+    dst.search = src.search;
+    dst.hash = '';
+    dst.port = src.port;
+    return dst.toString();
+  } catch {
+    return address;
+  }
+}
+
 function box(key, id, title, node, wide) {
   const isLink = node.address && node.address.startsWith('http');
+  // Only middleware and the control station hold an activity feed (ADR 0029) — a PLC
+  // holds no middleware, so it gets no link, and that asymmetry is the demonstration.
+  const hasActivityFeed = key === 'middleware' || key === 'controller';
+  const activityLink = (isLink && hasActivityFeed)
+    ? `<a class="activity" href="${hrefFor(node.address + '/activity')}" target="_blank">activity</a>`
+    : '';
   const addr = node.address
     ? (isLink
-        ? `<a href="${node.address}" target="_blank">${node.address}</a>`
+        ? `<a href="${hrefFor(node.address)}" target="_blank">${node.address}</a>`
         : `<span>${node.address}</span>`) +
-      (node.source ? `<span class="src" data-src="${node.source}">${node.source}</span>` : '')
+      (node.source ? `<span class="src" data-src="${node.source}">${node.source}</span>` : '') +
+      activityLink
     : `<span class="none">${node.state === 'stopped' ? 'stopped' : 'no address yet'}</span>`;
   const failedAttrs = node.state === 'failed' ? ` onclick="toggleOutput('${id}')"` : '';
   const stateText = node.state === 'slow' ? 'slow — check the output' : node.state;
@@ -110,6 +138,9 @@ const openOutputs = new Set();
 function outputTarget(id) {
   if (id === 'controller') return [0, 'controller'];
   const [kind, n] = id.split('-');
+  // A broker is a thread inside its unit's own middleware process (#79) -- it captures no
+  // output of its own, so a failed broker box opens that middleware's output instead.
+  if (kind === 'broker') return [parseInt(n, 10), 'middleware'];
   return [parseInt(n, 10), kind === 'mw' ? 'middleware' : 'plc'];
 }
 
@@ -147,20 +178,24 @@ function render(s) {
       ${box('plc', 'plc-' + u.index, 'PLC and panel', u.plc)}
     </div>`).join('');
 
+  const brokers = s.unit.map(u =>
+    box('broker', 'broker-' + u.index, 'broker ' + u.index, u.broker)
+  ).join('');
+
   const mws = s.unit.map(u =>
     box('middleware', 'mw-' + u.index, 'middleware ' + u.index, u.middleware)
   ).join('');
 
   document.getElementById('layers').innerHTML = `
     <div class="layer" style="${cols}">${plcs}</div>
-    <div class="layer one">${box('broker', 'broker', 'MQTT broker', s.broker, true)}</div>
+    <div class="layer" style="${cols}">${brokers}</div>
     <div class="layer" style="${cols}">${mws}</div>
     <div class="layer one">${box('graph', 'graph', 'knowledge graph', s.graph, true)}</div>
     <div class="layer one">
       ${box('controller', 'controller', 'control station', s.controller, true)}</div>`;
 
   document.getElementById('launcher-addr').innerHTML =
-    `<a href="${s.launcher.address}">${s.launcher.address}</a>`;
+    `<a href="${hrefFor(s.launcher.address)}">${s.launcher.address}</a>`;
 
   wires(s);
   bind();
@@ -198,8 +233,8 @@ function wires(s) {
   }
 
   for (const u of s.unit) {
-    straight('plc-' + u.index, 'broker', 'arrow-plc-broker', 'MQTT');
-    straight('broker', 'mw-' + u.index, 'arrow-broker-mw', 'MQTT');
+    straight('plc-' + u.index, 'broker-' + u.index, 'arrow-plc-broker', 'MQTT');
+    straight('broker-' + u.index, 'mw-' + u.index, 'arrow-broker-mw', 'MQTT');
     straight('mw-' + u.index, 'graph', 'arrow-mw-graph', 'OGM');
   }
   straight('graph', 'controller', 'arrow-graph-ctrl', 'discovery');

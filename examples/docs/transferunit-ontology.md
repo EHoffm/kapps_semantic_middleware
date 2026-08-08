@@ -112,7 +112,8 @@ metadata or from embedding code (ADR 0026).
 
 **Topic scheme** (an instance convention, not baked into the classes — ADR 0023):
 `TransferUnit<n>/<component>/<position>/<param>`, with a setpoint appending `_set`. The
-MockTransferUnit publishes 4 topics and subscribes to 2. Broker `127.0.0.1`, no auth — a local test
+mock PLC (`demo/transferunits/plc/transfer_unit.py`) publishes 4 topics and subscribes to 2. Broker
+`127.0.0.1`, no auth — a local test
 broker. A real deployed broker with auth and TLS is out of scope for map #24.
 
 **Lifecycle.** In production these parameter nodes are written by the **middleware** when the resource

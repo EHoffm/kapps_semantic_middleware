@@ -125,3 +125,24 @@ class TestRegistrationTiming:
 
         assert middleware.autoregister_connectors is True
         assert middleware.connector_sync_direction is SyncDirection.BIDIRECTIONAL
+
+
+@requires_graphdb
+class TestEnsureTransport:
+    """``ensure_transport`` (ADR 0034) reaches the wiring plan through the constructor."""
+
+    def test_the_hook_reaches_plan_wiring(self, seeded_unit, unit_scope):
+        calls = []
+        _middleware(
+            seeded_unit,
+            class_scope=unit_scope,
+            ensure_transport=lambda host, port: calls.append((host, port)),
+        )
+
+        # Scenario 3's four parameters share one declared address, no port declared.
+        assert calls == [(seed.MQTT_BROKER_IP, 1883)]
+
+    def test_no_hook_is_the_default_and_calls_nothing(self, seeded_unit, unit_scope):
+        middleware = _middleware(seeded_unit, class_scope=unit_scope)
+
+        assert middleware.ensure_transport is None

@@ -1627,6 +1627,13 @@ dependencies = [
     { name = "kapps-ogm" },
 ]
 
+[package.optional-dependencies]
+demonstrations = [
+    { name = "amqtt" },
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "amqtt" },
@@ -1645,10 +1652,14 @@ dev = [
 requires-dist = [
     { name = "aas-middleware", editable = "../aas_middleware_inf" },
     { name = "aiomqtt", specifier = ">=2.1.0" },
+    { name = "amqtt", marker = "extra == 'demonstrations'", specifier = ">=0.11.0" },
+    { name = "fastapi", marker = "extra == 'demonstrations'", specifier = ">=0.111.0" },
     { name = "graph-db-interface", editable = "../graph_db_interface" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "kapps-ogm", editable = "../kapps_ogm" },
+    { name = "uvicorn", marker = "extra == 'demonstrations'", specifier = ">=0.29.0" },
 ]
+provides-extras = ["demonstrations"]
 
 [package.metadata.requires-dev]
 dev = [

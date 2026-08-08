@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import math
 import logging
-from typing import Any, ClassVar, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, ClassVar, Dict, Iterable, List, Optional, Tuple
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from graph_db_interface import IRI
@@ -150,8 +150,32 @@ class MQTTParameterFormatter:
         return [self.model_type(**fields)]
 
     def serialize(self, data: Any) -> bytes:
-        """Persistence value to the device payload, encoded for ``consume``."""
+        """Persistence value to the device payload, encoded for ``consume``.
+
+        Raises if nothing has ever been observed for this parameter (ADR 0024's
+        locator pattern: the graph holds no ``inf:hasValue`` until a connector
+        fills it). A bare ``None`` would encode as the JSON scalar ``null``, not a
+        valid device value, and a receiver expecting a number or boolean chokes on
+        it. The caller's best-effort fan-out (``persisted_connector.py``) catches
+        and logs a per-connector failure, so raising here is the same "nothing safe
+        to send" outcome that silently accepting ``None`` would have hidden as a
+        network-level failure at the device.
+
+        This used to be the ordinary case rather than the guard it reads as. The
+        fan-out asked *every* write leg on a resource to re-derive its slice
+        whenever *any* field changed, so a parameter nothing had ever set was
+        routinely asked to publish. ADR 0035 scoped the fan-out to the field that
+        actually moved (``changed``), so a write leg is now only asked when its own
+        parameter was written -- and a write carries the value with it. The guard
+        stays because "asked to publish something never observed" is still a real
+        error state, and one worth naming rather than encoding as ``null``.
+        """
         value = self._value_of(data)
+        if value is None:
+            raise ValueError(
+                f"{self.parameter_label or 'parameter'} has no observed value yet; "
+                f"refusing to publish null to {self.set_topic or 'its set topic'}"
+            )
         if self.value_path is None:
             result = json.dumps(value).encode()
         else:
@@ -215,19 +239,29 @@ class MQTTBinding:
     connection_metadata: ClassVar[Tuple[IRI, ...]] = (
         INF.hasMQTTTopic,
         INF.hasMQTTBrokerIP,
+        INF.hasMQTTBrokerPort,
         INF.hasMQTTSetTopic,
         INF.hasMQTTValuePath,
     )
 
     @staticmethod
     def build(
-        binding: ParameterBinding, direction: SyncDirection
+        binding: ParameterBinding,
+        direction: SyncDirection,
+        *,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
     ) -> Iterable[Registration]:
         """One read registration always. One write registration when both sides permit it.
 
         ``direction`` has already been reduced to the most restrictive of the parameter's
         ``inf:accessMode`` and the instance's flavour (ADR 0023), so this only honours
         it. It must never re-widen.
+
+        ``ensure_transport``, when given, is called once with the declared ``(host, port)``,
+        immediately before the first connector for it is built (ADR 0034). Deduping across
+        several parameters that share one address is the caller's job (``wiring.py``'s
+        ``plan_wiring``), not this method's -- a single ``build`` call sees only its own
+        parameter, never its siblings.
         """
         connector_cls = _mqtt_client_connector_cls()
 
@@ -235,6 +269,9 @@ class MQTTBinding:
         topic = binding.get(INF.hasMQTTTopic)
         set_topic = binding.get(INF.hasMQTTSetTopic)
         value_path = binding.get(INF.hasMQTTValuePath)
+        port = binding.get(INF.hasMQTTBrokerPort)
+        if port is None:
+            port = 1883  # ADR 0031: absent means 1883, so every existing ABox keeps its meaning.
 
         if not broker or not topic:
             # A parameter marked MQTT-accessible whose metadata is incomplete would come up
@@ -253,10 +290,13 @@ class MQTTBinding:
             )
             return
 
+        if ensure_transport is not None:
+            ensure_transport(broker, port)
+
         formatter = _formatter_for(binding, value_path, topic=topic, set_topic=set_topic or "")
 
         yield Registration(
-            connector=connector_cls(broker, topic),
+            connector=connector_cls(broker, topic, port),
             sync_direction=SyncDirection.TO_PERSISTENCE,
             model_type=list,
             formatter=formatter,
@@ -276,7 +316,7 @@ class MQTTBinding:
             return
 
         yield Registration(
-            connector=connector_cls(broker, set_topic),
+            connector=connector_cls(broker, set_topic, port),
             sync_direction=SyncDirection.FROM_PERSISTENCE,
             model_type=list,
             formatter=formatter,
@@ -303,27 +343,12 @@ def _formatter_for(
         for prop, value in binding.metadata.items()
         if prop not in southbound and IRI(prop).lined != value_field
     }
-    # Build a short human-readable label for log lines. Full mangled IRIs are correct in
-    # route paths (ADR 0021) but unreadable in a log line a human watches scroll past.
-    # This string is display-only. Never parse it. Never use it to address anything.
-    resource_fragment = (
-        binding.resource_iri.fragment
-        if hasattr(binding.resource_iri, "fragment") and binding.resource_iri.fragment
-        else str(binding.resource_iri)
-    )
-    param_fragment = (
-        binding.parameter_property.fragment
-        if hasattr(binding.parameter_property, "fragment")
-        and binding.parameter_property.fragment
-        else str(binding.parameter_property)
-    )
-    parameter_label = f"{resource_fragment} {param_fragment}"
     return MQTTParameterFormatter(
         model_type=binding.node_model_type,
         northbound_facets=facets,
         value_field=value_field,
         value_path=value_path,
-        parameter_label=parameter_label,
+        parameter_label=binding.label,
         topic=topic,
         set_topic=set_topic,
     )

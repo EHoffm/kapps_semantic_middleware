@@ -186,17 +186,30 @@ def _make_bindings() -> list[_BindingStub]:
 
 
 class _StubConnector:
-    """Records what the framework asks it to provide/consume."""
+    """Records what the framework asks it to provide/consume.
+
+    Stands in for a ``PersistedConnector``, so it must carry that class's signature:
+    ``origin`` and ``changed`` are how a caller tells the fan-out what it attributed the
+    write to and which region of the model actually moved (#92, #94). Recording
+    ``changed`` rather than swallowing it makes this stub the fast, GraphDB-free place to
+    assert that the PUT handler scopes its write to one parameter.
+    """
 
     def __init__(self) -> None:
         self.provided: Optional[Any] = None
         self.consumed: Optional[Any] = None
+        self.changed: Optional[Any] = None
+        self.origin: Optional[Any] = None
 
     async def provide(self) -> Any:
         return self.provided
 
-    async def consume(self, value: Any) -> None:
+    async def consume(
+        self, value: Any, origin: Any = None, changed: Any = None
+    ) -> None:
         self.consumed = value
+        self.origin = origin
+        self.changed = changed
 
 
 class _FakeMiddleware:
@@ -413,6 +426,51 @@ def test_put_to_one_belt_mutates_only_that_belt():
 
     back_barrier = next(b for b in consumed.TU_hasLightBarrier if b.id.endswith("_back"))
     assert back_barrier.TU_isOccupied[0].hasValue == [True]
+
+
+def test_put_tells_the_fan_out_which_parameter_moved():
+    """#94: mutating one field is not enough -- the ``consume`` call has to say so.
+
+    The whole model goes to persistence either way, because a persistence connector is
+    keyed by *(data_model_name, model_id)* and holds the resource entire. Without
+    ``changed``, the fan-out asks every write leg on that resource to re-derive its slice,
+    and a sibling parameter's write leg publishes its last *observed* value onto its *set*
+    topic -- an unbidden command. The integration test in
+    ``test_southbound_echo_integration.py`` proves the effect against a real broker; this
+    proves the cause, with no GraphDB and no network.
+    """
+    mw = _FakeMiddleware()
+    unit = _make_unit()
+    _prime_connector(mw, unit)
+
+    generate_recursive_rest_api(
+        middleware=mw,
+        data_model_name="TransferUnit",
+        root_id=unit.id,
+        instance=unit,
+        bindings=_make_bindings(),
+    )
+
+    path = _path(
+        unit.id,
+        "TU_hasConveyorBelt",
+        "https://example.org/tui#ConveyorBelt1_left",
+        "TU_hasConveyorSpeed",
+    )
+    response = TestClient(mw.app).put(path, json=[{"hasValue": [9.9], "hasUnit": ["m/s"]}])
+    assert response.status_code == 200
+
+    changed = mw.persistence_registry.get_connection(None).changed
+    assert changed is not None, "the PUT handler told the fan-out nothing about what moved"
+
+    # All four levels, and the deepest two are the point: `contained_model_id` names the
+    # belt and `field_id` the parameter, so `_covers` reaches this belt's write leg and no
+    # other. A `changed` that stopped at `model_id` would cover the whole unit and restore
+    # the defect while still looking like a fix.
+    assert changed.data_model_name == "TransferUnit"
+    assert changed.model_id == unit.id
+    assert changed.contained_model_id == "https://example.org/tui#ConveyorBelt1_left"
+    assert changed.field_id == "TU_hasConveyorSpeed"
 
 
 def test_get_and_put_are_symmetric():

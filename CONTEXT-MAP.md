@@ -28,8 +28,8 @@
   Middleware end-to-end, against the ontology and the instance data they seed themselves. Core Middleware
   has no dependency on Example Scenarios.
 - **TransferUnit Factory → Core Middleware**: the factory runs several instances of the library
-  in separate processes. That is one instance per unit, plus a controller and a monitor. Core
-  Middleware has no dependency on the factory.
+  in separate processes. That is one instance per unit, plus a controller. A monitor is
+  milestone 2 (ADR 0032) and is not built. Core Middleware has no dependency on the factory.
 - **Module Requirements** records obligations that Core Middleware and SHACL Interop place on
   `kapps_ogm` and the visual-toolbox repo. It does not depend on the code contexts, and no code
   context depends on it. It is a record for work that belongs elsewhere.
@@ -75,9 +75,11 @@ start at 0001, so the prefix is not optional.
 
 ### Core Middleware records
 
-ADR 0001 to ADR 0028, ADR 0031, **ADR 0033** and **ADR 0034**. Some numbers in that span retired into
-their successors. These records govern the library. They hold for every consumer of the middleware,
-and not only for the demonstration.
+ADR 0001 to ADR 0028, ADR 0031, **ADR 0033**, **ADR 0034** and **ADR 0035**. Some numbers in that
+span retired into their successors: ADR 0013 and ADR 0014 retired into ADR 0015; ADR 0016 retired
+into ADR 0023; ADR 0019 retired into ADR 0028. A number missing from that list is missing, not
+retired. These records govern the library. They hold for every consumer of the middleware, and not
+only for the demonstration.
 
 ADR 0033 is a core record even though the demonstration forced it. It puts a REST binding descriptor
 beside the MQTT one, so the connector seam reaches a peer middleware as readily as a device, and it
@@ -87,6 +89,12 @@ ADR 0034 is core for the same reason and with a caveat of its own. The demonstra
 adds a public constructor argument rather than a domain term, and it deliberately keeps every
 transport implementation out of `src/`. Its shape is provisional until the demo has used it: the
 record says so, and says to revisit it once the factory runs.
+
+ADR 0035 is core and sits lower than either. It says a write into persistence names the region of the
+model that moved, so a connector is asked to write to its device only when its own parameter was
+written. The mechanism lives in `aas_middleware_inf` under root ADR 0001's bugfix allowance, because
+that is where the fan-out is; the record lives here because the invariant is this middleware's, and
+because every future connector depends on it.
 
 ### TransferUnit Factory records
 

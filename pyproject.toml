@@ -18,6 +18,29 @@ dependencies = [
     "aiomqtt>=2.1.0",
 ]
 
+[project.scripts]
+# Installed unconditionally, because a console script cannot be gated on an extra. Without
+# `[demonstrations]` it exits on a missing fastapi, which is the honest failure: the demo is
+# present and its dependencies are not.
+kapps-transferunit-factory = "kapps_semantic_middleware.demonstrations.transferunits.__main__:main"
+
+[project.optional-dependencies]
+# What `demo/` needs on top of the library, and nothing the library itself needs.
+# A plain `uv add kapps-semantic-middleware` installs the reference implementation only.
+# `uv add "kapps-semantic-middleware[demonstrations]"` adds what the factory demo runs on.
+#
+# All three were undeclared before the milestone-1 release review. fastapi and uvicorn
+# arrived transitively through aas-middleware, which is not a promise that repo makes;
+# amqtt sat in the dev group, so `uv sync --no-dev` produced a demo that raised
+# ImportError at demo/transferunits/middleware.py's `_serve_broker`.
+demonstrations = [
+    "fastapi>=0.111.0",
+    "uvicorn>=0.29.0",
+    # The per-unit broker (ADR 0034). Pure Python and run in-process, because mosquitto
+    # would need root, which a fresh checkout cannot assume.
+    "amqtt>=0.11.0",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
@@ -31,26 +54,64 @@ dev = [
     "httpx>=0.27.0",
     # A pure-Python MQTT broker, run in-process as a pytest fixture. mosquitto would need
     # root to install, which no CI runner and no fresh checkout can assume; this keeps the
-    # MockTransferUnit round-trip genuinely live and portable (#40).
+    # mock PLC's round-trip genuinely live and portable (#40). Also declared under the
+    # `demonstrations` extra, because the demo runs one per unit at runtime (ADR 0034).
     "amqtt>=0.11.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers"]
+addopts = ["--strict-markers", "-m", "not lap and not smoke"]
 markers = [
     "live: needs a reachable GraphDB (the GRAPHDB_* env vars). Applied automatically to any test that requests the `graphdb` fixture, so `-m 'not live'` selects the tier that runs anywhere.",
+    "lap: measures a control lap rather than asserting anything, and its timings are machine-dependent. Deselected by default (see `addopts`); run it with `-m lap -s` when the algorithm's tick needs revisiting (#82, #94).",
+    "smoke: boots the whole factory as six real processes and re-checks the claims only a run can show (#79, #88). Deselected by default (see `addopts`) because it needs the launcher's fixed port free, seeds the graph the GRAPHDB_* variables point at, and costs about a minute; run it with `-m smoke`.",
 ]
 # pytest-asyncio warns when this is unset and defaults it to "function". Stated explicitly so
 # the default is a decision rather than a warning; the async fixtures here are per-test.
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.mypy]
+python_version = "3.12"
+# The library and the demo. `demo` typechecks only because demo/ and demo/transferunits/
+# carry an __init__.py -- without them mypy stops at the first relative import and checks
+# nothing at all. ADR 0030 already called demo/transferunits a real package; now it is one.
+files = ["src", "demo"]
+
+[[tool.mypy.overrides]]
+# None of the three siblings ships a py.typed marker, and neither does amqtt. Left
+# unsilenced these produce 44 import-untyped errors that bury the real ones -- the whole
+# reason the milestone-1 review found only one genuine type error under the noise.
+# This suppresses the missing marker, not our own annotations.
+module = ["aas_middleware.*", "kapps_ogm.*", "graph_db_interface.*", "amqtt.*"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kapps_semantic_middleware"]
+# The demo ships inside the library's namespace as
+# `kapps_semantic_middleware.demonstrations`, rather than claiming a top-level `demo` on
+# PyPI -- a name that generic would collide with half the index. Root ADR 0004 fixes where
+# scenario code lives *on disk* (`demo/`), and says nothing about its installed name, so the
+# remap below satisfies both.
+#
+# Nothing here decides whether a consumer gets the demo's dependencies: that is the
+# `demonstrations` extra. Wheels cannot select files by extra, so the demo's ~200 KB always
+# ships, and importing it without the extra fails on fastapi with a clear ImportError.
+packages = ["src/kapps_semantic_middleware", "demo"]
+
+# An editable install cannot follow the rewrite below -- hatchling refuses a dev-mode build
+# when a source rewrite *changes* a prefix instead of removing one. So dev mode puts `src`
+# and the repository root on the path unchanged, and a developer imports `demo.transferunits`
+# exactly as before. `launcher._PACKAGE` derives the spawn paths from `__package__`, so the
+# same code drives children under either name.
+dev-mode-dirs = ["src", "."]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/kapps_semantic_middleware" = "kapps_semantic_middleware"
+"demo" = "kapps_semantic_middleware/demonstrations"
 
 [tool.uv.sources]
 aas-middleware = { path = "../aas_middleware_inf", editable = true }

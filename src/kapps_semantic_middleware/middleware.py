@@ -16,15 +16,19 @@ import functools
 import inspect
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import anyio
 import httpx
 from fastapi import APIRouter
+from fastapi.responses import Response
 from graph_db_interface import IRI
 from pydantic import BaseModel
 
 from aas_middleware import Middleware
+from aas_middleware.connect.connectors.model_connector import ModelConnector
+from aas_middleware.middleware.persistence_factory import PersistenceFactory
+from aas_middleware.middleware.registries import ConnectionInfo
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 
 from kapps_semantic_middleware.connectors.semantic import (
@@ -178,13 +182,24 @@ class SemanticMiddleware(Middleware):
 
     @property
     def app(self):
-        """The FastAPI app, with its root route renamed.
+        """The FastAPI app, with its root route renamed and a quiet favicon route added.
 
         The base class registers ``GET /`` inside its own ``app`` property, so the route
         exists the moment the app does. Starlette matches routes in order and a second
         registration would never be reached, so the original is removed rather than
         shadowed. Guarded by a flag: the base property caches, but this one is consulted
-        on every access.
+        on every access, and neither patch below may run twice on the same app object.
+
+        The favicon route (#89) answers ``GET /favicon.ico`` with a bare 204: this
+        product ships no icon asset, and every browser that requests one otherwise logs
+        a 404 -- the only console error a control station or a unit middleware's page
+        would otherwise show on a clean load.
+
+        The nested ``root`` function handles ``GET /`` requests. It returns the welcome
+        message defined in ``APP_WELCOME``.
+
+        The nested ``favicon`` function handles ``GET /favicon.ico`` requests. It returns
+        an empty 204 response to suppress browser console errors.
         """
         app = Middleware.app.fget(self)  # type: ignore[attr-defined]
         if not getattr(app, "_kapps_root_replaced", False):
@@ -198,7 +213,13 @@ class SemanticMiddleware(Middleware):
 
             @app.get("/", response_model=str)
             async def root() -> str:
+                """Handle GET / requests. Return the welcome message."""
                 return welcome
+
+            @app.get("/favicon.ico", include_in_schema=False)
+            async def favicon() -> Response:
+                """Handle GET /favicon.ico requests. Return an empty 204 response."""
+                return Response(status_code=204)
 
             # The schema is generated lazily and cached. Drop any copy built before the
             # swap, so /docs and /openapi.json describe the routes that actually exist.
@@ -223,9 +244,41 @@ class SemanticMiddleware(Middleware):
         autoregister_connectors: bool = True,
         connector_sync_direction: SyncDirection = SyncDirection.BIDIRECTIONAL,
         connector_registry: Optional[SemanticConnectorRegistry] = None,
+        ensure_transport: Optional[Callable[[str, int], None]] = None,
         activity_feed: bool = False,
         activity_capacity: int = 200,
     ) -> None:
+        """Initialize the KAPPS Semantic Middleware instance.
+
+        Configure the middleware for one of three modes: RESOURCE, WATCHDOG, or SERVER.
+        Resource mode registers services in the knowledge graph and exposes REST APIs.
+        Watchdog mode monitors service liveness and sweeps stale registrations.
+        Server mode is not yet implemented.
+
+        Parameters:
+            mode: The operating mode. Accepts a Mode constant or equivalent string.
+            resource_iri: The IRI of the resource this middleware represents (resource mode).
+            service_class: The ontology class IRI for the service (resource mode).
+            ogm: The ontology graph manager for knowledge graph operations.
+            host: The HTTP server host address. Default is "127.0.0.1".
+            port: The HTTP server port. Default is 8000.
+            address: The full service address. Defaults to http://{host}:{port}.
+            named_graph: The target named graph in the knowledge graph.
+            heartbeat_interval: Seconds between heartbeat updates (resource mode).
+            staleness_threshold: Seconds before a service is considered stale (watchdog mode).
+            sweep_interval: Seconds between staleness sweeps (watchdog mode).
+            class_scope: The consumer's view for parameter recognition and wiring.
+            autoregister_connectors: Enable automatic connector registration. Default is True.
+            connector_sync_direction: The sync direction for connectors. Default is BIDIRECTIONAL.
+            connector_registry: The semantic connector registry. Uses default_registry if None.
+            ensure_transport: A callback to start transport brokers before connector creation.
+            activity_feed: Enable the activity feed for observability. Default is False.
+            activity_capacity: Maximum events to retain in the activity feed ring buffer.
+
+        Resource mode requires resource_iri, service_class, and ogm. Watchdog mode requires ogm.
+        The constructor registers startup and shutdown callbacks for service lifecycle management.
+        It also configures liveness monitoring, connector wiring, and optional activity feeds.
+        """
         super().__init__()
         self._rebrand()
 
@@ -272,6 +325,10 @@ class SemanticMiddleware(Middleware):
             self.autoregister_connectors = autoregister_connectors
             self.connector_sync_direction = connector_sync_direction
             self.connector_registry = connector_registry or default_registry
+            # The transport seam a binding calls before building its first connector for a
+            # declared address (ADR 0034). None means exactly today's behaviour: the library
+            # never starts, probes, or stops a broker on its own.
+            self.ensure_transport = ensure_transport
             # None until a class_scope is given. Without a consumer's view, there is no
             # root for recognition, and the datamodel fetch stays unscoped, the same way
             # it does for scenarios 1 and 2.
@@ -288,7 +345,7 @@ class SemanticMiddleware(Middleware):
             # the receiver-side event-trigger REST route that other resources ring to dispatch.
             self._operation_queue: List[IRI] = []
             # Optional domain callback fired on enqueue (#15). None means leave the Operation
-            # queued for a manual claim_next. The system tracks background tasks so they are not
+            # queued for a manual claim_next. The middleware tracks background tasks so they are not
             # garbage-collected before they finish.
             self._callback: Optional[Any] = None
             self._callback_scope: Any = None
@@ -485,6 +542,13 @@ class SemanticMiddleware(Middleware):
         base_decorator = super().workflow(*args, **kwargs)
 
         def decorator(func):
+            """Wrap the workflow function and schedule its KG registration on startup.
+
+            The decorator creates IRIs for the Workflow and Capability instances.
+            It builds the REST endpoint URL from the service address and function name.
+            The wrapped function becomes a REST endpoint via the base class decorator.
+            Registration occurs during the on_start_up callback phase.
+            """
             wrapped = base_decorator(func)
             name = func.__name__
             workflow_iri = mint_workflow_iri(self.service_iri, name)
@@ -492,6 +556,12 @@ class SemanticMiddleware(Middleware):
             endpoint = build_workflow_endpoint(self.address, name)
 
             async def register_workflow_callback() -> None:
+                """Register the Workflow and Capability instances in the knowledge graph.
+
+                This callback runs during startup after the Service registration completes.
+                It creates the Workflow, Capability, and their class associations in the graph.
+                The endpoint URL links the Workflow to its REST handler.
+                """
                 await anyio.to_thread.run_sync(
                     functools.partial(
                         register_workflow,
@@ -526,8 +596,8 @@ class SemanticMiddleware(Middleware):
         it requires ``capability_class`` and ``state_property_class`` as
         keyword-only IRIs (both classes must pre-exist per ADR 0003). Registers a
         GET endpoint at ``/state/{name}`` that calls the decorated getter on
-        demand. The live value The system never writes to the graph. Only the stable
-        endpoint triple The system writes it at registration.
+        demand. The live value is NEVER written to the graph. Only the stable
+        endpoint triple is written, at registration.
 
         Raises:
             RuntimeError: If called outside resource mode.
@@ -546,6 +616,13 @@ class SemanticMiddleware(Middleware):
         state_property_class_iri = IRI(state_property_class)
 
         def decorator(func):
+            """Wrap the state getter function and register its REST endpoint.
+
+            The decorator creates IRIs for the StateProperty and Capability instances.
+            It builds a GET endpoint at /state/{name} that invokes the decorated getter.
+            The endpoint returns the current value without writing to the knowledge graph.
+            Registration of the endpoint metadata occurs during the on_start_up callback.
+            """
             state_name = name or func.__name__
             state_property_iri = mint_state_property_iri(self.service_iri, state_name)
             capability_iri = mint_capability_iri(self.resource_iri, state_name)
@@ -555,6 +632,12 @@ class SemanticMiddleware(Middleware):
 
             @router.get("")
             async def get_state():
+                """Handle GET /state/{name} requests. Call the decorated getter and return its value.
+
+                The handler invokes the decorated function to fetch the current state value.
+                It awaits the result if the function returns an awaitable.
+                The response contains the raw value, not wrapped in any envelope.
+                """
                 result = func()
                 if inspect.isawaitable(result):
                     result = await result
@@ -563,6 +646,12 @@ class SemanticMiddleware(Middleware):
             self.app.include_router(router)
 
             async def register_state_property_callback() -> None:
+                """Register the StateProperty and Capability instances in the knowledge graph.
+
+                This callback runs during startup after the Service registration completes.
+                It creates the StateProperty, Capability, and their class associations in the graph.
+                The endpoint URL links the StateProperty to its REST handler.
+                """
                 await anyio.to_thread.run_sync(
                     functools.partial(
                         register_state_property,
@@ -600,6 +689,12 @@ class SemanticMiddleware(Middleware):
         middleware = self
 
         async def event_trigger(payload: _EventTriggerPayload) -> Dict[str, str]:
+            """Handle POST /workflows/event_trigger/execute requests. Enqueue an Operation for execution.
+
+            The handler extracts the Operation IRI from the request payload.
+            It delegates to _handle_event_trigger to fetch and queue the Operation.
+            The response contains the Operation IRI and its initial QUEUED status.
+            """
             return await middleware._handle_event_trigger(IRI(payload.operation_iri))
 
         # Base decorator mounts the route without the KG registration the KAPPS
@@ -623,7 +718,7 @@ class SemanticMiddleware(Middleware):
             # Fire the domain callback in the background (#15). The trigger returns
             # immediately (ADR 0009 — it does not block on the work). The pull-and-run runs
             # off the event loop, so the blocking graph I/O never stalls the server. Keep a
-            # reference so the system does not garbage-collect the task before it finishes.
+            # reference so the middleware does not garbage-collect the task before it finishes.
             task = asyncio.create_task(self._run_callback())
             self._callback_tasks.add(task)
             task.add_done_callback(self._callback_tasks.discard)
@@ -721,8 +816,9 @@ class SemanticMiddleware(Middleware):
         clean exit the CM **atomically** records `done` plus provenance
         (`executedByWorkflow` / `executionTimestamp` / `executionResult`). On a body
         exception it records `failed` plus the exception message, and re-raises. Provenance
-        is folded into the terminal transition (ADR 0009). The resource-datamodel failure
-        dump The system defers it to a later slice.
+        is folded into the terminal transition (ADR 0009). On failure the CM also dumps the
+        resource datamodel and stores it as the Operation's ``svc:failureState``, so the
+        state that produced the failure survives the exception.
 
         This is the in-process receiver face — not REST-exposed (ADR 0005/0010).
         """
@@ -797,12 +893,12 @@ class SemanticMiddleware(Middleware):
         destination-free, universal maxCount-1 check. Possession is not always single.
         The body is domain-owned: physical transport, and any counterpart coordination, for
         example through a `request(...)` dispatch. The Core never references the event
-        trigger. On clean exit, `__exit__` switches possession to the counterpart. The system appends
+        trigger. On clean exit, `__exit__` switches possession to the counterpart. The middleware appends
         the counterpart's `cfc:hasPossessor` to a fresh PossessionState (an atomic insertion,
-        because a resource can possess several workpieces). The system then re-points the workpiece's
+        because a resource can possess several workpieces). The middleware then re-points the workpiece's
         cardinality-1 `cfc:hasPossessedWorkpiece`, in a single OGM DELETE/INSERT (the update
         path, ADR 0008). The workpiece thus points to exactly one PossessionState throughout the process.
-        On an exception, the system aborts with no switch. Possession The Core models it as
+        On an exception, the middleware aborts with no switch. Possession is Core's reified model
         (`cfc:PossessionState`). The "possessed by exactly one" cardinality is Core's own
         Workpiece restriction, the commit-time SHACL backstop.
         """
@@ -867,7 +963,7 @@ class SemanticMiddleware(Middleware):
         The blocking pull-and-run runs in a worker thread, so it never stalls the server. A
         failure inside the domain work is a normal terminal outcome. `claim_next` has
         already recorded it as `failed`, with provenance in the graph. This logs it at
-        warning level, not error. The system catches the exception so this fire-and-forget
+        warning level, not error. The middleware catches the exception so this fire-and-forget
         task does not leak an unretrieved-exception warning. A drained-queue race
         (`OperationQueueEmpty`, another callback task claimed the op first) is benign.
         """
@@ -885,7 +981,7 @@ class SemanticMiddleware(Middleware):
     def _drive_callback(self) -> None:
         """Run one pull-and-run wrapping the registered domain callback (#15)."""
         callback = self._callback
-        if callback is None:  # defensive: only scheduled when the system registers a callback
+        if callback is None:  # defensive: only scheduled when the middleware registers a callback
             return
         with self.claim_next(self._callback_scope) as claimed:
             claimed.result = callback(claimed.operation)
@@ -895,9 +991,9 @@ class SemanticMiddleware(Middleware):
 
         Own ``queued`` Operations are re-enqueued into the in-memory cache. Own orphaned
         ``running`` Operations (this resource crashed mid-execution) transition to
-        ``failed``, and The system never auto-reruns them, because a half-done physical action must not
+        ``failed``, and never auto-rerun, because a half-done physical action must not
         silently replay. Both are found by ontology traversal (Operation -> Capability <-
-        resource), The links persist across a restart. So this is a one-shot startup
+        resource), whose links persist across a restart. So this is a one-shot startup
         query, rather than steady-state polling.
         """
         queued = await anyio.to_thread.run_sync(
@@ -947,7 +1043,7 @@ class SemanticMiddleware(Middleware):
         Recognition and the northbound projection run identically for every connector
         wiring (ADR 0032). ``autoregister_connectors`` controls only the connection. An
         inspecting instance that skipped recognition would treat each parameter node as
-        ordinary data, and serves its broker address northbound. The least-privileged
+        ordinary data, and serve its broker address northbound. The least-privileged
         instance would leak the most (ADR 0028).
         """
         # Deliberately not wrapped in a try/except. A class_scope request means the
@@ -963,6 +1059,7 @@ class SemanticMiddleware(Middleware):
             registry=self.connector_registry,
             flavour=self.connector_sync_direction,
             autoregister=self.autoregister_connectors,
+            ensure_transport=self.ensure_transport,
         )
 
         for binding, registration in self._wiring.registrations:
@@ -990,6 +1087,56 @@ class SemanticMiddleware(Middleware):
                 self.resource_iri,
             )
 
+    def _suppress_default_persistence_warning(self, data_model_name: str) -> None:
+        """Pre-register the exact fallback ``persist()`` would build anyway, so
+        ``aas_middleware``'s "No persistence factory found ... Using default persistence
+        factory" warning never fires for ``data_model_name`` (#89 item 6).
+
+        ``persist()`` (the base class) calls ``add_to_persistence`` with no
+        ``persistence_factory``, which asks the registry for the default one. Nothing in
+        this codebase ever calls the base class's own opt-in
+        (``add_default_persistence``) to register one ahead of time, so every call falls
+        into the registry's "not found" branch, logs the warning, and constructs
+        ``PersistenceFactory(ModelConnector)`` -- benign, since that is the only
+        connector kind ``persist()`` ever needed, but a warning nobody had explained
+        trains people to ignore warnings (the issue's own words), and #86 is exactly the
+        kind of bug that hides behind one.
+
+        Registering that identical factory here, before the first ``persist()`` call,
+        changes no behaviour -- the connector constructed is the same either way -- it
+        only tells the registry the fallback was chosen on purpose. Called directly on
+        ``persistence_registry`` rather than through ``add_default_persistence``: that
+        wrapper additionally requires ``data_model_name`` already present in
+        ``self.data_models``, a bookkeeping step ``Controller._load_view_datamodels``
+        (``demo/transferunits/controller.py``) has no other reason to perform for each
+        view hit it loads. ``object`` stands in for the wrapper's own ``typing.Any``
+        default: the registry's lookup does ``issubclass(persisted_model_type,
+        model_type)``, and ``typing.Any`` is not a class ``issubclass`` accepts.
+
+        Idempotent -- harmless to call more than once, but skipped once this
+        ``data_model_name`` is registered, so a caller need not track whether it already
+        ran.
+
+        **Kept here rather than fixed upstream, knowingly** (#93 item 5 raised this as a
+        root ADR 0001 question). Every fact this method uses -- that the fallback is
+        ``PersistenceFactory(ModelConnector)``, that the lookup does
+        ``issubclass(persisted_model_type, model_type)`` -- belongs to ``aas_middleware``,
+        so this is a reimplementation of a sibling's internals in a downstream repo, and it
+        drifts silently the moment that fallback changes. Root ADR 0001 would permit fixing
+        it there, but the sibling is not *defective*: it warns about a real choice it made,
+        and suppressing that warning for every consumer is a feature change, not a bugfix.
+        The failure mode if it drifts is benign and loud enough -- the warning returns --
+        rather than a wrong value, which is why this is a recorded bet rather than a fix.
+        Revisit it with map #57's follow-on map #96, which takes ownership of this exact
+        registry.
+        """
+        connection_info = ConnectionInfo(data_model_name=data_model_name)
+        if connection_info in self.persistence_registry.persistence_factories:
+            return
+        self.persistence_registry.add_persistence_factory(
+            connection_info, object, PersistenceFactory(ModelConnector)
+        )
+
     async def _load_resource_datamodel(self) -> None:
         """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
 
@@ -1002,7 +1149,7 @@ class SemanticMiddleware(Middleware):
 
         When a ``class_scope`` was given, the fetch goes through the **pruned** spec. So
         the served datamodel has no field that could carry a broker address or a topic
-        (ADR 0028). Without one, the system fetches unscoped, and returns the individual.
+        (ADR 0028). Without one, the middleware fetches unscoped, and returns the individual.
         This is what scenarios 1 and 2 rely on, and why the projection cannot leak there.
         """
         try:
@@ -1029,6 +1176,7 @@ class SemanticMiddleware(Middleware):
                 # up by data_model_name="resource" and this exact resource_iri, and raises
                 # a bare KeyError if it is missing. Scenarios 1 and 2 pass no class_scope,
                 # so self._wiring remains None and they keep the behavior unchanged.
+                self._suppress_default_persistence_warning("resource")
                 await self.persist("resource", instance)
             # The local recursive router, not the framework generator (ADR 0017). It still
             # produces the framework's top-level CRUD -- it calls it -- and then descends the

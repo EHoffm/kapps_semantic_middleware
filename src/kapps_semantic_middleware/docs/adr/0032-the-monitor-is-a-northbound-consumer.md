@@ -1,5 +1,16 @@
 # The monitor is a northbound consumer, not a wired instance
 
+> **Coming soon — milestone 2. Nothing below runs today.**
+>
+> No monitor process exists. `demo/transferunits/launcher.py` starts PLCs, middleware
+> instances and one control station, and nothing else. No `fac:MonitoringStation`
+> individual is ever seeded.
+>
+> This record is a **design**, written before the code. Read every present-tense verb
+> below as "the monitor will", not as "the monitor does". Milestone 1 ships the factory
+> without it, and ADR 0029's 2026-07-31 amendment records why: build the minimum example,
+> make it run, then add the monitor against working code.
+
 The scenario 3 monitor does not wire a connector. It does not abstract a device. It reads the knowledge graph with
 SPARQL, and it reads other middleware instances over REST. It holds two seams. It does not hold a third seam.
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
 from graph_db_interface import IRI
@@ -37,6 +37,7 @@ from kapps_semantic_middleware.connectors.semantic import (
     resolve_direction,
 )
 from kapps_semantic_middleware.projection import cross_check, prune_southbound
+from kapps_semantic_middleware.vocabulary import META_TYPE_NAMESPACES, RDFS, SVC
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,16 @@ class WiringPlan:
     southbound_properties: frozenset
     """The prune set that was applied, kept for assertions and diagnostics."""
 
+    southbound_by_property: Dict[str, frozenset]
+    """The same prune set, broken out per recognized parameter property rather than
+    unioned across all of them. ``plan_wiring`` already computes this as a cache
+    (``southbound_by_property``, one ontology round trip per distinct property rather
+    than one per binding) and used to discard it once ``southbound_properties`` was
+    built. Kept here instead: a consumer that shows what pruning stripped *per
+    parameter* -- ticket #82's station board, answering ticket #78's deferred display
+    question -- needs exactly this breakdown, and recomputing it a second time would cost
+    the same ontology queries this cache exists to avoid paying twice."""
+
     def northbound_fetch_kwargs(self) -> Dict[str, Any]:
         """The arguments that materialize this resource's northbound view."""
         return {
@@ -96,6 +107,7 @@ def plan_wiring(
     registry: SemanticConnectorRegistry,
     flavour: SyncDirection = SyncDirection.BIDIRECTIONAL,
     autoregister: bool = True,
+    ensure_transport: Optional[Callable[[str, int], None]] = None,
 ) -> WiringPlan:
     """Resolve a resource's parameters and decide what to connect.
 
@@ -103,8 +115,14 @@ def plan_wiring(
     the recognized bindings either way. An inspecting instance that skipped recognition
     would treat every parameter node as ordinary data, and serve its broker address. The
     least-privileged connector wiring would leak the most (ADR 0028).
+
+    ``ensure_transport`` is the deployment's transport hook (ADR 0034). Wrapped once here,
+    fresh per call, so it fires at most once per distinct ``(host, port)`` across every
+    binding built below -- a binding descriptor calls it unconditionally and the wrapper
+    absorbs the dedup, so no descriptor has to track addresses it has already seen across
+    calls it cannot see each other from.
     """
-    resource_class = resource_class or _class_of(ogm, resource_iri)
+    resource_class = resource_class or class_of(ogm, resource_iri)
     full_spec = ogm.get_class_spec(class_iri=resource_class, class_scope=class_scope)
 
     # The projection asks the *ontology* what is protocol metadata, not the registry. A
@@ -120,7 +138,11 @@ def plan_wiring(
     northbound_spec = prune_southbound(full_spec, ogm=ogm, cache=southbound_by_property)
 
     bindings = _recognise(
-        ogm=ogm, resource_iri=resource_iri, spec=full_spec, registry=registry
+        ogm=ogm,
+        resource_iri=resource_iri,
+        resource_class=resource_class,
+        spec=full_spec,
+        registry=registry,
     )
 
     southbound = frozenset(
@@ -139,11 +161,15 @@ def plan_wiring(
             getattr(binding.descriptor, "connection_metadata", None),
         )
 
+    deduped_ensure_transport = _dedupe_by_address(ensure_transport)
+
     registrations: List[Tuple[ParameterBinding, Registration]] = []
     if autoregister:
         for binding in bindings:
             direction = resolve_direction(binding.access_mode, flavour)
-            for registration in binding.descriptor.build(binding, direction):
+            for registration in binding.descriptor.build(
+                binding, direction, ensure_transport=deduped_ensure_transport
+            ):
                 registrations.append((binding, registration))
     else:
         logger.info(
@@ -159,13 +185,41 @@ def plan_wiring(
         bindings=bindings,
         registrations=registrations,
         southbound_properties=southbound,
+        southbound_by_property=southbound_by_property,
     )
+
+
+def _dedupe_by_address(
+    ensure_transport: Optional[Callable[[str, int], None]],
+) -> Optional[Callable[[str, int], None]]:
+    """Wrap a transport hook so it fires at most once per distinct ``(host, port)``.
+
+    ``None`` in, ``None`` out -- a resource with no hook calls nothing (ADR 0034). Otherwise
+    a fresh ``seen`` set is closed over per call to :func:`plan_wiring`, which is exactly the
+    scope one middleware construction spans. A resource whose parameters ever name two
+    addresses gets the hook called twice; four parameters sharing one address get it once,
+    before the first connector for that address is built.
+    """
+    if ensure_transport is None:
+        return None
+
+    seen: set = set()
+
+    def wrapped(host: str, port: int) -> None:
+        key = (host, port)
+        if key in seen:
+            return
+        seen.add(key)
+        ensure_transport(host, port)
+
+    return wrapped
 
 
 def _recognise(
     *,
     ogm: Any,
     resource_iri: IRI,
+    resource_class: IRI,
     spec: Any,
     registry: SemanticConnectorRegistry,
 ) -> List[ParameterBinding]:
@@ -175,10 +229,30 @@ def _recognise(
     named type of its own. It has only anonymous restriction nodes, which exist by inference and so
     never appear in an explicit-graph fetch. The property hierarchy is what survives a
     round trip (ADR 0020).
+
+    **The evidence may sit on the parameter or on the resource's Service** (ADR 0023's
+    2026-08-03 amendment, ticket #33). An MQTT connector recognises ``inf:hasMQTTTopic`` on
+    the parameter itself. A REST connector has no such marker; its evidence is the resource's
+    own ``svc:address``, one hop out through ``svc:isServiceOf``. Look that address up **once**
+    per resource here, and fold it into every recognised binding's metadata alongside whatever
+    the parameter node itself carries — a binding descriptor that does not care (MQTT) simply
+    never reads the key.
     """
     bindings: List[ParameterBinding] = []
+    address = _service_address(ogm=ogm, resource_iri=resource_iri)
+    # This must equal `type(instance).__name__` for the materialized root -- the {Model}
+    # segment `rest_router.py` actually mounts routes under. `kapps_ogm`'s
+    # `ClassSpec.to_pydantic_model` names that class `self.iri.lined`, the class IRI
+    # mangled whole (`class_spec.py`), not its bare fragment: two classes from different
+    # namespaces that happen to share a fragment (e.g. two ontologies each defining their
+    # own `TransferUnit`) would otherwise collide on one Python class name. A REST
+    # binding derives this route independently, with no served route list to read it
+    # from, so it has to reconstruct the same mangling `to_pydantic_model` used, not the
+    # shorter fragment a human would write by hand -- using the fragment here 404s every
+    # request this binding ever builds (kapps_semantic_middleware#80).
+    root_class_local_name = IRI(str(resource_class)).lined
 
-    for holder_iri, prop_iri, prop_spec in _parameter_properties(
+    for holder_iri, prop_iri, prop_spec, steps in _parameter_properties(
         ogm=ogm, root_iri=resource_iri, spec=spec
     ):
         descriptor = _descriptor_for(ogm=ogm, prop_iri=prop_iri, registry=registry)
@@ -194,6 +268,10 @@ def _recognise(
         if metadata is None:
             continue
 
+        metadata = normalize_metadata(metadata)
+        if address is not None:
+            metadata.setdefault(str(SVC.address), [address])
+
         bindings.append(
             ParameterBinding(
                 resource_iri=holder_iri,
@@ -201,17 +279,20 @@ def _recognise(
                 # ClassSpec keys arrive as rdflib URIRef, not IRI, so the mangling has to go
                 # through a converted copy. URIRef has no `lined`.
                 field_id=IRI(str(prop_iri)).lined,
-                metadata=normalize_metadata(metadata),
+                metadata=metadata,
                 descriptor=descriptor,
                 node_model_type=prop_spec.nested.to_pydantic_model(),
+                root_iri=IRI(str(resource_iri)),
+                root_class_local_name=root_class_local_name,
+                path_steps=steps,
             )
         )
 
     return bindings
 
 
-def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
-    """Yield ``(holder_iri, property_iri, property_spec)`` for every COMPLEX property.
+def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any, steps: Tuple[Tuple[str, str], ...] = ()):
+    """Yield ``(holder_iri, property_iri, property_spec, path_steps)`` for every COMPLEX property.
 
     A COMPLEX property is the deepest addressable thing. ``ConnectionInfo`` has exactly three
     levels and ``field_id`` resolves by plain ``getattr``, so ``inf:hasValue`` — one level
@@ -220,12 +301,19 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
 
     Descend one level through object properties to reach a resource's components. A
     TransferUnit's parameters hang off its belts and barriers, not off the unit itself.
+
+    ``path_steps`` accumulates the ``(field_name, child_iri)`` hops taken to reach the
+    current ``root_iri``, mirroring ``rest_router.py``'s own tree walk exactly — that is what
+    lets ``rest_binding.py`` derive a structural URL with no second walk and no ontology
+    term (ADR 0017, ADR 0033). ``field_name`` is mangled here (``IRI(prop_iri).lined``), the
+    same way ``field_id`` is mangled below, because that is the actual pydantic field name
+    the served route uses.
     """
     from kapps_ogm.mapping.property_spec import PropertyValueKind
 
     for prop_iri, prop_spec in getattr(spec, "properties", {}).items():
         if prop_spec.value_kind is PropertyValueKind.COMPLEX:
-            yield root_iri, prop_iri, prop_spec
+            yield root_iri, prop_iri, prop_spec, steps
             continue
 
         nested = getattr(prop_spec, "nested", None)
@@ -234,8 +322,30 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any):
 
         for component_iri in _linked_individuals(ogm, root_iri, prop_iri):
             yield from _parameter_properties(
-                ogm=ogm, root_iri=component_iri, spec=nested
+                ogm=ogm,
+                root_iri=component_iri,
+                spec=nested,
+                steps=steps + ((IRI(str(prop_iri)).lined, str(component_iri)),),
             )
+
+
+def _service_address(*, ogm: Any, resource_iri: IRI) -> Optional[str]:
+    """The resource's own ``svc:address``, one hop out through ``svc:isServiceOf``.
+
+    One query per ``_recognise`` call, not per parameter — a resource has one Service, and
+    every parameter on it shares the same answer. ``None`` when the resource has no Service,
+    or the Service has not (yet) published an address. That is the ordinary state of a
+    freshly-constructing instance recognising its *own* resource: ``plan_wiring`` runs from
+    ``__init__``, and ``_register_service`` is an ``on_start_up`` callback that has not run
+    yet, so there is no address to find and REST recognition finds nothing to bind (ADR
+    0023's Service-join amendment).
+    """
+    rows = ogm.db.query(
+        f"SELECT ?addr {EXPLICIT_GRAPH} "
+        f"WHERE {{ ?svc <{SVC.isServiceOf}> <{resource_iri}> ; <{SVC.address}> ?addr }}",
+        convert_bindings=True,
+    )["results"]["bindings"]
+    return str(rows[0]["addr"]) if rows else None
 
 
 def _linked_individuals(ogm: Any, subject: IRI, prop_iri: IRI) -> List[IRI]:
@@ -291,7 +401,7 @@ def _is_subproperty_of(ogm: Any, prop_iri: IRI, ancestor: IRI) -> bool:
     return bool(
         ogm.db.query(
             f"ASK {{ <{prop_iri}> "
-            f"<http://www.w3.org/2000/01/rdf-schema#subPropertyOf>* <{ancestor}> }}"
+            f"<{RDFS.subPropertyOf}>* <{ancestor}> }}"
         ).get("boolean", False)
     )
 
@@ -326,7 +436,12 @@ def _parameter_metadata(
     metadata: Dict[str, Any] = {}
     undeclared = set()
     for row in rows:
-        prop, value = str(row["p"]), str(row["v"])
+        # `row["p"]` is the property IRI -- always stringified for a plain dict key. `row["v"]`
+        # is left as `convert_bindings=True` produced it: every metadata property here has been
+        # `xsd:string` until now, so this was a no-op, but forcing `str()` on it would turn
+        # `inf:hasMQTTBrokerPort`'s `xsd:integer` back into a string (#69's stated acceptance:
+        # the round trip must hand back 18831, not "18831").
+        prop, value = str(row["p"]), row["v"]
         if prop not in declared:
             undeclared.add(prop)
             continue
@@ -349,22 +464,16 @@ def _parameter_metadata(
     return metadata
 
 
-# These are types every individual carries that say nothing about what it *is*. An OGM ClassSpec
-# You resolve against one of these fails outright, and `owl:NamedIndividual` in particular is
-# asserted on everything the OGM writes.
-_META_TYPE_NAMESPACES = (
-    "http://www.w3.org/2002/07/owl#",
-    "http://www.w3.org/2000/01/rdf-schema#",
-    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-)
+def class_of(ogm: Any, instance_iri: IRI) -> IRI:
+    """Return the individual's asserted domain class, so a caller need not restate it.
 
+    An individual carries several ``rdf:type`` assertions, and their order means nothing.
+    So this filters out the structural types rather than trusting them to sort last.
+    ``owl:NamedIndividual`` is the trap: it is asserted on everything the OGM writes, and a
+    ClassSpec resolved against it cannot resolve at all.
 
-def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
-    """This function returns the individual's asserted domain class, so a caller need not restate what the graph knows.
-
-    An individual carries several ``rdf:type`` assertions and their order is not meaningful,
-    so filter out the structural ones rather than trust them to sort last. Picking
-    ``owl:NamedIndividual`` yields a ClassSpec that cannot resolve at all.
+    Public because a consumer that discovers resources in the graph needs exactly this answer,
+    and the alternative is the copy that grew in the demo's station board and drifted.
     """
     rows = ogm.db.query(
         f"SELECT ?c {EXPLICIT_GRAPH} "
@@ -375,7 +484,7 @@ def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
     candidates = [
         IRI(str(row["c"]))
         for row in rows
-        if not str(row["c"]).startswith(_META_TYPE_NAMESPACES)
+        if not str(row["c"]).startswith(META_TYPE_NAMESPACES)
     ]
 
     if not candidates:

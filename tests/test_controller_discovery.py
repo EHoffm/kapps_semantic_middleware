@@ -19,6 +19,7 @@ from graph_db_interface import IRI
 from kapps_ogm import OGM
 
 from demo.transferunits.controller import Controller, ResourceInfo
+from kapps_semantic_middleware.connectors.rest_binding import build_parameter_path
 from kapps_semantic_middleware.registration import mint_service_iri, register_service
 from kapps_semantic_middleware.vocabulary import CFC, SVC
 
@@ -195,32 +196,6 @@ class TestControllerDiscovery:
         assert controller_found, "Controller should appear in its own discovery"
 
 
-class TestControllerRestInteraction:
-    """Tests for REST interaction with resources.
-
-    These tests need a running middleware instance serving a resource.
-    They stay skipped until the launcher (ticket #66) exists to serve one.
-    """
-
-    @pytest.mark.skip(reason="Requires running middleware instance")
-    async def test_open_resource_returns_datamodel(self):
-        """Opening a resource returns its full datamodel tree."""
-        # This would require a running middleware at a known URL
-        pass
-
-    @pytest.mark.skip(reason="Requires running middleware instance")
-    async def test_set_parameter_writes_single_field(self):
-        """Setting a parameter does exactly one PUT to the field path."""
-        # This would require a running middleware at a known URL
-        pass
-
-    @pytest.mark.skip(reason="Requires running middleware instance")
-    async def test_get_parameter_reads_single_field(self):
-        """Getting a parameter does exactly one GET to the field path."""
-        # This would require a running middleware at a known URL
-        pass
-
-
 class TestGetServiceInfo:
     """Tests for the _get_service_info helper method."""
 
@@ -258,7 +233,7 @@ class TestGetServiceInfo:
 
 
 class TestParameterPathDerivation:
-    """Offline tests for _build_parameter_path and _derive_parameter_path.
+    """Offline tests for rest_binding.build_parameter_path and _derive_parameter_path.
 
     There is no GraphDB and no network. These mirror the fixture style of
     test_recursive_rest_router.py, but walk a plain JSON tree of dicts and
@@ -303,7 +278,7 @@ class TestParameterPathDerivation:
         This is the same shape test_recursive_rest_router.py's _path() helper
         asserts on the server side (ADR 0017).
         """
-        path = Controller._build_parameter_path(
+        path = build_parameter_path(
             "TransferUnit",
             IRI(self.UNIT_IRI),
             [("tu:hasConveyorBelt", self.LEFT_BELT_IRI)],
@@ -319,13 +294,13 @@ class TestParameterPathDerivation:
 
     def test_sibling_belts_produce_different_paths(self):
         """Two belts under one field yield distinct, non-colliding paths."""
-        left_path = Controller._build_parameter_path(
+        left_path = build_parameter_path(
             "TransferUnit",
             IRI(self.UNIT_IRI),
             [("tu:hasConveyorBelt", self.LEFT_BELT_IRI)],
             "tu:hasConveyorSpeed",
         )
-        right_path = Controller._build_parameter_path(
+        right_path = build_parameter_path(
             "TransferUnit",
             IRI(self.UNIT_IRI),
             [("tu:hasConveyorBelt", self.RIGHT_BELT_IRI)],
@@ -350,7 +325,7 @@ class TestParameterPathDerivation:
             "tu:hasConveyorSpeed",
         )
 
-        expected = Controller._build_parameter_path(
+        expected = build_parameter_path(
             "TransferUnit",
             IRI(self.UNIT_IRI),
             [("tu:hasConveyorBelt", self.LEFT_BELT_IRI)],
@@ -370,7 +345,3 @@ class TestParameterPathDerivation:
                 [("tu:hasConveyorBelt", "https://example.org/tui#ConveyorBelt1_ghost")],
                 "tu:hasConveyorSpeed",
             )
-
-    def test_extract_local_name_splits_fragment(self):
-        """_extract_local_name returns the fragment after '#' from a class IRI."""
-        assert Controller._extract_local_name(IRI("https://example.org/tu#TransferUnit")) == "TransferUnit"

@@ -1,6 +1,6 @@
 # SHACL Interop
 
-One of four contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others.
+One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others.
 
 Temporary scaffolding (see
 `src/kapps_semantic_middleware/shacl_interop/docs/adr/0001-shacl-for-workflow-signatures.md`)

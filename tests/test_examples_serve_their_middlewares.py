@@ -24,12 +24,14 @@ import pytest
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
-KNOWN_UNSERVED = {
-    # Serving it deadlocks. `uvicorn.Server.run()` in a thread creates its own event loop, and
-    # `lifespan` connects the MQTT connectors on *that* loop — while the walkthrough drives the
-    # same connectors from the loop `asyncio.run(main())` owns. Cross-loop use of an aiomqtt
-    # client hangs rather than failing. Filed, not worked around.
-    "scenario3_transferunit.py": 62,
+KNOWN_UNSERVED: dict[str, int] = {
+    # Empty on purpose. The one entry that lived here, `scenario3_transferunit.py`, was retired
+    # with its notebook and `mock_transferunit.py` when the factory demo landed — ADR 0029
+    # promised that retirement, and `demo/transferunits/` is now the only scenario 3. Its
+    # exemption went with the file; see #62 for the cross-loop deadlock that earned it.
+    #
+    # Keep this dict and the test below even while it is empty. A future example that cannot
+    # serve its middleware gets an entry here with its issue number, not a silent skip.
 }
 """Examples that legitimately do not serve a middleware yet, each with its issue.
 

@@ -11,14 +11,14 @@ Middleware context, in one shared sequence: `../../src/kapps_semantic_middleware
 `CONTEXT-MAP.md` records which context each ADR governs.
 
 **Root ADR 0004 governs what belongs here.** Every part of a scenario lives in this directory. The
-library holds generic functions only. The monitor, the controller and the TransferUnit resource logic
-are parts of scenario 3.
+library holds generic functions only. The controller and the TransferUnit resource logic are parts
+of scenario 3. The monitor is also a part of scenario 3, and it is not built yet (milestone 2).
 
 ## Language
 
 **Factory**:
-The whole demonstration as it runs: N TransferUnits, a controller, a monitor, and the Launcher
-that starts them.
+The whole demonstration as it runs: N TransferUnits, a controller, and the Launcher that starts
+them. A monitor joins in milestone 2 (ADR 0032). It is not built.
 _Avoid_: demo, scenario 3, setup
 
 **Unit index**:
@@ -39,7 +39,7 @@ _Avoid_: middleware script, worker
 This is the controller's Resource individual in the graph. It carries no controllable parameter, and
 it appears in its own discovery list. It registers a Service, so it stays discoverable, and it
 registers no Workflow, so it holds no Capability and an Operation never resolves to it (ADR 0002).
-The monitoring station is the same shape for the monitor.
+The monitoring station will be the same shape for the monitor, in milestone 2.
 _Avoid_: controller resource, planner, operator station
 
 **TransferUnit Expert**:

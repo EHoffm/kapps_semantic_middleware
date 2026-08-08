@@ -43,3 +43,39 @@ implemented on a branch with a changelog entry, per root ADR 0001.
   the amendment there).
 
 Raised by wayfinder ticket #52 under map #24.
+
+---
+
+**Amendment (2026-08-07, #78 under map #57) — "the checkout stays unpatched" is retired. The test
+was never about *where the code lands*; it is about *who decides the semantics*.**
+
+The consequence above reads *"Our checkout of `kapps_ogm` stays unpatched. It can track upstream."*
+That was already false when written down in this form: `kapps_ogm`'s own `CHANGELOG.md` records
+**"Four new modules implement Skolemised identity for anonymous nodes, per `SAWeindel/kapps_ogm#6`
+and PRD requirements R1–R6"**. The specification went upstream, was accepted, and was then built in
+the checkout. What actually happened is better than what this ADR described, and the ADR should say
+so rather than be quietly ignored a second time.
+
+**The rule, restated.** New capability in a sibling is specified as a PRD and filed as an upstream
+issue **before** any code. Implementation in our checkout is permitted once the specification exists
+and the owner has it, and it carries a detailed `CHANGELOG.md` entry naming the PRD and the issue
+(root ADR 0001's requirement, unchanged). What is still forbidden is the thing this ADR was written
+to stop: **changing a sibling's semantics by patching first and describing later.** The three tests
+in *Why* above are the real content and they stand — a defect not a feature request, local, and no
+judgement call that belongs with a reviewer. Only the third test decides this, and it decides it by
+requiring the specification, not by requiring the code to live elsewhere.
+
+**Second instance, and what prompted this.** Ticket #78 found that a `ClassScope` is truncated at a
+`COMPLEX` property in four independent places, so a consumer cannot ask for a parameter node's
+`inf:hasValue` without also receiving its broker address. Same shape as this ADR's original case:
+not local, and the semantics — what a scope *means* below an anonymous node, and what a partial
+node may then be committed as — are a judgement call with the OGM owner. So it went the same way:
+`docs/prd/scoped-hydration-below-complex-properties.md` in `kapps_ogm`, filed as
+[`SAWeindel/kapps_ogm#23`](https://github.com/SAWeindel/kapps_ogm/issues/23). Implementation there
+was authorised by Etienne on 2026-08-07 and is scheduled after map #57's milestone-1 merge.
+
+**One divergence from the precedent, deliberately.** That PRD lives in the `kapps_ogm` repository,
+next to the code it constrains, rather than in `docs/prd/` here alongside
+`kapps-ogm-anonymous-node-identity.md`. The two PRDs are therefore in different repositories. This
+is a live inconsistency rather than a settled convention, and it should be settled the next time one
+of them is touched.

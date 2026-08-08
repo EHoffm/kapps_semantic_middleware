@@ -71,10 +71,13 @@
     <div class="row">
       <button id="btn-front" onclick="toggle('front')">front — clear</button>
       <button id="btn-back" onclick="toggle('back')">back — clear</button>
+      <button id="btn-throughput" onclick="toggleThroughput()">simulate throughput</button>
     </div>
     <p class="hint">A light barrier is a sensor. The middleware reads it and cannot move it,
        so these two buttons stand in for a workpiece. They call
        <code>transfer_unit.py &rarr; set_occupied()</code>.</p>
+    <p class="hint">The throughput button starts a loop that cycles the barriers automatically
+       while a belt runs. It calls <code>transfer_unit.py &rarr; set_throughput_simulation()</code>.</p>
   </div>
 
   <p class="hint">The speed you type goes to <code>transfer_unit.py &rarr; set_speed()</code>.
@@ -82,8 +85,7 @@
 </main>
 
 <div class="bar">
-  <span>Commanded speed appears only when divergent from actual</span>
-  <span class="proto">PROTOTYPE — use MQTT setpoint to test divergence</span>
+  <span>A ramping belt shows what it is ramping to. Highlighted means it stopped short.</span>
 </div>
 
 <script>
@@ -111,6 +113,12 @@ function toggle(pos) {
   post('/api/barrier/' + pos, {occupied: !on}).then(render);
 }
 
+function toggleThroughput() {
+  const btn = document.getElementById('btn-throughput');
+  const on = btn.classList.contains('on');
+  post('/api/throughput', {enabled: !on}).then(render);
+}
+
 function render(s) {
   document.getElementById('title').textContent = s.unit;
   for (const pos of ['left', 'right']) {
@@ -121,16 +129,23 @@ function render(s) {
     if (motion) {
       motion.style.animationPlayState = speed === 0 ? 'paused' : 'running';
       if (speed !== 0) motion.style.animationDuration = (1.5 / Math.abs(speed)) + 's';
+      motion.style.animationDirection = speed < 0 ? 'reverse' : 'normal';
     }
     const label = document.getElementById('label-' + pos);
     if (label) label.textContent = pos + '  ' + speed.toFixed(2) + ' m/s';
 
     const box = document.getElementById('cmd-' + pos);
-    const diverged = cmd !== null && Math.abs(cmd - speed) > 1e-9;
-    box.classList.toggle('diverged', diverged);
-    // Commanded speed line appears ONLY when divergent from actual
-    if (diverged) {
-      box.textContent = 'commanded ' + cmd.toFixed(2) + ' — the unit does not follow';
+    // `diverged` means STOPPED CONVERGING, not unequal (#81, which amended #31 to say
+    // so; #93 item 3). Under #83's ramp the two are unequal during every set by design,
+    // so the old `abs(cmd - speed) > 1e-9` painted every healthy ramp as a fault.
+    // The verdict is the server's -- panel.py's ConvergenceTracker judges it on the
+    // clock, so opening a second tab cannot make a belt diverge sooner.
+    const status = (s.belt_status || {})[pos];
+    box.classList.toggle('diverged', status === 'diverged');
+    if (status === 'diverged') {
+      box.textContent = 'stopped at ' + speed.toFixed(2) + ', commanded ' + cmd.toFixed(2) + ' m/s';
+    } else if (status === 'converging') {
+      box.textContent = 'ramping to ' + cmd.toFixed(2) + ' m/s';
     } else {
       box.textContent = '';
     }
@@ -147,6 +162,13 @@ function render(s) {
     if (hit) hit.style.display = on ? '' : 'none';
     const label = document.getElementById('label-' + pos);
     if (label) label.textContent = pos + '  ' + (on ? 'occupied' : 'clear');
+  }
+  // Throughput simulation button state
+  const tpBtn = document.getElementById('btn-throughput');
+  if (tpBtn) {
+    const tpOn = s.throughput_simulation;
+    tpBtn.classList.toggle('on', tpOn);
+    tpBtn.textContent = 'simulate throughput' + (tpOn ? ' — on' : '');
   }
 }
 

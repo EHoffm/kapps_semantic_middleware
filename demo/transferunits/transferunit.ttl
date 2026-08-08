@@ -23,6 +23,7 @@ inf:isInterfaceAccessibleMQTTParameter rdf:type owl:ObjectProperty ;
         owl:intersectionOf (
             [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTTopic     ; owl:allValuesFrom xsd:string ]
             [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTBrokerIP  ; owl:allValuesFrom xsd:string ]
+            [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTBrokerPort ; owl:allValuesFrom xsd:integer ]
             [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTSetTopic  ; owl:allValuesFrom xsd:string ]
             [ rdf:type owl:Restriction ; owl:onProperty inf:hasMQTTValuePath ; owl:allValuesFrom xsd:string ]
         ) ] .
@@ -46,6 +47,10 @@ inf:hasMQTTSetTopic rdf:type owl:DatatypeProperty ;
 inf:hasMQTTBrokerIP rdf:type owl:DatatypeProperty ;
     rdfs:label "has MQTT broker IP" ;
     rdfs:comment "Address of the broker carrying this parameter's topics." .
+
+inf:hasMQTTBrokerPort rdf:type owl:DatatypeProperty ;
+    rdfs:label "has MQTT broker port" ;
+    rdfs:comment "Port of the broker carrying this parameter's topics. Absent means 1883." .
 
 inf:hasMQTTValuePath rdf:type owl:DatatypeProperty ;
     rdfs:label "has MQTT value path" ;

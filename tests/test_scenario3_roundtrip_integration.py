@@ -31,22 +31,24 @@ import examples.seed as seed  # noqa: E402
 from demo.transferunits.plc.transfer_unit import TransferUnit  # noqa: E402
 
 
-@pytest.fixture
-def wired(graphdb, mqtt_broker):
-    """Seed scenario 3 pointed at the test broker, then plan its wiring.
+def _wire_scenario3_to_test_broker(graphdb, mqtt_broker, *, declare_port):
+    """Seed scenario 3, point its broker address at the live test broker, plan its wiring.
 
-    The seeded broker address is rewritten to the test broker's host:port, because the
-    binding reads the address out of the graph — which is the property under test. Pointing
-    the graph at the test broker is how you redirect a whole TransferUnit, and it is exactly
-    what provisioning (#54) will do for real.
+    Shared by ``wired`` and ``wired_with_declared_port`` below, which differ only in
+    whether ``inf:hasMQTTBrokerPort`` also gets declared in the graph.
     """
     host, port = mqtt_broker.split(":")
     ogm = OGM(db=graphdb)
     seed.seed_scenario3(graphdb, ogm)
 
+    port_triple = (
+        f'; <{INF.hasMQTTBrokerPort}> "{port}"^^<http://www.w3.org/2001/XMLSchema#integer> '
+        if declare_port
+        else ""
+    )
     graphdb.query(
         f"DELETE {{ ?n <{INF.hasMQTTBrokerIP}> ?old }} "
-        f"INSERT {{ ?n <{INF.hasMQTTBrokerIP}> \"{host}\" }} "
+        f'INSERT {{ ?n <{INF.hasMQTTBrokerIP}> "{host}" {port_triple}}} '
         f"WHERE  {{ ?n <{INF.hasMQTTBrokerIP}> ?old }}",
         update=True,
     )
@@ -65,6 +67,18 @@ def wired(graphdb, mqtt_broker):
         flavour=SyncDirection.BIDIRECTIONAL,
     )
     return plan, host, int(port)
+
+
+@pytest.fixture
+def wired(graphdb, mqtt_broker):
+    """Seed scenario 3 pointed at the test broker, then plan its wiring.
+
+    The seeded broker address is rewritten to the test broker's host:port, because the
+    binding reads the address out of the graph — which is the property under test. Pointing
+    the graph at the test broker is how you redirect a whole TransferUnit, and it is exactly
+    what provisioning (#54) will do for real.
+    """
+    return _wire_scenario3_to_test_broker(graphdb, mqtt_broker, declare_port=False)
 
 
 def _connector_for(plan, topic_suffix, direction):
@@ -162,6 +176,9 @@ class TestMiddlewareToDevice:
                 [node] = registration.formatter.deserialize(2.75)
                 await connector.consume(registration.formatter.serialize([node]))
                 await unit.wait_for_setpoint(timeout=5.0)
+                # The setpoint ramps the belt rather than snapping it (#83); wait for the ramp
+                # to converge before asserting the exact value.
+                await unit.wait_for_convergence("left", timeout=10.0)
             finally:
                 await connector.disconnect()
 
@@ -204,3 +221,52 @@ class TestFullLoop:
             finally:
                 await write.connector.disconnect()
                 await read.connector.disconnect()
+
+
+@pytest.fixture
+def wired_with_declared_port(graphdb, mqtt_broker):
+    """Like ``wired``, but the port comes from the graph too -- no manual patch afterward.
+
+    ``wired`` (above) rewrites only the broker IP to the test broker's host, and every test
+    that uses it patches ``connector.mqtt_broker_port`` by hand afterward, because there was
+    nothing in the graph to carry a non-default port. This fixture declares
+    ``inf:hasMQTTBrokerPort`` too, the same way provisioning will, so the connector the graph
+    wires is already pointed at the live test broker with no test-side patch at all.
+    """
+    return _wire_scenario3_to_test_broker(graphdb, mqtt_broker, declare_port=True)
+
+
+@requires_graphdb
+@pytest.mark.asyncio
+class TestDeclaredPortReachesALiveBroker:
+    """#69's stated acceptance: proven against a live broker on a non-default port, not a mock."""
+
+    async def test_the_connector_is_already_built_on_the_declared_port(
+        self, wired_with_declared_port
+    ):
+        plan, host, port = wired_with_declared_port
+        registration = _connector_for(plan, "left/speed", SyncDirection.TO_PERSISTENCE)
+
+        assert port != 1883  # the whole point: a non-default port
+        assert registration.connector.mqtt_broker_port == port  # no manual patch needed
+
+    async def test_a_published_value_reaches_the_connector_on_the_declared_port(
+        self, wired_with_declared_port
+    ):
+        plan, host, port = wired_with_declared_port
+        registration = _connector_for(plan, "left/speed", SyncDirection.TO_PERSISTENCE)
+        connector = registration.connector
+
+        async with TransferUnit(
+            broker=host,
+            port=port,
+            publish_interval=0.1,
+            initial_speeds={"left": 4.5, "right": 0.0},
+        ):
+            await connector.connect()
+            try:
+                value = await asyncio.wait_for(connector.queue.get(), timeout=5.0)
+            finally:
+                await connector.disconnect()
+
+        assert value == 4.5
