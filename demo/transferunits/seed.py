@@ -18,14 +18,13 @@ from rdflib import Literal
 from rdflib.namespace import RDF, RDFS
 
 from kapps_semantic_middleware.seeding import clear_repository, load_shared_ontologies
-from kapps_semantic_middleware.vocabulary import SVC
+from kapps_semantic_middleware.vocabulary import INF, SVC
 
 
 # --- Namespaces ------------------------------------------------------------- #
 
 TU_NS = "https://www.sfb1574.kit.edu/ontologies/TransferUnit#"
 TUI_NS = "https://www.sfb1574.kit.edu/ontologies/TransferUnitInstances#"
-INF_NS = "https://www.sfb1574.kit.edu/ontologies/CrcInterfaces#"
 FAC_NS = "https://www.sfb1574.kit.edu/ontologies/Factory#"
 FACI_NS = "https://www.sfb1574.kit.edu/ontologies/FactoryInstances#"
 
@@ -46,12 +45,12 @@ TU_IS_OCCUPIED = IRI(f"{TU_NS}isOccupied")
 TU_HAS_UNIT = IRI(f"{TU_NS}hasUnit")
 
 # --- Interface property IRIs (inf:) ------------------------------------------ #
-
-INF_ACCESS_MODE = IRI(f"{INF_NS}accessMode")
-INF_HAS_MQTT_TOPIC = IRI(f"{INF_NS}hasMQTTTopic")
-INF_HAS_MQTT_SET_TOPIC = IRI(f"{INF_NS}hasMQTTSetTopic")
-INF_HAS_MQTT_BROKER_IP = IRI(f"{INF_NS}hasMQTTBrokerIP")
-INF_HAS_MQTT_BROKER_PORT = IRI(f"{INF_NS}hasMQTTBrokerPort")
+#
+# Reached through `vocabulary.INF`, never minted here. ADR 0021 puts every ontology IRI in
+# one place, and `inf:` is *library* vocabulary: the connectors match on these very terms,
+# so a demo that spelled them itself could drift out of step with the code that reads them.
+# The `tu:` and `fac:` IRIs above are different -- those are domain terms this demo owns,
+# and ADR 0030 keeps them here on purpose.
 
 # --- Control station ---------------------------------------------------------- #
 
@@ -118,15 +117,15 @@ def _create_belt(ogm, n: int, position: str) -> IRI:
             TU_HAS_CONVEYOR_SPEED: [
                 {
                     TU_HAS_UNIT: ["m/s"],
-                    INF_ACCESS_MODE: ["readwrite"],
-                    INF_HAS_MQTT_TOPIC: [
+                    INF.accessMode: ["readwrite"],
+                    INF.hasMQTTTopic: [
                         _mqtt_topic(n, "ConveyorBelt", position, "speed")
                     ],
-                    INF_HAS_MQTT_SET_TOPIC: [
+                    INF.hasMQTTSetTopic: [
                         _mqtt_topic(n, "ConveyorBelt", position, "speed_set")
                     ],
-                    INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
-                    INF_HAS_MQTT_BROKER_PORT: [broker_port(n)],
+                    INF.hasMQTTBrokerIP: [MQTT_BROKER_IP],
+                    INF.hasMQTTBrokerPort: [broker_port(n)],
                 }
             ]
         },
@@ -144,12 +143,12 @@ def _create_barrier(ogm, n: int, position: str) -> IRI:
         data={
             TU_IS_OCCUPIED: [
                 {
-                    INF_ACCESS_MODE: ["read"],
-                    INF_HAS_MQTT_TOPIC: [
+                    INF.accessMode: ["read"],
+                    INF.hasMQTTTopic: [
                         _mqtt_topic(n, "LightBarrier", position, "occupied")
                     ],
-                    INF_HAS_MQTT_BROKER_IP: [MQTT_BROKER_IP],
-                    INF_HAS_MQTT_BROKER_PORT: [broker_port(n)],
+                    INF.hasMQTTBrokerIP: [MQTT_BROKER_IP],
+                    INF.hasMQTTBrokerPort: [broker_port(n)],
                 }
             ]
         },

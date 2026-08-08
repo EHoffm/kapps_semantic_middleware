@@ -37,7 +37,7 @@ from kapps_semantic_middleware.connectors.semantic import (
     resolve_direction,
 )
 from kapps_semantic_middleware.projection import cross_check, prune_southbound
-from kapps_semantic_middleware.vocabulary import SVC
+from kapps_semantic_middleware.vocabulary import META_TYPE_NAMESPACES, RDFS, SVC
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def plan_wiring(
     absorbs the dedup, so no descriptor has to track addresses it has already seen across
     calls it cannot see each other from.
     """
-    resource_class = resource_class or _class_of(ogm, resource_iri)
+    resource_class = resource_class or class_of(ogm, resource_iri)
     full_spec = ogm.get_class_spec(class_iri=resource_class, class_scope=class_scope)
 
     # The projection asks the *ontology* what is protocol metadata, not the registry. A
@@ -401,7 +401,7 @@ def _is_subproperty_of(ogm: Any, prop_iri: IRI, ancestor: IRI) -> bool:
     return bool(
         ogm.db.query(
             f"ASK {{ <{prop_iri}> "
-            f"<http://www.w3.org/2000/01/rdf-schema#subPropertyOf>* <{ancestor}> }}"
+            f"<{RDFS.subPropertyOf}>* <{ancestor}> }}"
         ).get("boolean", False)
     )
 
@@ -464,22 +464,16 @@ def _parameter_metadata(
     return metadata
 
 
-# These are types every individual carries that say nothing about what it *is*. An OGM ClassSpec
-# You resolve against one of these fails outright, and `owl:NamedIndividual` in particular is
-# asserted on everything the OGM writes.
-_META_TYPE_NAMESPACES = (
-    "http://www.w3.org/2002/07/owl#",
-    "http://www.w3.org/2000/01/rdf-schema#",
-    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-)
+def class_of(ogm: Any, instance_iri: IRI) -> IRI:
+    """Return the individual's asserted domain class, so a caller need not restate it.
 
+    An individual carries several ``rdf:type`` assertions, and their order means nothing.
+    So this filters out the structural types rather than trusting them to sort last.
+    ``owl:NamedIndividual`` is the trap: it is asserted on everything the OGM writes, and a
+    ClassSpec resolved against it cannot resolve at all.
 
-def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
-    """This function returns the individual's asserted domain class, so a caller need not restate what the graph knows.
-
-    An individual carries several ``rdf:type`` assertions and their order is not meaningful,
-    so filter out the structural ones rather than trust them to sort last. Picking
-    ``owl:NamedIndividual`` yields a ClassSpec that cannot resolve at all.
+    Public because a consumer that discovers resources in the graph needs exactly this answer,
+    and the alternative is the copy that grew in the demo's station board and drifted.
     """
     rows = ogm.db.query(
         f"SELECT ?c {EXPLICIT_GRAPH} "
@@ -490,7 +484,7 @@ def _class_of(ogm: Any, instance_iri: IRI) -> IRI:
     candidates = [
         IRI(str(row["c"]))
         for row in rows
-        if not str(row["c"]).startswith(_META_TYPE_NAMESPACES)
+        if not str(row["c"]).startswith(META_TYPE_NAMESPACES)
     ]
 
     if not candidates:

@@ -14,7 +14,13 @@ no SIGTERM — it is pure HTTP, not process management.
 The view mechanism (ADR 0033, ticket #80) means the board never constructs its own SPARQL
 or walks its own tree. Every row comes from WiringPlan/ParameterBinding generically — no
 domain term (tu:, TransferUnit, ConveyorBelt, hasConveyorSpeed, etc.) appears anywhere in
-this file. algorithm.py remains the only file in this demo allowed to name one.
+this file, in code or in the teaching copy. algorithm.py remains the only file in this demo
+allowed to name one. ``tests/test_station_board_guard.py`` holds this down, so the claim
+fails a test rather than merely aging badly.
+
+The `inf:` CURIEs below are the exception, and they are not domain terms: `inf:hasValue`
+appears inside a string the page *displays*, to show a reader the Python expression a write
+performs. It is library vocabulary, and it is illustrative text rather than a query.
 
 Usage::
 
@@ -87,8 +93,8 @@ TEACH: Dict[str, Dict[str, str]] = {
     },
     "param-row": {
         "title": "A parameter row",
-        "what": "A plain number box and a set button -- no slider, since the ontology "
-        "gives tu:hasConveyorSpeed no bounds. A write goes converging -> settled | "
+        "what": "A plain number box and a set button -- no slider, because the ontology "
+        "declares no bounds for a parameter. A write goes converging -> settled | "
         "rejected | diverged. Commanded sits beside actual; diverged means it stopped "
         "converging, not merely unequal.",
         "file": "src/kapps_semantic_middleware/connectors/rest_binding.py",
@@ -144,9 +150,11 @@ def _get_label(ogm: Any, resource_iri: IRI) -> Optional[str]:
     Generic — rdfs:label is not a domain term. Same query-and-bindings-shape idiom
     Controller.discover_resources uses (controller.py).
     """
+    from kapps_semantic_middleware.vocabulary import RDFS
+
     sparql = f"""
     SELECT ?label WHERE {{
-        <{resource_iri}> <http://www.w3.org/2000/01/rdf-schema#label> ?label .
+        <{resource_iri}> <{RDFS.label}> ?label .
     }}
     """
     result = ogm.db.query(sparql, convert_bindings=True)
@@ -157,34 +165,21 @@ def _get_label(ogm: Any, resource_iri: IRI) -> Optional[str]:
 
 
 def _get_class_iri(ogm: Any, resource_iri: IRI) -> Optional[str]:
-    """Query the graph for the asserted domain class of a resource.
-    
-    Mirrors wiring.py's _class_of logic — filter out meta-type namespaces
-    (owl:, rdfs:, rdf:) and return the first surviving candidate.
+    """The asserted domain class of a resource, or ``None`` if the graph does not say.
+
+    Delegates to the library's ``class_of``. This used to repeat that query, and its own
+    copy of the meta-type namespace list, here in the demo.
+
+    The one difference is what happens when there is no answer. ``class_of`` raises, because
+    a middleware that cannot resolve a ClassSpec cannot start. A board is a screen: an
+    unreadable resource becomes a row with a blank class, and the other rows still render.
     """
-    from kapps_semantic_middleware.connectors.wiring import EXPLICIT_GRAPH
-    
-    _META_TYPE_NAMESPACES = (
-        "http://www.w3.org/2002/07/owl#",
-        "http://www.w3.org/2000/01/rdf-schema#",
-        "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-    )
-    
-    sparql = f"""
-    SELECT ?c {EXPLICIT_GRAPH} WHERE {{
-        <{resource_iri}> a ?c . FILTER(isIRI(?c))
-    }}
-    """
-    result = ogm.db.query(sparql, convert_bindings=True)
-    bindings = result.get("results", {}).get("bindings", []) if isinstance(result, dict) else []
-    
-    candidates = [
-        str(row["c"])
-        for row in bindings
-        if not str(row["c"]).startswith(_META_TYPE_NAMESPACES)
-    ]
-    
-    return candidates[0] if candidates else None
+    from kapps_semantic_middleware.connectors.wiring import class_of
+
+    try:
+        return str(class_of(ogm, resource_iri))
+    except ValueError:
+        return None
 
 
 def _find_wiring_for_resource(

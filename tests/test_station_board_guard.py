@@ -131,3 +131,48 @@ def test_teach_files_exist_on_disk():
     ]
 
     assert not missing, f"TEACH names files that don't exist: {missing}"
+
+
+# The domain terms of scenario 3. `algorithm.py` is allowed to name these; nothing else in
+# the demo is (root ADR 0004, and station_board.py's own module docstring).
+SCENARIO_3_DOMAIN_TERMS = (
+    "tu:",
+    "TransferUnit",
+    "ConveyorBelt",
+    "LightBarrier",
+    "hasConveyorSpeed",
+    "hasConveyorBelt",
+    "hasLightBarrier",
+    "isOccupied",
+)
+
+
+def test_station_board_names_no_domain_term():
+    """station_board.py's module docstring claims no domain term appears in it. Hold it down.
+
+    The claim was true and unasserted until the milestone-1 release review, which found the
+    teaching copy naming ``tu:hasConveyorSpeed`` while the docstring above it said nothing
+    did. A claim a file makes about itself should fail a test, not age quietly.
+
+    The whole source text is checked, not just the code: a tooltip that names a domain term
+    teaches the reader that this screen is TransferUnit-specific, which is the opposite of
+    what the board demonstrates. It renders whatever the view selects.
+    """
+    path = REPO_ROOT / "demo" / "transferunits" / "station_board.py"
+    source = path.read_text(encoding="utf-8")
+
+    # The docstring lists the terms in order to forbid them, so exempt the sentence that
+    # does the forbidding -- and this test's own name for them, imported at module scope.
+    lines = [
+        line
+        for line in source.splitlines()
+        if "domain term (tu:" not in line and "this file, in code or in the teaching copy" not in line
+    ]
+    body = "\n".join(lines)
+
+    found = sorted({term for term in SCENARIO_3_DOMAIN_TERMS if term in body})
+    assert not found, (
+        f"station_board.py names domain terms {found}, contradicting its own module "
+        f"docstring. Either phrase it generically, or change the docstring -- but the two "
+        f"must agree. algorithm.py is the only file in this demo allowed to name one."
+    )
