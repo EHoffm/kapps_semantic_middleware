@@ -38,9 +38,9 @@ belongs, and one person makes every promotion decision at that point.
 
 ## Consequences
 
-- `src/kapps_semantic_middleware/controller.py` is misplaced today. It holds 473 lines of scenario 3
-  discovery code, and it landed in commit `1fead76`. It moves to `demo/transferunits/`. Only
-  `tests/test_controller_discovery.py` imports it, so the move touches two files. Tracked on #43.
+- ~~`src/kapps_semantic_middleware/controller.py` is misplaced today.~~ **Done.** It held 473 lines
+  of scenario 3 discovery code from commit `1fead76`, and it moved to `demo/transferunits/`, where
+  it is now `demo/transferunits/controller.py`. No `controller.py` remains in the library.
 - The monitor duplicates the controller's discovery code rather than shares a base class (ADR 0032).
 - `seeding.py` stays in the library. `clear_repository` and `load_shared_ontologies` are generic, and
   ADR 0030 already keeps the unit shape out of them.

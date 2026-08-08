@@ -1,5 +1,15 @@
 # Brownfield gap analysis — Semantic Middleware core vs. the decided architecture
 
+> **Superseded. This is a historical snapshot, not current ground truth.**
+>
+> It was written on 2026-07-17 and describes the tree as it stood then. Milestone 1 has since
+> shipped, and several subsystems this document marks **ADD (absent, 0 hits)** now exist: the
+> operation queue (`middleware.py`'s `_operation_queue`), the pull-and-run of a queued Operation
+> (`claim_next`), the Operation status lifecycle, and `mw.handover`.
+>
+> Read it for the reasoning that shaped the architecture. Do not read it to learn what is built.
+> For that, read `CONTEXT-MAP.md` and the ADRs it points at.
+
 **Date:** 2026-07-17
 **Scope:** the middleware itself — the runtime facade (`src/kapps_semantic_middleware/`) **and**
 the ontology stack (`ontology/service.ttl` + the decided `cfc:`/`mes:`/`svc:` layering). The

@@ -1,8 +1,9 @@
 # The factory is one process per participant, and a launcher builds the initial situation
 
-An N-unit factory runs as **2N+3 processes**. Per unit: one process holding the mock PLC and its
-panel UI, and one holding that unit's middleware instance. Plus a controller, a monitor, and a
-**launcher** that starts everything.
+An N-unit factory runs as **2N+2 processes** today. Per unit: one process holding the mock PLC and
+its panel UI, and one holding that unit's middleware instance. Plus a controller and a
+**launcher** that starts everything. The target topology is **2N+3**. The monitor is the missing
+process, and it defers to milestone 2 (see the 2026-07-31 amendment below).
 
 ```
 launcher            fixed port, the only bookmarkable one; seeds the graph, spawns, indexes, stops
@@ -12,6 +13,7 @@ launcher            fixed port, the only bookmarkable one; seeds the graph, spaw
 ├── middleware-2    …
 ├── controller      SemanticMiddleware, northbound consumer, drives units (ADR 0032)
 └── monitor         SemanticMiddleware, northbound consumer, read-only (ADR 0032)
+                    -- MILESTONE 2, NOT BUILT. No such process runs today.
 ```
 
 Nothing is a thread of something else. A PLC really is its own box, and a middleware instance
@@ -180,7 +182,7 @@ ADR 0022 stays valid for a redundant pair, or for a restart before deregistratio
 
 Two further corrections. `mint_service_iri` **is** implemented now, on branch
 `feat/47-service-iri-per-instance` in commit `0c49041`, so the correction above describes `main` and
-not that branch. And the demo runs **2N+3** processes with no two instances on one resource, so the
+not that branch. And the demo runs with no two instances on one resource, so the
 per-instance discriminator changes nothing for scenario 3.
 
 The target topology stays **2N+3**, and the monitor stays in milestone 2.

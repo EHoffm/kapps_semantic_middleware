@@ -1,6 +1,6 @@
 # Core Middleware
 
-One of four contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others
+One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others
 (SHACL Interop, Example Scenarios, Module Requirements).
 
 The reference implementation of the KAPPS architecture's Semantic Middleware Runtime: the
@@ -39,8 +39,14 @@ connectors wired `TO_PERSISTENCE`, reads live values, structurally unable to wri
 reaches another middleware instance over its ADR 0017 routes, recognised through the resource's
 Service (`svc:address`). A peer middleware is a device as far as the seam is concerned.
 
-Recognition and the **Projection** run identically in every combination, so connection metadata never
-leaks (ADR 0020, ADR 0032, ADR 0033).
+Recognition and the **Projection** run identically in every combination, so connection metadata
+never reaches a **served datamodel** (ADR 0020, ADR 0032, ADR 0033).
+
+That claim is about the serving path, and it is deliberately narrower than "never leaks". The
+`/activity` feed goes around the projection: `connectors/mqtt_binding.py` logs the topic at INFO,
+and `activity.py` widens the package logger to INFO and serves those lines. So a broker topic is
+visible on `/activity` while the same instance's datamodel routes correctly hide it. That is
+**issue #76, open**, and it is a real hole in the demo's teaching rather than a subtlety.
 _Avoid_: Flavour, retired by ADR 0032. **Role**, retired by ADR 0033 — an instance has no property
 beyond its wiring. Consumer and Resource middleware as *defined* terms; they survive only as informal
 shorthand. Read-only mode, because a **Mode** is `resource`/`server`/`watchdog`, and a connector
@@ -136,7 +142,7 @@ properties from the ClassSpec before fetching**, and materializes the pruned spe
 counts as protocol metadata is **read from the ontology**, per Parameter, at every startup: everything
 contributed by an **Interface property** strictly between the Parameter's own property and
 `inf:isInterfaceAccessibleParameter`. The Parameter's own range (value, unit) and the root's own range
-(`inf:accessMode`) stay. It runs for **every Flavour**, including one that wires nothing — gating it
+(`inf:accessMode`) stay. It runs for **every connector wiring**, including one that wires nothing — gating it
 would make the least-privileged instance the one that leaks.
 
 Deriving the set from the **registry** instead was tried and **fails open**: it knows only the
@@ -154,7 +160,7 @@ reach a peer. That premise died when the `inf:` interface properties gained thei
 necessary so provisioning can write connection metadata through the OGM — because `PropertySpec` merges
 the entire `rdfs:subPropertyOf*` chain with no depth parameter. Measured: the unpruned belt materializes
 carrying topic, set topic and broker. Merge depth remains the right *description* of the two views; the
-middleware has to realize the shallow one itself (ADR 0028 stays retired as written; ADR 0026's
+middleware has to realize the shallow one itself (ADR 0019 stays retired as written; ADR 0026's
 projection claim is superseded).
 _Avoid_: Filter, Stripping *of data* (the prune is on the shape, before any data is read — the northbound
 model has no field to carry a broker address in); View (the view is the ClassScope, which selects *which*

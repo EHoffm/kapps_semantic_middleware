@@ -88,4 +88,9 @@ the model that is served over REST, because `setattr` replaces the whole node an
 sees only the payload.
 
 Connection metadata never travels in either direction: it is what the connector *uses*, and it
-is projected out of everything served northbound (ADR 0028).
+is projected out of every **datamodel** served northbound (ADR 0028).
+
+One exception exists today, and it is a defect rather than a design: the `/activity` feed serves
+log lines, and this connector logs its topic at INFO. So a topic reaches a browser through
+`/activity` while the datamodel routes on the same instance correctly hide it. Tracked as
+**issue #76**.

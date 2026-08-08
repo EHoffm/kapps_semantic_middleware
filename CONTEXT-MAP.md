@@ -28,8 +28,8 @@
   Middleware end-to-end, against the ontology and the instance data they seed themselves. Core Middleware
   has no dependency on Example Scenarios.
 - **TransferUnit Factory → Core Middleware**: the factory runs several instances of the library
-  in separate processes. That is one instance per unit, plus a controller and a monitor. Core
-  Middleware has no dependency on the factory.
+  in separate processes. That is one instance per unit, plus a controller. A monitor is
+  milestone 2 (ADR 0032) and is not built. Core Middleware has no dependency on the factory.
 - **Module Requirements** records obligations that Core Middleware and SHACL Interop place on
   `kapps_ogm` and the visual-toolbox repo. It does not depend on the code contexts, and no code
   context depends on it. It is a record for work that belongs elsewhere.
@@ -76,8 +76,10 @@ start at 0001, so the prefix is not optional.
 ### Core Middleware records
 
 ADR 0001 to ADR 0028, ADR 0031, **ADR 0033**, **ADR 0034** and **ADR 0035**. Some numbers in that
-span retired into their successors. These records govern the library. They hold for every consumer of
-the middleware, and not only for the demonstration.
+span retired into their successors: ADR 0013 and ADR 0014 retired into ADR 0015; ADR 0016 retired
+into ADR 0023; ADR 0019 retired into ADR 0028. A number missing from that list is missing, not
+retired. These records govern the library. They hold for every consumer of the middleware, and not
+only for the demonstration.
 
 ADR 0033 is a core record even though the demonstration forced it. It puts a REST binding descriptor
 beside the MQTT one, so the connector seam reaches a peer middleware as readily as a device, and it

@@ -5,8 +5,7 @@ codebase.
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root, or
-- **`CONTEXT-MAP.md`** at the repo root if it exists — it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
+- **`CONTEXT-MAP.md`** at the repo root — it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
 - **`docs/adr/`** — read ADRs that touch the area where you are about to work. In multi-context
   repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
 
@@ -30,6 +29,10 @@ This repo is **multi-context** (`CONTEXT-MAP.md` exists at the root, as of 2026-
 │   └── shacl_interop/
 │       ├── CONTEXT.md                        ← "SHACL Interop" context (temporary scaffolding)
 │       └── docs/adr/
+├── demo/transferunits/
+│   └── CONTEXT.md                            ← "TransferUnit Factory" context
+│                                                (its ADRs share the Core Middleware
+│                                                 sequence above; it has no docs/adr/)
 └── examples/
     ├── CONTEXT.md                            ← "Example Scenarios" context
     └── docs/adr/
