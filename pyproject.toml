@@ -18,6 +18,12 @@ dependencies = [
     "aiomqtt>=2.1.0",
 ]
 
+[project.scripts]
+# Installed unconditionally, because a console script cannot be gated on an extra. Without
+# `[demonstrations]` it exits on a missing fastapi, which is the honest failure: the demo is
+# present and its dependencies are not.
+kapps-transferunit-factory = "kapps_semantic_middleware.demonstrations.transferunits.__main__:main"
+
 [project.optional-dependencies]
 # What `demo/` needs on top of the library, and nothing the library itself needs.
 # A plain `uv add kapps-semantic-middleware` installs the reference implementation only.
@@ -85,7 +91,27 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kapps_semantic_middleware"]
+# The demo ships inside the library's namespace as
+# `kapps_semantic_middleware.demonstrations`, rather than claiming a top-level `demo` on
+# PyPI -- a name that generic would collide with half the index. Root ADR 0004 fixes where
+# scenario code lives *on disk* (`demo/`), and says nothing about its installed name, so the
+# remap below satisfies both.
+#
+# Nothing here decides whether a consumer gets the demo's dependencies: that is the
+# `demonstrations` extra. Wheels cannot select files by extra, so the demo's ~200 KB always
+# ships, and importing it without the extra fails on fastapi with a clear ImportError.
+packages = ["src/kapps_semantic_middleware", "demo"]
+
+# An editable install cannot follow the rewrite below -- hatchling refuses a dev-mode build
+# when a source rewrite *changes* a prefix instead of removing one. So dev mode puts `src`
+# and the repository root on the path unchanged, and a developer imports `demo.transferunits`
+# exactly as before. `launcher._PACKAGE` derives the spawn paths from `__package__`, so the
+# same code drives children under either name.
+dev-mode-dirs = ["src", "."]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/kapps_semantic_middleware" = "kapps_semantic_middleware"
+"demo" = "kapps_semantic_middleware/demonstrations"
 
 [tool.uv.sources]
 aas-middleware = { path = "../aas_middleware_inf", editable = true }

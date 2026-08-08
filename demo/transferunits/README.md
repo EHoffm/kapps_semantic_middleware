@@ -92,6 +92,19 @@ uv run python -m demo.transferunits --units 2
 
 Then open **<http://127.0.0.1:8080/>** in your browser.
 
+### If you installed the package instead of cloning it
+
+The demo also ships inside the installed library, under a longer name. You need the
+`demonstrations` extra, because a plain install brings the library alone:
+
+```bash
+uv add "kapps-semantic-middleware[demonstrations]"
+kapps-transferunit-factory --units 2
+```
+
+That command and the `python -m demo.transferunits` above start the same factory. The two
+names differ because a package called `demo` on PyPI would collide with half the index.
+
 That address is fixed and always the same. Every other program picks a free port at random, so the
 launcher page is your way in — it lists every program and links to it.
 

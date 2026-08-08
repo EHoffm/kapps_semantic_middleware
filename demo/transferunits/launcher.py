@@ -30,6 +30,13 @@ from kapps_semantic_middleware.vocabulary import SVC
 
 from . import seed
 
+# Every child is spawned as `python -m <this package>.<module>`, derived rather than written
+# out. In this checkout that resolves to `demo.transferunits`; in an installed wheel the same
+# code resolves to `kapps_semantic_middleware.demonstrations.transferunits`, because the demo
+# ships under the library's namespace rather than claiming a top-level `demo` on PyPI. Root
+# ADR 0004 fixes where these files live on disk, not what they are called once installed.
+_PACKAGE = __package__ or "demo.transferunits"
+
 SLOW_AFTER_SECONDS = 30.0
 WATCH_INTERVAL_SECONDS = 1.0
 
@@ -96,7 +103,7 @@ def _spawn_plc(unit_index: int) -> ChildHandle:
     cmdline = [
         sys.executable,
         "-m",
-        "demo.transferunits.plc",
+        f"{_PACKAGE}.plc",
         "--unit-index",
         str(unit_index),
         "--broker",
@@ -148,7 +155,7 @@ def _spawn_middleware(unit_index: int) -> ChildHandle:
     cmdline = [
         sys.executable,
         "-m",
-        "demo.transferunits.middleware",
+        f"{_PACKAGE}.middleware",
         "--unit-index",
         str(unit_index),
         "--port",
@@ -171,7 +178,7 @@ def _spawn_middleware(unit_index: int) -> ChildHandle:
 
 def _spawn_controller() -> ChildHandle:
     """Spawn the control station process, inheriting GRAPHDB_* from the launcher."""
-    cmdline = [sys.executable, "-m", "demo.transferunits.control_station", "--port", "0"]
+    cmdline = [sys.executable, "-m", f"{_PACKAGE}.control_station", "--port", "0"]
     cmdline_str = " ".join(cmdline)
     print(cmdline_str, flush=True)
 
