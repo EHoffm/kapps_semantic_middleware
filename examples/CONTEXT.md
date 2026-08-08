@@ -1,6 +1,6 @@
 # Example Scenarios
 
-One of four contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others.
+One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others.
 
 Self-contained, runnable Jupyter notebooks demonstrate Core Middleware end-to-end (see
 `examples/docs/adr/0001-self-contained-example-notebooks.md`). Seed-data/ontology-provisioning
@@ -22,13 +22,14 @@ deliberately show *three different* interaction patterns:
   the door's live status over the StateProperty GET endpoint. It invokes the open workflow of
   the door directly, at the endpoint it found. The door has no operation queue and executes
   synchronously. Not operation based.
-- **Scenario 3** (a TransferUnit + a mock PLC) — the **ontology-driven wiring** pattern. No
-  topic and no broker address appears anywhere in the scenario code. The middleware reads the
-  instance out of the graph. It recognizes which properties are interface-accessible parameters.
-  It builds the connectors from the metadata it finds there (ADR 0023). Also the first
-  scenario with a **device** end. `mock_transferunit.py` speaks MQTT and knows nothing about
-  the graph, the ontology, or the middleware. That is the asymmetry it exists to show. Needs an
-  MQTT broker as well as GraphDB. It starts a pure-Python one if none listens.
+- **Scenario 3** (a TransferUnit + a mock PLC) — **retired from this directory.** It lives in
+  [`demo/transferunits/`](../demo/transferunits/) as the runnable factory, and ADR 0029 promised
+  this move when the factory landed. Read it there to see the **ontology-driven wiring** pattern:
+  no topic and no broker address appears anywhere in the scenario code, and the middleware builds
+  its connectors from what the graph tells it (ADR 0023).
+
+  What stays here is `seed.py`'s `seed_scenario3` and `transferunit.ttl`. Eight test modules seed
+  a TransferUnit through them, so they are the regression net ADR 0030 froze, not leftovers.
 
 _Avoid_: Example, demo (used loosely elsewhere in this repo docs). Scenario is the precise
 unit — one notebook, one dummy repository, one seed script.

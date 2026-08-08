@@ -16,7 +16,7 @@ import aiomqtt
 
 from demo.transferunits.middleware import _listening, ensure_transport
 
-# Distinct from conftest.py's MQTT_TEST_PORT (18831) and test_mock_transferunit.py's 18841:
+# Distinct from conftest.py's MQTT_TEST_PORT (18831) and test_transfer_unit_plc.py's 18841:
 # each of these live-broker tests needs a port nothing else in the suite is using at the
 # same time.
 _PORT = 18851
