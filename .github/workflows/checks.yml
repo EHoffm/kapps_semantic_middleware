@@ -1,0 +1,39 @@
+name: checks
+
+# What this can and cannot run, and why.
+#
+# It runs ruff. Ruff needs no project install, so it works on any runner.
+#
+# It does NOT run mypy or the test suite. Those need the project installed, and the project
+# cannot be installed here: `pyproject.toml` resolves three siblings as editable path
+# checkouts, and one of them (`aas_middleware_inf`) lives on a private KIT GitLab instance
+# with no public mirror. A GitHub runner cannot fetch it, so `uv sync` fails before any test
+# can run. See SIBLINGS.md.
+#
+# Run the full set locally with `scripts/check.sh`, which does gate mypy and pytest. When the
+# siblings become installable from a registry, move those two steps into this file and delete
+# this comment.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ruff
+        # Pinned to the floor declared in pyproject.toml's dev group, so CI and a developer's
+        # checkout disagree about style only when someone changes that floor deliberately.
+        run: pipx install "ruff>=0.15.15"
+
+      - name: Lint
+        run: ruff check .
+
+      # `ruff format --check` is deliberately absent. The repository has never been
+      # formatted with it, and turning it on today reformats 67 of 85 files -- a diff large
+      # enough to bury the change it would ship alongside. Adopting a formatter is its own
+      # commit and its own decision, not a side effect of adding CI.

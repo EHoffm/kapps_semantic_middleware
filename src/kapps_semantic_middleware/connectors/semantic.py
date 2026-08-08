@@ -245,17 +245,20 @@ class SemanticConnectorRegistry:
     (ADR 0020, ADR 0028).
     """
 
-    def __init__(self, descriptors: Optional[Sequence[BindingDescriptor]] = None) -> None:
-        self._by_property: Dict[str, BindingDescriptor] = {}
+    def __init__(self, descriptors: Optional[Sequence[Type[BindingDescriptor]]] = None) -> None:
+        self._by_property: Dict[str, Type[BindingDescriptor]] = {}
         for descriptor in descriptors or ():
             self.register(descriptor)
 
-    def register(self, descriptor: BindingDescriptor) -> BindingDescriptor:
+    def register(self, descriptor: Type[BindingDescriptor]) -> Type[BindingDescriptor]:
         """Add a descriptor, replace any earlier one for the same interface property.
 
         We deliberately replace rather than refuse. A domain expert may override the
         built-in MQTT binding with a site-specific one. This is a supported use of the
         seam. The expert should not have to unregister first.
+
+        Takes the descriptor **class**, not an instance of it. Every member of
+        ``BindingDescriptor`` is a ``ClassVar``, so the class itself is the configuration.
         """
         key = str(descriptor.interface_property)
         existing = self._by_property.get(key)
@@ -263,13 +266,13 @@ class SemanticConnectorRegistry:
             logger.info(
                 "Replace the binding registered for %s (%s -> %s)",
                 key,
-                type(existing).__name__,
-                type(descriptor).__name__,
+                existing.__name__,
+                descriptor.__name__,
             )
         self._by_property[key] = descriptor
         return descriptor
 
-    def for_interface_property(self, iri: IRI) -> Optional[BindingDescriptor]:
+    def for_interface_property(self, iri: IRI) -> Optional[Type[BindingDescriptor]]:
         """The descriptor that registers for exactly this interface property, if any."""
         return self._by_property.get(str(iri))
 
@@ -290,7 +293,7 @@ class SemanticConnectorRegistry:
     def __len__(self) -> int:
         return len(self._by_property)
 
-    def __iter__(self) -> Iterator[BindingDescriptor]:
+    def __iter__(self) -> Iterator[Type[BindingDescriptor]]:
         return iter(self._by_property.values())
 
 

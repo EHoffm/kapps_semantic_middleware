@@ -111,7 +111,7 @@ def main() -> int:
         print(f"\n  # {name}")
         print(f"  git -C {spec['path']} fetch {spec['remote']}")
         print(f"  git -C {spec['path']} checkout {spec['branch']}")
-    print(f"\n  uv sync\n")
+    print("\n  uv sync\n")
     print(f"{DIM}Why each pin is what it is: see SIBLINGS.md{OFF}\n")
     return 1
 

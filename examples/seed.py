@@ -21,9 +21,12 @@ from rdflib.namespace import RDF
 
 from kapps_semantic_middleware.registration import create_possession
 from kapps_semantic_middleware.seeding import (
-    CORE_GRAPH,
-    MES_GRAPH,
-    SERVICE_GRAPH,
+    # Re-exported, not used here. A scenario asserts against the named graphs it
+    # seeded, and reaches them through this module rather than through the library
+    # (``tests/test_scenario3_seed_integration.py`` reads ``seed.CORE_GRAPH``).
+    CORE_GRAPH,  # noqa: F401
+    MES_GRAPH,  # noqa: F401
+    SERVICE_GRAPH,  # noqa: F401
     _read_mes_ontology,
     clear_repository,
     load_shared_ontologies,

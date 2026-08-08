@@ -17,8 +17,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
-import pytest
-
 
 class _FakeListeningSocket:
     """Stands in for the real, still-listening socket bind_free_socket returns.

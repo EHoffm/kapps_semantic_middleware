@@ -54,7 +54,7 @@ from kapps_semantic_middleware.connectors.rest_binding import (
 )
 from kapps_semantic_middleware.connectors.semantic import SemanticConnectorRegistry
 from kapps_semantic_middleware.connectors.wiring import WiringPlan, plan_wiring
-from kapps_semantic_middleware.vocabulary import CFC, SVC
+from kapps_semantic_middleware.vocabulary import RDFS, SVC
 
 logger = logging.getLogger(__name__)
 
@@ -969,7 +969,7 @@ class Controller(SemanticMiddleware):
                 OPTIONAL {{ ?svc <{SVC.isServiceOf}> ?resource . }}
                 OPTIONAL {{ ?svc <{SVC.address}> ?addr . }}
                 OPTIONAL {{ ?svc <{SVC.lastHeartbeat}> ?hb . }}
-                OPTIONAL {{ ?resource <http://www.w3.org/2000/01/rdf-schema#label> ?label . }}
+                OPTIONAL {{ ?resource <{RDFS.label}> ?label . }}
             }}
             """
             result = self.ogm.db.query(sparql, convert_bindings=True)

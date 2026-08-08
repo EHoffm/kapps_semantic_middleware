@@ -18,6 +18,23 @@ dependencies = [
     "aiomqtt>=2.1.0",
 ]
 
+[project.optional-dependencies]
+# What `demo/` needs on top of the library, and nothing the library itself needs.
+# A plain `uv add kapps-semantic-middleware` installs the reference implementation only.
+# `uv add "kapps-semantic-middleware[demonstrations]"` adds what the factory demo runs on.
+#
+# All three were undeclared before the milestone-1 release review. fastapi and uvicorn
+# arrived transitively through aas-middleware, which is not a promise that repo makes;
+# amqtt sat in the dev group, so `uv sync --no-dev` produced a demo that raised
+# ImportError at demo/transferunits/middleware.py's `_serve_broker`.
+demonstrations = [
+    "fastapi>=0.111.0",
+    "uvicorn>=0.29.0",
+    # The per-unit broker (ADR 0034). Pure Python and run in-process, because mosquitto
+    # would need root, which a fresh checkout cannot assume.
+    "amqtt>=0.11.0",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
@@ -31,7 +48,8 @@ dev = [
     "httpx>=0.27.0",
     # A pure-Python MQTT broker, run in-process as a pytest fixture. mosquitto would need
     # root to install, which no CI runner and no fresh checkout can assume; this keeps the
-    # MockTransferUnit round-trip genuinely live and portable (#40).
+    # mock PLC's round-trip genuinely live and portable (#40). Also declared under the
+    # `demonstrations` extra, because the demo runs one per unit at runtime (ADR 0034).
     "amqtt>=0.11.0",
 ]
 
@@ -46,6 +64,21 @@ markers = [
 # pytest-asyncio warns when this is unset and defaults it to "function". Stated explicitly so
 # the default is a decision rather than a warning; the async fixtures here are per-test.
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.mypy]
+python_version = "3.12"
+# The library and the demo. `demo` typechecks only because demo/ and demo/transferunits/
+# carry an __init__.py -- without them mypy stops at the first relative import and checks
+# nothing at all. ADR 0030 already called demo/transferunits a real package; now it is one.
+files = ["src", "demo"]
+
+[[tool.mypy.overrides]]
+# None of the three siblings ships a py.typed marker, and neither does amqtt. Left
+# unsilenced these produce 44 import-untyped errors that bury the real ones -- the whole
+# reason the milestone-1 review found only one genuine type error under the noise.
+# This suppresses the missing marker, not our own annotations.
+module = ["aas_middleware.*", "kapps_ogm.*", "graph_db_interface.*", "amqtt.*"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling"]
