@@ -1,9 +1,9 @@
 """Entry point for running the TransferUnit PLC with panel.
 
-Takes --unit-index, --broker, --broker-port, --panel-port.
---panel-port of 0 asks OS for free port.
-Prints one line to stdout with bound port.
-FastAPI runs on PLC event loop (not uvicorn on thread).
+This script takes five command-line flags: ``--unit-index``, ``--broker``, ``--broker-port``,
+``--panel-port``, and ``--ramp-rate``. A ``--panel-port`` value of 0 asks the OS for a free
+port. The script prints one line to stdout with the bound port. FastAPI runs on the PLC
+event loop. It does not run uvicorn on a separate thread.
 """
 
 from __future__ import annotations

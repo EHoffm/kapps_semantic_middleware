@@ -70,11 +70,11 @@ THROUGHPUT_POLL_SECONDS = 0.1
 class TransferUnit:
     """A PLC for one TransferUnit, publishing four values and taking two setpoints.
 
-    Publishing is periodic rather than on-change alone, because a middleware that starts
-    after the device must still converge: ``MqttClientConnector`` holds the latest message
-    from its subscription and has nothing to hold until one arrives, so a device that only
-    published on change would leave a freshly started middleware blank until an operator
-    happened to move something.
+    Publishing is periodic rather than on-change alone. A middleware may start after the
+    device. It must still converge. ``MqttClientConnector`` holds the latest message from
+    its subscription. It has nothing to hold until one arrives. A device that published
+    on change only would leave a fresh middleware blank. An operator would need to move
+    something first.
     """
 
     def __init__(
@@ -86,6 +86,13 @@ class TransferUnit:
         initial_speeds: Optional[Dict[str, float]] = None,
         ramp_rate: float = DEFAULT_RAMP_RATE,
     ) -> None:
+        """Initialize a TransferUnit PLC instance.
+
+        Set the unit index, broker address, and port. Set the publish interval for periodic
+        updates. Set the ramp rate for belt acceleration. Initialize speeds to zero or the
+        given initial values. Initialize setpoints to None. Initialize barrier states to
+        unoccupied.
+        """
         self.unit_index = unit_index
         self.unit = f"TransferUnit{unit_index}"
         self.broker = broker
@@ -105,12 +112,27 @@ class TransferUnit:
     # --- Topics ------------------------------------------------------------------ #
 
     def speed_topic(self, position: str) -> str:
+        """Return the MQTT topic for publishing a belt's actual speed.
+
+        The PLC publishes to this topic. The middleware subscribes to it. Messages travel
+        northbound from device to middleware.
+        """
         return f"{self.unit}/ConveyorBelt/{position}/speed"
 
     def speed_set_topic(self, position: str) -> str:
+        """Return the MQTT topic for receiving a belt's speed setpoint.
+
+        The middleware publishes to this topic. The PLC subscribes to it. Messages travel
+        southbound from middleware to device.
+        """
         return f"{self.unit}/ConveyorBelt/{position}/speed_set"
 
     def occupied_topic(self, position: str) -> str:
+        """Return the MQTT topic for publishing a light barrier's occupancy state.
+
+        The PLC publishes to this topic. The middleware subscribes to it. Messages travel
+        northbound from device to middleware.
+        """
         return f"{self.unit}/LightBarrier/{position}/occupied"
 
     @property
@@ -131,11 +153,12 @@ class TransferUnit:
         """Connect, subscribe to both setpoint topics, and begin publishing.
 
         Retries the connection with a backoff, capped at ``CONNECT_RETRY_MAX_SECONDS``. The
-        middleware brings up this unit's broker concurrently with the PLC rather than before
-        it (ADR 0029 as amended), so refusal on the first attempts is the ordinary startup
-        race, not a fault -- and a real machine has to survive a broker restart the same way.
-        This is a device concern: it holds no knowledge of the middleware or why the broker
-        was briefly unreachable, only that a fresh attempt is worth making.
+        middleware brings up this unit's broker concurrently with the PLC. It does not start
+        the broker first (ADR 0029 as amended). Refusal on the first attempts is the ordinary
+        startup race. It is not a fault. A real machine must survive a broker restart the
+        same way. This is a device concern. The device holds no knowledge of the middleware.
+        It does not know why the broker was briefly unreachable. A fresh attempt is worth
+        making.
         """
         self._client = aiomqtt.Client(self.broker, port=self.port)
         delay = CONNECT_RETRY_INITIAL_SECONDS
@@ -194,10 +217,21 @@ class TransferUnit:
             self._client = None
 
     async def __aenter__(self) -> "TransferUnit":
+        """Enter the async context manager and start the PLC.
+
+        Call ``start()`` to connect to the MQTT broker. Subscribe to setpoint topics. Start
+        background tasks for listening, publishing, and ramping. Return self for use in the
+        context block.
+        """
         await self.start()
         return self
 
     async def __aexit__(self, *exc_info) -> None:
+        """Exit the async context manager and stop the PLC.
+
+        Call ``stop()`` to cancel all background tasks. Disconnect from the MQTT broker.
+        Clear occupied barriers if the throughput simulation is running. Release resources.
+        """
         await self.stop()
 
     # --- Behaviour ---------------------------------------------------------------- #
@@ -212,11 +246,10 @@ class TransferUnit:
     async def set_occupied(self, position: str, occupied: bool) -> None:
         """Move a light barrier and publish it immediately.
 
-        The barriers are read-only northbound, so this is the test's way in — it is what a
-        workpiece passing the sensor would do. The throughput simulation (below) calls this
-        same method rather than assigning ``self.occupied`` directly, for exactly the same
-        reason the panel's manual barrier buttons do: it is the one door a barrier moves
-        through.
+        The barriers are read-only northbound. This is the test's way in. A workpiece passing
+        the sensor would do this. The throughput simulation calls this same method. It does
+        not assign ``self.occupied`` directly. The panel's manual barrier buttons do the same.
+        This method is the one door a barrier moves through.
         """
         self.occupied[position] = occupied
         await self._publish(self.occupied_topic(position), occupied)
@@ -224,10 +257,10 @@ class TransferUnit:
     async def set_speed(self, position: str, value: float) -> None:
         """Set the commanded target for a belt position.
 
-        This is the REST API entry point for the panel. It used to set the actual speed and
-        publish it immediately; now it only sets the target the belt ramps toward (#83) --
-        ``_ramp_loop`` is the single place that moves ``self.speeds`` and publishes the
-        result, for this write path exactly as for an MQTT setpoint.
+        This is the REST API entry point for the panel. It used to set the actual speed.
+        It published immediately. Now it only sets the target. The belt ramps toward the
+        target (#83). ``_ramp_loop`` is the single place that moves ``self.speeds``. It
+        publishes the result. This write path works exactly as an MQTT setpoint.
         """
         self.setpoints[position] = value
 
@@ -238,11 +271,16 @@ class TransferUnit:
     async def wait_for_convergence(self, position: str, timeout: float = 5.0) -> None:
         """Block until `position`'s actual speed reaches its setpoint. For tests.
 
-        Polls rather than an event: convergence is the ramp's *last* tick, and there is no
-        single moment before it happens that a listener could subscribe to in advance.
+        This method polls rather than using an event. Convergence is the ramp's last tick.
+        No single moment exists before it happens. A listener cannot subscribe in advance.
         """
 
         async def _settled() -> None:
+            """Wait until the belt speed equals its setpoint.
+
+            Poll the speed at each ramp tick. Continue while the setpoint is None. Continue
+            while the speed does not equal the setpoint. Exit when convergence is reached.
+            """
             while (
                 self.setpoints[position] is None
                 or self.speeds[position] != self.setpoints[position]
@@ -255,9 +293,9 @@ class TransferUnit:
         """Start or stop the barrier-cycling throughput simulation (#83).
 
         A crude stand-in for a workpiece traveling front-to-back while a belt runs. Cancelling
-        rather than flagging: the loop can be mid-sleep inside a half cycle, and a flag it only
-        checked between awaits would leave that sleep to finish on its own clock. Idempotent --
-        calling with the state already in effect is a no-op.
+        is used rather than flagging. The loop can be mid-sleep inside a half cycle. A flag
+        checked only between awaits would leave that sleep to finish on its own clock. This
+        method is idempotent. Calling with the state already in effect is a no-op.
         """
         if enabled:
             if self._throughput_task is None:
@@ -306,15 +344,15 @@ class TransferUnit:
     async def _ramp_loop(self) -> None:
         """Move each belt's actual speed toward its setpoint, one tick at a time.
 
-        A belt is a thing with momentum, not a number that snaps (#83): the setpoint moves
-        the target, and this loop is the "slow PID controller" that actually drives the
-        reported speed there. It runs regardless of who last moved the target -- the MQTT
+        A belt is a thing with momentum. It is not a number that snaps (#83). The setpoint
+        moves the target. This loop is the "slow PID controller". It drives the reported
+        speed there. It runs regardless of who last moved the target -- the MQTT
         path (``_listen``) and the panel's REST path (``set_speed``) both only ever set
         ``self.setpoints`` now; this is the single place ``self.speeds`` changes.
 
-        The same arithmetic handles a negative target identically to a positive one, so a
-        setpoint that reverses a belt's direction ramps straight through zero with no
-        special-casing anywhere in this method.
+        The same arithmetic handles a negative target identically to a positive one. A
+        setpoint that reverses a belt's direction ramps straight through zero. No special-
+        casing exists anywhere in this method.
         """
         while True:
             await asyncio.sleep(RAMP_TICK_SECONDS)
@@ -338,9 +376,9 @@ class TransferUnit:
     async def _throughput_loop(self) -> None:
         """Cycle both light barriers while a belt runs, at a rate that tracks its speed.
 
-        A crude stand-in for a workpiece traveling front-to-back: "the belts are running"
-        means EITHER belt has nonzero speed -- the unit has one shared simulation, not one
-        per belt, and a single moving belt is enough to be moving material through it.
+        A crude stand-in for a workpiece traveling front-to-back. "The belts are running"
+        means EITHER belt has nonzero speed. The unit has one shared simulation. It does
+        not have one per belt. A single moving belt is enough to move material through it.
         """
         while True:
             speed = max(abs(self.speeds["left"]), abs(self.speeds["right"]))
@@ -364,9 +402,10 @@ class TransferUnit:
     async def _hold_while_running(self, duration: float) -> bool:
         """Sleep up to `duration`, in THROUGHPUT_POLL_SECONDS slices, bailing out early.
 
-        Returns False the moment both belts have stopped -- so a stopped belt is noticed
-        within one poll interval instead of only at the end of a half-cycle computed from a
-        now-stale speed. Returns True if the full duration elapsed with a belt still running.
+        Returns False the moment both belts have stopped. A stopped belt is noticed within
+        one poll interval. It is not noticed only at the end of a half-cycle. That half-
+        cycle would be computed from a now-stale speed. Returns True if the full duration
+        elapsed with a belt still running.
         """
         elapsed = 0.0
         while elapsed < duration:
@@ -378,11 +417,22 @@ class TransferUnit:
         return True
 
     async def _publish_loop(self) -> None:
+        """Publish all four values periodically at the configured interval.
+
+        Periodic publishing ensures middleware convergence. A middleware starting after the
+        device must receive values. On-change publishing alone would leave it blank. Publish
+        all speeds and barrier states. Wait for the next interval. Repeat forever.
+        """
         while True:
             await self.publish_once()
             await asyncio.sleep(self.publish_interval)
 
     async def _publish(self, topic: str, value) -> None:
+        """Publish a single value to an MQTT topic.
+
+        Encode the value as JSON. Send it to the broker on the given topic. Assert the
+        client is connected first. All published messages pass through this method.
+        """
         assert self._client is not None
         await self._client.publish(topic, json.dumps(value).encode())
 
