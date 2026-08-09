@@ -3,8 +3,10 @@
 These functions load the published/general ontology modules (Core, svc:,
 mes:) into named graphs, and clear the default graph. Both the example
 scenarios and the multi-process factory demo use this library code, so it
-lives here rather than in examples/ (ADR 0030).
+lives here rather than in examples/.
 """
+
+# ADR: 0030
 
 from __future__ import annotations
 
@@ -26,10 +28,10 @@ def _read_core_ontology() -> str:
 
     A verbatim copy of the published Core (version 0.9.0,
     https://circularfactory.github.io/Core/latest/ontology.ttl). Core is external and
-    superior: imported and specialized, never modified (Core Middleware ADR 0012). It is
-    vendored rather than fetched so seeding stays reproducible offline, which matches
-    the self-containment rule in examples ADR 0001.
+    superior: imported and specialized, never modified. It is vendored rather than fetched,
+    so seeding stays reproducible offline and a scenario stays self-contained.
     """
+    # ADR: 0012, examples 0001
     return (
         resources.files("kapps_semantic_middleware")
         .joinpath("ontology", "core.ttl")

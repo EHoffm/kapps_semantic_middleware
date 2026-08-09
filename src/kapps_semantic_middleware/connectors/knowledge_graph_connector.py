@@ -2,10 +2,13 @@
 Knowledge Graph Connector for KAPPS Semantic Middleware.
 
 This module wraps kapps_ogm.OGM access behind the aas_middleware Connector protocol.
-ADR 0006 (knowledge-graph-connector) decided this. All middleware graph access goes
-through a Connector abstraction. Neither workflow registration code nor state
-registration code calls ogm.fetch or ogm.commit directly.
+
+All middleware graph access goes through that one abstraction. Neither workflow
+registration code nor state registration code calls ogm.fetch or ogm.commit directly.
+One seam means the graph can be swapped, traced or stubbed in one place.
 """
+
+# ADR: 0006
 
 from __future__ import annotations
 

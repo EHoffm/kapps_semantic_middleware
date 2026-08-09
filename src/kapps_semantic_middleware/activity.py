@@ -2,7 +2,7 @@
 
 This module turns the middleware internal logging stream into a live feed for browsers.
 It is library-level and mode-agnostic. A controller and a monitor are the same library with
-different configuration (ADR 0022). They inherit this feed from the same code with no
+different configuration. They inherit this feed from the same code with no
 role-specific branching. That is the architectural claim the demo exists to make.
 
 **What it shows:** wiring decisions, message traffic, registrations, heartbeats.
@@ -20,6 +20,8 @@ The SSE endpoint polls that deque on a short sleep. This decouples the logging p
 (synchronous, multi-threaded) from the serving path (asynchronous, single-threaded). No loop
 introspection or ``call_soon_threadsafe`` is required.
 """
+
+# ADR: 0022
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Recognition and wiring: turn a resource's ClassSpec into connector registrations.
 
-This is the step ADR 0023 calls "register from the knowledge graph". It runs at
+This is the step that registers from the knowledge graph. It runs at
 **construction**, not during ``on_start_up``. The reason is sharp. ``lifespan`` calls
 ``connect()`` on everything in the connection registry *before* it runs ``on_start_up``
 callbacks. ``initiate_sync`` (what ``add_synced_connector`` defers) starts
@@ -14,11 +14,13 @@ Register at construction instead. This avoids the failure, with no out-of-band l
 call. It is possible because everything a ``ConnectionInfo`` needs comes from the
 ClassSpec and the graph.
 
-Two shapes come out of here. ADR 0028 needs both.
+Two shapes come out of here. Both are required.
 
 - The **full** spec. The bindings read it to find broker addresses and topics.
 - The **pruned** spec. The system serves this northbound.
 """
+
+# ADR: 0023, 0028
 
 from __future__ import annotations
 
@@ -48,14 +50,17 @@ It is not an ontology term, so it does not belong in ``vocabulary.py``. It names
 *feature*, the pseudo-graph of explicit statements. It is a constant rather than three inline
 copies because every recognition query needs it for the same reason. The default graph
 includes materialized inference, and a parameter node's only types are anonymous restriction
-nodes that exist by inference alone (ADR 0020). Count or read without this. This returns
+nodes that exist by inference alone. Count or read without this. This returns
 inferred triples and inflates every result.
 """
+# ADR: 0020
 
 
 @dataclass
 class WiringPlan:
     """This describes what recognition found, and what the caller should do about it."""
+
+    # ADR: 0020, 0028
 
     northbound_spec: Any
     """The pruned ClassSpec, safe to materialize and serve."""
@@ -71,7 +76,7 @@ class WiringPlan:
 
     bindings: List[ParameterBinding]
     """This lists every recognized interface-accessible parameter. Populate for every flavour,
-    including one that wires nothing. The system never gates recognition (ADR 0020, ADR 0028)."""
+    including one that wires nothing. The system never gates recognition."""
 
     registrations: List[Tuple[ParameterBinding, Registration]]
     """The connector registrations to perform. Empty when the flavour wires nothing."""
@@ -114,9 +119,9 @@ def plan_wiring(
     ``autoregister`` gates only the registrations. Produce the spec, the projection, and
     the recognized bindings either way. An inspecting instance that skipped recognition
     would treat every parameter node as ordinary data, and serve its broker address. The
-    least-privileged connector wiring would leak the most (ADR 0028).
+    least-privileged connector wiring would leak the most.
 
-    ``ensure_transport`` is the deployment's transport hook (ADR 0034). Wrapped once here,
+    ``ensure_transport`` is the deployment's transport hook. Wrapped once here,
     fresh per call, so it fires at most once per distinct ``(host, port)`` across every
     binding built below -- a binding descriptor calls it unconditionally and the wrapper
     absorbs the dedup, so no descriptor has to track addresses it has already seen across
@@ -194,7 +199,7 @@ def _dedupe_by_address(
 ) -> Optional[Callable[[str, int], None]]:
     """Wrap a transport hook so it fires at most once per distinct ``(host, port)``.
 
-    ``None`` in, ``None`` out -- a resource with no hook calls nothing (ADR 0034). Otherwise
+    ``None`` in, ``None`` out -- a resource with no hook calls nothing. Otherwise
     a fresh ``seen`` set is closed over per call to :func:`plan_wiring`, which is exactly the
     scope one middleware construction spans. A resource whose parameters ever name two
     addresses gets the hook called twice; four parameters sharing one address get it once,
@@ -228,10 +233,9 @@ def _recognise(
     Match on the **interface property**, not on ``rdf:type``. A parameter node has no
     named type of its own. It has only anonymous restriction nodes, which exist by inference and so
     never appear in an explicit-graph fetch. The property hierarchy is what survives a
-    round trip (ADR 0020).
+    round trip.
 
-    **The evidence may sit on the parameter or on the resource's Service** (ADR 0023's
-    2026-08-03 amendment, ticket #33). An MQTT connector recognises ``inf:hasMQTTTopic`` on
+    **The evidence may sit on the parameter or on the resource's Service** (ticket #33). An MQTT connector recognises ``inf:hasMQTTTopic`` on
     the parameter itself. A REST connector has no such marker; its evidence is the resource's
     own ``svc:address``, one hop out through ``svc:isServiceOf``. Look that address up **once**
     per resource here, and fold it into every recognised binding's metadata alongside whatever
@@ -296,8 +300,7 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any, steps: Tuple[Tu
 
     A COMPLEX property is the deepest addressable thing. ``ConnectionInfo`` has exactly three
     levels and ``field_id`` resolves by plain ``getattr``, so ``inf:hasValue`` — one level
-    further down — is unreachable. This is the same atomic unit ADR 0017 reached from the
-    routing side (ADR 0023).
+    further down — is unreachable. This is the same atomic unit the routing side reached.
 
     Descend one level through object properties to reach a resource's components. A
     TransferUnit's parameters hang off its belts and barriers, not off the unit itself.
@@ -305,7 +308,7 @@ def _parameter_properties(*, ogm: Any, root_iri: IRI, spec: Any, steps: Tuple[Tu
     ``path_steps`` accumulates the ``(field_name, child_iri)`` hops taken to reach the
     current ``root_iri``, mirroring ``rest_router.py``'s own tree walk exactly — that is what
     lets ``rest_binding.py`` derive a structural URL with no second walk and no ontology
-    term (ADR 0017, ADR 0033). ``field_name`` is mangled here (``IRI(prop_iri).lined``), the
+    term. ``field_name`` is mangled here (``IRI(prop_iri).lined``), the
     same way ``field_id`` is mangled below, because that is the actual pydantic field name
     the served route uses.
     """
@@ -337,8 +340,7 @@ def _service_address(*, ogm: Any, resource_iri: IRI) -> Optional[str]:
     or the Service has not (yet) published an address. That is the ordinary state of a
     freshly-constructing instance recognising its *own* resource: ``plan_wiring`` runs from
     ``__init__``, and ``_register_service`` is an ``on_start_up`` callback that has not run
-    yet, so there is no address to find and REST recognition finds nothing to bind (ADR
-    0023's Service-join amendment).
+    yet, so there is no address to find and REST recognition finds nothing to bind.
     """
     rows = ogm.db.query(
         f"SELECT ?addr {EXPLICIT_GRAPH} "

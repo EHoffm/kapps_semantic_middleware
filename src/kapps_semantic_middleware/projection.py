@@ -1,4 +1,4 @@
-"""The northbound projection: hiding protocol metadata the ontology declares (ADR 0028).
+"""The northbound projection: hiding protocol metadata the ontology declares.
 
 A parameter node bundles two kinds of fact. What the value *means* — its magnitude, its unit,
 whether a peer may write it — is northbound content. How the middleware *physically reaches the
@@ -33,7 +33,7 @@ experts' packages; the ontology may have grown a protocol since one of them last
 
 A keep-list — naming what is safe and dropping the rest — was considered and rejected. It reads
 as the safer construction, but it is a closed-world assertion in the serving path, and the
-architecture has exactly one closed-world moment by design (ADR 0025: SHACL at admission). It
+architecture has exactly one closed-world moment by design -- SHACL at admission. It
 would also hide new legitimate domain content by default, taxing twenty domain engineers to guard
 something the OGM write path already governs.
 """
@@ -310,15 +310,15 @@ def load_northbound(
 ) -> Any:
     """Fetch one resource with southbound metadata pruned before materialization.
 
-    This is the "prune on load" half of ADR 0033: a consumer that fetches another middleware's
+    This is the "prune on load" half of the consumer story: a consumer that fetches another middleware's
     datamodel into its own instance must run the same prune automatically, or it ends up holding
     the factory's broker addresses. The prune happens **before** any data is read through the spec,
     so the materialized result has no field a connection detail could ever occupy — this is not a
-    data-side filter (ADR 0028).
+    data-side filter.
 
     ``resource_class`` is a **required** keyword argument, not resolved from the graph the way a
     bare ``ogm.fetch(instance_iri=...)`` resolves it. The caller already knows the class from its
-    own discovery/view query (ADR 0033's "Control Expert" flow queries ``tu:TransferUnit`` etc.
+    own discovery/view query (a control station's flow queries ``tu:TransferUnit`` etc.
     before ever fetching a hit), so there is nothing left to resolve, and inventing a second
     class-resolution path here would duplicate ``OGM.fetch``'s own fallback for no benefit.
 

@@ -1,4 +1,4 @@
-"""The MQTT semantic connector: the first instance of the binding seam (ADR 0023).
+"""The MQTT semantic connector: the first instance of the binding seam.
 
 A parameter is reachable over MQTT when its domain property is a subproperty of
 ``inf:isInterfaceAccessibleMQTTParameter``. The parameter node then carries a broker
@@ -13,10 +13,11 @@ TransferUnit that is 4 parameters, 4 bindings, 6 connectors, 6 topics.
 
 ``aiomqtt`` is an optional extra of ``aas_middleware`` (its ``industrial`` group). So the
 connector class is imported lazily. Importing this module must not require a working MQTT
-stack. The registry must exist for every connector wiring, including one that wires nothing
-(ADR 0028). An inspecting instance with no ``aiomqtt`` installed must still receive the
-projection.
+stack. The registry must exist for every connector wiring, including one that wires nothing.
+An inspecting instance with no ``aiomqtt`` installed must still receive the projection.
 """
+
+# ADR: 0023, 0028
 
 from __future__ import annotations
 
@@ -87,11 +88,11 @@ class MQTTParameterFormatter:
     scalar: ``[AnonymousClass(hasValue=[12.1], hasUnit=['m/s'], accessMode=['readwrite'])]``.
     ``ConnectionInfo`` bottoms out at that property. ``field_id`` is a plain ``getattr`` and
     the node's ``inf:hasValue`` is one level further down. The formatter bridges
-    the device scalar and the node the middleware persists (ADR 0023).
+    the device scalar and the node the middleware persists.
 
     **Payload shape.** Raw scalar by default. If the parameter declares
     ``inf:hasMQTTValuePath``, use a JSON envelope with the value at that dotted path. The path is
-    one property and is honoured symmetrically on both read and write (ADR 0023).
+    one property and is honoured symmetrically on both read and write.
 
     **Symmetry.** ``MqttClientConnector`` is asymmetric. Its listener runs
     ``json.loads(payload)`` on everything it receives. ``consume()`` publishes its argument
@@ -102,14 +103,15 @@ class MQTTParameterFormatter:
     ``update_persistence_with_value`` does ``setattr(contained_model, field_id, value)``,
     replacing the whole list. ``Formatter.deserialize`` sees only the payload. It has no
     access to the current persistence value. A bare scalar would therefore blank the unit and
-    the access mode *in the model served over REST*. ADR 0027 removed the other half of this
-    problem, the graph one. A skolemized parameter node is addressable. So a commit diffs per
-    triple, and the system cannot wipe an unchanged facet. The in-memory half remains, and it is what
+    the access mode *in the model served over REST*. The graph layer now diffs per triple, so
+    unchanged facets are preserved there. The in-memory half remains, and it is what
     this reassembly is for. The northbound payload keeps its unit after the first device
     message. The facets come from the same metadata the binding already read. So this is a
     pure function per message, with no read of current state. ``_last_value`` exists solely
     for change-detection in logging, and never affects the returned value.
     """
+
+    # ADR: 0023, 0027
 
     def __init__(
         self,
@@ -152,9 +154,9 @@ class MQTTParameterFormatter:
     def serialize(self, data: Any) -> bytes:
         """Persistence value to the device payload, encoded for ``consume``.
 
-        Raises if nothing has ever been observed for this parameter (ADR 0024's
-        locator pattern: the graph holds no ``inf:hasValue`` until a connector
-        fills it). A bare ``None`` would encode as the JSON scalar ``null``, not a
+        Raises if nothing has ever been observed for this parameter. Under the
+        locator pattern the graph holds no ``inf:hasValue`` until a connector
+        fills it. A bare ``None`` would encode as the JSON scalar ``null``, not a
         valid device value, and a receiver expecting a number or boolean chokes on
         it. The caller's best-effort fan-out (``persisted_connector.py``) catches
         and logs a per-connector failure, so raising here is the same "nothing safe
@@ -164,12 +166,14 @@ class MQTTParameterFormatter:
         This used to be the ordinary case rather than the guard it reads as. The
         fan-out asked *every* write leg on a resource to re-derive its slice
         whenever *any* field changed, so a parameter nothing had ever set was
-        routinely asked to publish. ADR 0035 scoped the fan-out to the field that
+        routinely asked to publish. The fan-out is now scoped to the field that
         actually moved (``changed``), so a write leg is now only asked when its own
         parameter was written -- and a write carries the value with it. The guard
         stays because "asked to publish something never observed" is still a real
         error state, and one worth naming rather than encoding as ``null``.
         """
+
+        # ADR: 0024, 0035
         value = self._value_of(data)
         if value is None:
             raise ValueError(
@@ -254,15 +258,17 @@ class MQTTBinding:
         """One read registration always. One write registration when both sides permit it.
 
         ``direction`` has already been reduced to the most restrictive of the parameter's
-        ``inf:accessMode`` and the instance's flavour (ADR 0023), so this only honours
+        ``inf:accessMode`` and the instance's flavour, so this only honours
         it. It must never re-widen.
 
         ``ensure_transport``, when given, is called once with the declared ``(host, port)``,
-        immediately before the first connector for it is built (ADR 0034). Deduping across
+        immediately before the first connector for it is built. Deduping across
         several parameters that share one address is the caller's job (``wiring.py``'s
         ``plan_wiring``), not this method's -- a single ``build`` call sees only its own
         parameter, never its siblings.
         """
+
+        # ADR: 0023, 0034
         connector_cls = _mqtt_client_connector_cls()
 
         broker = binding.get(INF.hasMQTTBrokerIP)
@@ -333,9 +339,11 @@ def _formatter_for(
     """Build the formatter for one parameter from its already-resolved northbound facets.
 
     The facets are the parameter node's properties minus the connection metadata. These are exactly the
-    northbound projection of the node (ADR 0028), reached here from the binding side rather than
+    northbound projection of the node, reached here from the binding side rather than
     from the spec side.
     """
+
+    # ADR: 0028
     southbound = {str(prop) for prop in MQTTBinding.connection_metadata}
     value_field = INF.hasValue.lined
     facets = {

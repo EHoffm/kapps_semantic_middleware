@@ -1,12 +1,14 @@
 """KAPPS Semantic Middleware.
 
 Extends aas_middleware.Middleware with knowledge-graph registration, discovery,
-and execution capabilities. Supports three modes per ADR 0005 -- see `modes.Mode`
+and execution capabilities. Supports three modes -- see `modes.Mode`
 for what each one means and which are implemented.
 
-Operation execution follows ADR 0002: an Operation resolves via its implemented
+Operation execution: an Operation resolves via its implemented
 Capability to a Workflow endpoint, which the system then invokes over HTTP.
 """
+
+# ADR: root 0002, 0005
 
 from __future__ import annotations
 
@@ -78,7 +80,9 @@ __all__ = ["SemanticMiddleware", "OperationResolutionError", "Mode"]
 
 
 class _EventTriggerPayload(BaseModel):
-    """REST body of the event trigger: the IRI of the Operation now in the graph (ADR 0009)."""
+    """REST body of the event trigger: the IRI of the Operation now in the graph."""
+
+    # ADR: 0009
 
     # `str`, not `IRI`, and deliberately so (#45). `IRI.__get_pydantic_core_schema__` returns
     # `any_schema()` — permissive by design, on the grounds that IRI validates itself — so
@@ -94,8 +98,10 @@ class _OperationDraft:
 
     The dispatch body populates ``data`` (domain property-IRI str -> list of values) and
     can read ``iri`` (the minted Operation IRI). The atomic exit turns it into a graph
-    Operation and fires the event trigger (ADR 0010).
+    Operation and fires the event trigger.
     """
+
+    # ADR: 0010
 
     def __init__(self, iri: IRI) -> None:
         self.iri = iri
@@ -103,13 +109,15 @@ class _OperationDraft:
 
 
 class _ClaimedOperation:
-    """Handle yielded by ``claim_next(...)`` (ADR 0010 pull-and-run).
+    """Handle yielded by ``claim_next(...)`` for pull-and-run execution.
 
     ``operation`` is the re-fetched Operation (a `kapps_ogm` Node — hydrated under the
     domain-supplied ClassScope, or a bare reference when no scope was given). The body reads
     it to decide what work to do. It sets ``result`` to the outcome, which is recorded as
     ``svc:executionResult`` in the terminal transition.
     """
+
+    # ADR: 0010
 
     def __init__(self, iri: IRI, operation: Any) -> None:
         self.iri = iri
@@ -518,7 +526,7 @@ class SemanticMiddleware(Middleware):
         """Register a function as a REST-invokable workflow with KG registration.
 
         In resource mode, requires ``capability_class`` and ``workflow_class`` as
-        keyword-only IRIs (both classes must pre-exist per ADR 0003). Registers the
+        keyword-only IRIs (both classes must pre-exist in the ontology). Registers the
         REST endpoint via the base class, then schedules KG registration of the
         Workflow and Capability instances on startup (after the service is
         registered).
@@ -594,7 +602,7 @@ class SemanticMiddleware(Middleware):
         Parallel to :meth:`workflow` but GET-only, for a readable, potentially
         high-frequency-changing value (e.g. a door's status). In resource mode,
         it requires ``capability_class`` and ``state_property_class`` as
-        keyword-only IRIs (both classes must pre-exist per ADR 0003). Registers a
+        keyword-only IRIs (both classes must pre-exist in the ontology). Registers a
         GET endpoint at ``/state/{name}`` that calls the decorated getter on
         demand. The live value is NEVER written to the graph. Only the stable
         endpoint triple is written, at registration.
@@ -678,14 +686,16 @@ class SemanticMiddleware(Middleware):
     # ------------------------------------------------------------------ #
 
     def _register_event_trigger(self) -> None:
-        """Expose the built-in ``execute`` event trigger on the REST API (ADR 0009).
+        """Expose the built-in ``execute`` event trigger on the REST API.
 
         Mounted via the base aas_middleware workflow mechanism, as a plain REST
         route (``POST /workflows/event_trigger/execute``). This is deliberately
         NOT a KG-registered ``svc:Workflow``. The event trigger is framework
         plumbing every resource-mode instance exposes, so peers can call it. It
-        is not a domain capability (ADR 0005 amended).
+        is not a domain capability.
         """
+
+        # ADR: 0005, 0009
         middleware = self
 
         async def event_trigger(payload: _EventTriggerPayload) -> Dict[str, str]:
@@ -702,7 +712,7 @@ class SemanticMiddleware(Middleware):
         Middleware.workflow(self)(event_trigger)
 
     async def _handle_event_trigger(self, operation_iri: IRI) -> Dict[str, str]:
-        """Receiver-side event-trigger intake (ADR 0009).
+        """Receiver-side event-trigger intake.
 
         The trigger carries only the Operation IRI — its payload lives in the graph. We
         ``ogm.fetch`` the Operation (confirming it exists) and enqueue it into this
@@ -710,6 +720,8 @@ class SemanticMiddleware(Middleware):
         no business result. A domain callback (#15) or pull-and-run (#14) runs the work
         later. This slice only enqueues.
         """
+
+        # ADR: 0009
         await anyio.to_thread.run_sync(
             functools.partial(self.ogm.fetch, instance_iri=operation_iri)
         )
@@ -733,7 +745,7 @@ class SemanticMiddleware(Middleware):
         operation_iri: Optional[str] = None,
         target_resource: Optional[str] = None,
     ):
-        """Caller-side dispatch as a transaction context manager (ADR 0010).
+        """Caller-side dispatch as a transaction context manager.
 
         Usage::
 
@@ -742,12 +754,14 @@ class SemanticMiddleware(Middleware):
 
         The body populates the yielded draft. On clean exit the middleware **atomically**
         creates the Operation (status ``queued``, addressed to a reachable Service via its
-        Capability — ADR 0002 discovery), and triggers that Service's event trigger over
-        REST. If the trigger delivery fails, the system reverts the created Operation (ADR 0010
-        atomic create-and-notify). A body exception aborts before anything is written.
+        Capability through discovery), and triggers that Service's event trigger over
+        REST. If the trigger delivery fails, the system reverts the created Operation
+        atomically. A body exception aborts before anything is written.
 
-        This is the in-process caller face — not REST-exposed (ADR 0005/0010).
+        This is the in-process caller face — not REST-exposed.
         """
+
+        # ADR: 0002, 0005, 0010
         if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"request() is only valid in resource mode; current mode is {self.mode!r}"
@@ -802,7 +816,7 @@ class SemanticMiddleware(Middleware):
 
     @contextlib.contextmanager
     def claim_next(self, scope: Any = None):
-        """Pull-and-run the next queued Operation as a transaction context manager (ADR 0009/0010).
+        """Pull-and-run the next queued Operation as a transaction context manager.
 
         Usage::
 
@@ -816,12 +830,14 @@ class SemanticMiddleware(Middleware):
         clean exit the CM **atomically** records `done` plus provenance
         (`executedByWorkflow` / `executionTimestamp` / `executionResult`). On a body
         exception it records `failed` plus the exception message, and re-raises. Provenance
-        is folded into the terminal transition (ADR 0009). On failure the CM also dumps the
+        is folded into the terminal transition. On failure the CM also dumps the
         resource datamodel and stores it as the Operation's ``svc:failureState``, so the
         state that produced the failure survives the exception.
 
-        This is the in-process receiver face — not REST-exposed (ADR 0005/0010).
+        This is the in-process receiver face — not REST-exposed.
         """
+
+        # ADR: 0005, 0009, 0010
         if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"claim_next() is only valid in resource mode; current mode is {self.mode!r}"
@@ -879,7 +895,7 @@ class SemanticMiddleware(Middleware):
 
     @contextlib.contextmanager
     def handover(self, *, mode: Any, workpiece: Any, counterpart: Any):
-        """Change-of-possession primitive as a transaction context manager (ADR 0011).
+        """Change-of-possession primitive as a transaction context manager.
 
         Usage::
 
@@ -896,12 +912,14 @@ class SemanticMiddleware(Middleware):
         trigger. On clean exit, `__exit__` switches possession to the counterpart. The middleware appends
         the counterpart's `cfc:hasPossessor` to a fresh PossessionState (an atomic insertion,
         because a resource can possess several workpieces). The middleware then re-points the workpiece's
-        cardinality-1 `cfc:hasPossessedWorkpiece`, in a single OGM DELETE/INSERT (the update
-        path, ADR 0008). The workpiece thus points to exactly one PossessionState throughout the process.
+        cardinality-1 `cfc:hasPossessedWorkpiece`, in a single OGM DELETE/INSERT along the update
+        path. The workpiece thus points to exactly one PossessionState throughout the process.
         On an exception, the middleware aborts with no switch. Possession is Core's reified model
         (`cfc:PossessionState`). The "possessed by exactly one" cardinality is Core's own
         Workpiece restriction, the commit-time SHACL backstop.
         """
+
+        # ADR: 0008, 0011
         if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"handover() is only valid in resource mode; current mode is {self.mode!r}"
@@ -939,7 +957,7 @@ class SemanticMiddleware(Middleware):
         )
 
     def register_callback(self, callback: Any, scope: Any = None) -> None:
-        """Register a domain work callback fired on enqueue (#15, ADR 0009).
+        """Register a domain work callback fired on enqueue (#15).
 
         `callback` is the work function `callback(operation) -> result`. It runs the
         Operation's work, and returns the value recorded as `svc:executionResult`. On each
@@ -950,6 +968,8 @@ class SemanticMiddleware(Middleware):
         for a manual `claim_next`. `scope` is the domain ClassScope used to re-fetch the
         Operation.
         """
+
+        # ADR: 0009
         if self.mode != Mode.RESOURCE:
             raise RuntimeError(
                 f"register_callback() is only valid in resource mode; current mode is {self.mode!r}"
@@ -987,7 +1007,7 @@ class SemanticMiddleware(Middleware):
             claimed.result = callback(claimed.operation)
 
     async def _reconstruct_queue(self) -> None:
-        """Reconstruct the operation queue from the graph on startup (ADR 0009 durability).
+        """Reconstruct the operation queue from the graph on startup for durability.
 
         Own ``queued`` Operations are re-enqueued into the in-memory cache. Own orphaned
         ``running`` Operations (this resource crashed mid-execution) transition to
@@ -996,6 +1016,8 @@ class SemanticMiddleware(Middleware):
         resource), whose links persist across a restart. So this is a one-shot startup
         query, rather than steady-state polling.
         """
+
+        # ADR: 0009
         queued = await anyio.to_thread.run_sync(
             functools.partial(
                 find_resource_operations,
@@ -1038,14 +1060,16 @@ class SemanticMiddleware(Middleware):
         ``add_synced_connector`` defers) starts ``run_receive()`` but never calls
         ``connect()``. A connector registered later does not connect. Its listener never
         starts. ``receive()`` blocks forever, while outbound limps on through
-        ``consume()``'s reconnect. Silent, one-directional failure (ADR 0023).
+        ``consume()``'s reconnect. Silent, one-directional failure.
 
         Recognition and the northbound projection run identically for every connector
-        wiring (ADR 0032). ``autoregister_connectors`` controls only the connection. An
+        wiring. ``autoregister_connectors`` controls only the connection. An
         inspecting instance that skipped recognition would treat each parameter node as
         ordinary data, and serve its broker address northbound. The least-privileged
-        instance would leak the most (ADR 0028).
+        instance would leak the most.
         """
+
+        # ADR: 0023, 0028, 0032
         # Deliberately not wrapped in a try/except. A class_scope request means the
         # parameters under it must wire, and a resource that cannot resolve them has not
         # "come up with a smaller surface" — it has come up unable to reach its device, with
@@ -1118,11 +1142,11 @@ class SemanticMiddleware(Middleware):
         ran.
 
         **Kept here rather than fixed upstream, knowingly** (#93 item 5 raised this as a
-        root ADR 0001 question). Every fact this method uses -- that the fallback is
+        root architecture question). Every fact this method uses -- that the fallback is
         ``PersistenceFactory(ModelConnector)``, that the lookup does
         ``issubclass(persisted_model_type, model_type)`` -- belongs to ``aas_middleware``,
         so this is a reimplementation of a sibling's internals in a downstream repo, and it
-        drifts silently the moment that fallback changes. Root ADR 0001 would permit fixing
+        drifts silently the moment that fallback changes. Root architecture rules would permit fixing
         it there, but the sibling is not *defective*: it warns about a real choice it made,
         and suppressing that warning for every consumer is a feature change, not a bugfix.
         The failure mode if it drifts is benign and loud enough -- the warning returns --
@@ -1130,6 +1154,8 @@ class SemanticMiddleware(Middleware):
         Revisit it with map #57's follow-on map #96, which takes ownership of this exact
         registry.
         """
+
+        # ADR: root 0001
         connection_info = ConnectionInfo(data_model_name=data_model_name)
         if connection_info in self.persistence_registry.persistence_factories:
             return
@@ -1138,7 +1164,7 @@ class SemanticMiddleware(Middleware):
         )
 
     async def _load_resource_datamodel(self) -> None:
-        """Expose the resource's REST interface generated from graph ground truth (ADR 0009).
+        """Expose the resource's REST interface generated from graph ground truth.
 
         Resource mode builds its REST surface from the graph. It fetches the resource
         individual through the OGM, materializes its aas_middleware datamodel, and
@@ -1148,10 +1174,12 @@ class SemanticMiddleware(Middleware):
         skipped, with a warning, instead of failing startup.
 
         When a ``class_scope`` was given, the fetch goes through the **pruned** spec. So
-        the served datamodel has no field that could carry a broker address or a topic
-        (ADR 0028). Without one, the middleware fetches unscoped, and returns the individual.
+        the served datamodel has no field that could carry a broker address or a topic.
+        Without one, the middleware fetches unscoped, and returns the individual.
         This is what scenarios 1 and 2 rely on, and why the projection cannot leak there.
         """
+
+        # ADR: 0009, 0028
         try:
             fetch = functools.partial(
                 self.ogm.fetch, instance_iri=self.resource_iri, materialize=True
@@ -1201,13 +1229,15 @@ class SemanticMiddleware(Middleware):
     def _dump_resource_datamodel(self) -> Optional[str]:
         """Serialize this resource's aas_middleware datamodel to a JSON string, or None.
 
-        This is the failed Operation state snapshot (ADR 0009 / #14). On a body exception,
+        This is the failed Operation state snapshot (#14). On a body exception,
         `claim_next` records this alongside `operationStatus=failed` (`svc:failureState`),
         so the user can diagnose the resource state from the
         graph. This is best-effort. A resource with no materializable datamodel, or a
         serialization error, yields None. The `failed` status and error string are still
         recorded either way. The snapshot is additive.
         """
+
+        # ADR: 0009
         try:
             node = self.ogm.fetch(instance_iri=self.resource_iri, materialize=True)
             instance = getattr(node, "instance", None)

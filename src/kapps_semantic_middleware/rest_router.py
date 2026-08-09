@@ -1,4 +1,4 @@
-"""REST routes, generated recursively to the complex property (ADR 0017).
+"""REST routes, generated recursively to the complex property.
 
 The middleware extends the CRUD API of the resource datamodel with recursive routes. These routes descend
 the datamodel tree. They terminate at each interface-accessible parameter. This parameter is a
@@ -14,7 +14,7 @@ segment. The dict is the body. Value and unit move together. They must move toge
 without its unit is not a speed.
 
 Every value in this tree is a **list**. RDF multiplicity requires this (research doc 0029). This
-requirement includes scalars. ADR 0017 shows a bare dict in its example. That example predates the
+requirement includes scalars. The original example showed a bare dict. That example predates the
 finding. The payload is a list of parameter dicts. It is not a bare dict.
 
 Verb gating is per individual. One belt may be ``readwrite``. A barrier on the same unit may be
@@ -25,7 +25,7 @@ parameter returns 405. The route does not exist. FastAPI handles that automatica
 The request or response type comes from the **owning node** model field annotation. It does not
 come from ``binding.node_model_type``. The latter comes from the full spec. It carries southbound
 connection metadata. The northbound instance owns its annotation. That annotation is the pruned
-shape (ADR 0028). Use the wrong one. This mistake leaks broker addresses northbound.
+shape. Use the wrong one. This mistake leaks broker addresses northbound.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def _lined(value: Any) -> str:
     """Convert an IRI or plain string into a URL-safe segment.
 
     This function tolerates a value already an ``IRI`` (has ``lined``). It also tolerates
-    one that is a plain ``str``. This function is total and invertible (ADR 0021). Raw IRIs contain
+    one that is a plain ``str``. This function is total and invertible. Raw IRIs contain
     ``/``. They would break routing.
     """
     if hasattr(value, "lined"):

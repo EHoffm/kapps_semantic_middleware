@@ -17,16 +17,18 @@ release.
 
 `mes:` is the Manufacturing Execution System domain ontology
 (https://w3id.org/circularfactory/MES#), defined in `kapps_semantic_middleware/ontology/mes.ttl`.
-It is domain-facing. It covers possession and handover-ability vocabulary per ADR 0012.
+It is domain-facing. It covers possession and handover-ability vocabulary.
 
 `inf:` is the interface vocabulary. It defines what makes a domain parameter reachable
 over a protocol. It is authored for now under the existing CrcInterfaces IRI, so scenario
 3 stays vocabulary-compatible with the minimal example shared across `graph_db_interface`
 and `kapps_ogm`. CrcInterfaces is deprecated. The consolidation capstone (#39) re-homes
 these terms under the `inf:` name it mints. Code must therefore reach these terms only
-through `class INF`, never inline at a use site (ADR 0021). A rename is then one constant
+through `class INF`, never inline at a use site. A rename is then one constant
 here, plus a find-and-replace.
 """
+
+# ADR: 0012, 0021
 
 from __future__ import annotations
 
@@ -130,7 +132,7 @@ class MES:
 
     Scope is now handover *ability* only. Possession itself is Core material-flow state
     (``cfc:PossessionState`` / ``cfc:hasPossessor`` / ``cfc:hasPossessedWorkpiece``, see
-    ``class CFC``). This module no longer mints its own possession vocabulary (ADR 0012).
+    ``class CFC``). This module no longer mints its own possession vocabulary.
     """
 
     # Classes
@@ -153,7 +155,7 @@ class INF:
     """Terms from the interface vocabulary (`inf:`).
 
     A **parameter** is one node hanging off a domain property. It carries the value together with
-    everything needed to reach it over a protocol (ADR 0015). The terms split into two layers.
+    everything needed to reach it over a protocol. The terms split into two layers.
     The split is load-bearing:
 
     - **Northbound-safe** — declared by the generic marker ``isInterfaceAccessibleParameter``:
@@ -161,11 +163,13 @@ class INF:
     - **Southbound only** — declared by a protocol marker such as
       ``isInterfaceAccessibleMQTTParameter``: the connection metadata. A peer that learned the
       broker address and topics could drive the device directly. It would bypass the middleware.
-      This must never reach a northbound payload (ADR 0028).
+      This must never reach a northbound payload.
 
     The core never decides which terms are southbound by name. A binding descriptor declares its
-    own ``connection_metadata``. The registry takes the union (ADR 0021, ADR 0028).
+    own ``connection_metadata``. The registry takes the union.
     """
+
+    # ADR: 0015, 0021, 0028
 
     # Interface marker properties. A domain property becomes interface-accessible by being
     # rdfs:subPropertyOf one of these. The protocol marker is a subproperty of the generic one.
@@ -177,21 +181,21 @@ class INF:
 
     # Parameter content (northbound-safe).
     hasValue = IRI("hasValue", base=INF_NS)  # the live value; absent under the locator pattern
-    accessMode = IRI("accessMode", base=INF_NS)  # "read" | "readwrite" (ADR 0015 facet)
+    accessMode = IRI("accessMode", base=INF_NS)  # "read" | "readwrite" facet
 
     # MQTT connection metadata (southbound only).
     hasMQTTTopic = IRI("hasMQTTTopic", base=INF_NS)  # topic the device publishes readings on
     hasMQTTSetTopic = IRI("hasMQTTSetTopic", base=INF_NS)  # setpoint topic; readwrite only
     hasMQTTBrokerIP = IRI("hasMQTTBrokerIP", base=INF_NS)  # broker carrying both topics
-    hasMQTTBrokerPort = IRI("hasMQTTBrokerPort", base=INF_NS)  # xsd:integer; absent means 1883 (ADR 0031)
+    hasMQTTBrokerPort = IRI("hasMQTTBrokerPort", base=INF_NS)  # xsd:integer; absent means 1883
     hasMQTTValuePath = IRI("hasMQTTValuePath", base=INF_NS)  # JSON envelope path; absent = raw scalar
 
 
 class AccessMode:
-    """String values for `inf:accessMode` (ADR 0015). Not IRIs / individuals.
+    """String values for `inf:accessMode`. Not IRIs / individuals.
 
     Absent or unrecognised means read-only. A parameter is never writable by accident of omission
-    (ADR 0023).
+    by accident of omission.
     """
 
     READ = "read"
@@ -200,7 +204,7 @@ class AccessMode:
 
 
 class OperationStatus:
-    """String values for svc:operationStatus (ADR 0009 lifecycle). Not IRIs / individuals."""
+    """String values for svc:operationStatus, in lifecycle order. Not IRIs / individuals."""
 
     QUEUED = "queued"
     RUNNING = "running"

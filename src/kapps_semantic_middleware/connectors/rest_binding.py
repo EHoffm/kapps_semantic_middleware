@@ -1,4 +1,4 @@
-"""The REST semantic connector: the connector seam reaches a peer middleware (ADR 0033).
+"""The REST semantic connector: the connector seam reaches a peer middleware.
 
 A parameter binds a REST connector when two things hold, neither of them a marker on the
 parameter itself. First, the parameter is interface-accessible at all — a subproperty of
@@ -8,21 +8,21 @@ binding instead; ``wiring.py``'s ``_descriptor_for`` already picks the most spec
 registered match). Second, the parameter's resource carries a live ``svc:address`` on its
 Service, one hop out through ``svc:isServiceOf``. That address is not a marker on the
 parameter — it is looked up once per resource in ``wiring.py``'s ``_recognise`` and folded
-into every recognised binding's metadata (ADR 0023's 2026-08-03 amendment). This binding
-reads it out exactly like MQTT reads ``inf:hasMQTTBrokerIP``, through ``binding.get``.
+into every recognised binding's metadata. This binding reads it out exactly like MQTT reads
+``inf:hasMQTTBrokerIP``, through ``binding.get``.
 
-**The route is structural, so nothing else is needed** (ADR 0017, ADR 0033). Address plus
-the recursive path derived from the datamodel tree is a complete binding — no REST-specific
-ontology term is minted. ``build_parameter_path`` does that derivation. It moved here from
+**The route is structural, so nothing else is needed.** Address plus the recursive path
+derived from the datamodel tree is a complete binding — no REST-specific ontology term is
+minted. ``build_parameter_path`` does that derivation. It moved here from
 ``demo/transferunits/controller.py`` rather than being rewritten (ticket #77): the two
 callers — this binding, reaching outward at recognition time, and the ``Controller``,
 reaching outward from a fetched JSON tree — need the identical algorithm, and a domain-level
 module is the wrong place to own something the middleware itself defines.
 
-**Payload shape.** Per ADR 0017 the payload is a *list* of parameter dicts, not a bare
-scalar, and a PUT must send back exactly what a GET returned. Unlike MQTT, which bridges a
-bare device scalar and the one-element list the framework holds, a peer's own ADR 0017 route
-already serves and accepts that exact list — there is no scalar to rewrap. So
+**Payload shape.** The payload is a *list* of parameter dicts, not a bare scalar, and a PUT
+must send back exactly what a GET returned. Unlike MQTT, which bridges a bare device scalar
+and the one-element list the framework holds, a peer's own generated parameter route already
+serves and accepts that exact list — there is no scalar to rewrap. So
 ``RESTParameterFormatter`` is a plain type adapter between the wire JSON and
 ``node_model_type`` instances, nothing more (contrast ``mqtt_binding.MQTTParameterFormatter``,
 which reassembles static facets a bare scalar would otherwise blank).
@@ -42,12 +42,12 @@ ticket #77). Three questions were left open for whoever picked this up:
   should tune the default.
 - *Configurable?* Yes, per connector instance (``poll_interval=``), which
   ``RESTBinding.build`` could source from a future ``inf:`` term if one ever proves
-  necessary. None is minted here; ADR 0033 is explicit that the route needs no new term, and
-  a cadence is not addressing.
+  necessary. None is minted here; the route needs no new term, and a cadence is not
+  addressing.
 
-**Lazy import, same rule as MQTT** (ADR 0023 / ADR 0028): importing this module, and
-recognising and building a ``RESTBinding``, must not require a working network stack, so that
-an inspecting instance keeps receiving the projection on a host that cannot reach anything.
+**Lazy import, same rule as MQTT:** importing this module, and recognising and building a
+``RESTBinding``, must not require a working network stack, so that an inspecting instance
+keeps receiving the projection on a host that cannot reach anything.
 
 **That rule does not currently hold on this module's import path, and the guard below is
 unreachable.** Corrected 2026-08-07 on #77, which had recorded the box as merely untested.
@@ -63,6 +63,8 @@ the eager import upstream goes away, and its error message is reachable and asse
 (``tests/test_optional_transport_stacks.py``). What is *not* claimed here any more is that
 absence has ever been survivable on this path.
 """
+
+# ADR: 0017, 0023, 0028, 0033
 
 from __future__ import annotations
 
@@ -132,8 +134,7 @@ def _httpx_module():
     """The ``httpx`` module, or an actionable error if it is absent.
 
     Called from inside the connector's async methods, never at import or recognition time, so
-    that the failure is deferred to the moment something actually tries to talk to a peer
-    (ADR 0023 / ADR 0028).
+    that the failure is deferred to the moment something actually tries to talk to a peer.
 
     **The deferral is real; the absence it defers is not reachable here.** See the module
     docstring: an eager, undeclared ``import httpx`` upstream in ``aas_middleware`` means this
@@ -141,6 +142,8 @@ def _httpx_module():
     nonetheless asserted, by swapping the module global -- the strongest check available while
     that stays true, and weaker than #77's box asked for.
     """
+
+    # ADR: 0023, 0028
     if httpx is None:  # pragma: no cover - depends on the optional install
         raise ImportError(
             "The REST semantic connector needs httpx. Install it with `uv add httpx`, or "
@@ -162,7 +165,7 @@ def build_parameter_path(
     ``/{Model}/{lined_root}/{field}/{lined_child}/.../{field}``. Field names stay literal —
     the caller (recognition, here; a fetched JSON tree, for ``Controller``) already carries
     them in the mangled form the served route uses. Only individual IDs are mangled here, via
-    ``IRI.lined`` (ADR 0017, ADR 0021).
+    ``IRI.lined``.
 
     Moved from ``demo/transferunits/controller.py`` (ticket #77): the algorithm has no
     domain term and two callers now need it, one of them in ``src/``.
@@ -179,6 +182,7 @@ def build_parameter_path(
     Returns:
         The structural URL path.
     """
+    # ADR: 0017, 0021
     path_parts = ["", root_class_local_name, IRI(root_iri).lined]
     for field_name, child_id in steps:
         path_parts.append(field_name)
@@ -188,13 +192,15 @@ def build_parameter_path(
 
 
 class RESTParameterFormatter:
-    """Adapts between a peer's ADR 0017 JSON body and the persistence value.
+    """Adapts between a peer's parameter-route JSON body and the persistence value.
 
     Unlike a bare MQTT scalar, the REST payload already carries the whole parameter node --
     value, unit, access mode, whatever the range declares -- because the peer's own GET/PUT
     routes serve and accept exactly that shape. There is no scalar to rewrap, so this is a
     type adapter between a JSON list of dicts and ``model_type`` instances, nothing more.
     """
+
+    # ADR: 0017
 
     def __init__(
         self,
@@ -228,9 +234,11 @@ class RESTParameterFormatter:
     def serialize(self, data: Any) -> List[Dict[str, Any]]:
         """The persistence value to the JSON body of an outbound PUT.
 
-        Echo semantics (ADR 0017): this is the same shape ``deserialize`` accepted, so a
-        read-modify-write round trips through this pair with no reshaping in between.
+        Echo semantics: this is the same shape ``deserialize`` accepted, so a read-modify-write
+        round trips through this pair with no reshaping in between.
         """
+
+        # ADR: 0017
         items = data if isinstance(data, (list, tuple)) else [data]
         body = [
             item.model_dump(mode="json") if hasattr(item, "model_dump") else item
@@ -243,7 +251,7 @@ class RESTParameterFormatter:
 
 
 class RESTParameterConnector:
-    """Reaches one ADR 0017 parameter route on a peer middleware over HTTP.
+    """Reaches one generated parameter route on a peer middleware over HTTP.
 
     ``connect``/``disconnect`` are no-ops. HTTP is stateless here, one ``httpx.AsyncClient``
     per call, the same style ``Controller`` and ``aas_middleware``'s own
@@ -291,7 +299,8 @@ class RESTParameterConnector:
             return response.json()
 
     async def consume(self, body: Any) -> None:
-        """PUT ``body`` to the parameter route. ``body`` is already the ADR 0017 list shape."""
+        """PUT ``body`` to the parameter route. ``body`` already has the list shape it wants."""
+        # ADR: 0017
         httpx_module = _httpx_module()
         async with httpx_module.AsyncClient(timeout=self.timeout) as client:
             response = await client.put(self.url, json=body)
@@ -334,14 +343,18 @@ class RESTBinding:
     whose resource happens to be live.
     """
 
+    # ADR: 0023, 0028
+
     connector_cls: ClassVar[Any] = RESTParameterConnector
     interface_property: ClassVar[IRI] = INF.isInterfaceAccessibleParameter
     connection_metadata: ClassVar[Tuple[IRI, ...]] = ()
     """Empty on purpose. This binding reads nothing declared on the *parameter* -- its
     evidence is the resource's Service, one hop out (see the module docstring). The
-    projection's cross-check (ADR 0028) compares this against what the ontology declares
-    *between the parameter property and the interface root*, which is likewise nothing for a
-    parameter with no protocol-specific marker, so the two agree."""
+    projection's cross-check compares this against what the ontology declares *between the
+    parameter property and the interface root*, which is likewise nothing for a parameter with
+    no protocol-specific marker, so the two agree."""
+
+    # ADR: 0028
 
     @staticmethod
     def build(
@@ -354,12 +367,13 @@ class RESTBinding:
         when ``direction`` permits it.
 
         ``direction`` has already been reduced to the most restrictive of the parameter's
-        ``inf:accessMode`` and the instance's connector wiring (ADR 0023), so this only
-        honours it.
+        ``inf:accessMode`` and the instance's connector wiring, so this only honours it.
 
         ``ensure_transport`` is unused. REST reaches a peer middleware, not a broker this
-        deployment needs to bring up (ADR 0034) -- there is nothing here to ensure.
+        deployment needs to bring up -- there is nothing here to ensure.
         """
+
+        # ADR: 0023, 0034
         address = binding.get(SVC.address)
         if not address:
             # A generically interface-accessible parameter whose resource has no live

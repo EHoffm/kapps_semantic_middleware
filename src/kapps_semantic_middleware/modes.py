@@ -1,4 +1,4 @@
-"""The three middleware modes as constants. Do not use bare strings (ADR 0005, #21).
+"""The three middleware modes as constants. Do not use bare strings (#21).
 
 ``SemanticMiddleware(mode=...)`` took a plain ``str``. It validated the string against a tuple.
 The tuple was written out at the call site. A typo produced a ``ValueError`` at construction. This
@@ -12,13 +12,17 @@ This keeps all of that working unchanged. ``Mode.RESOURCE == "resource"`` is tru
 is the better way to say it. The string does not stop being a way to say it.
 """
 
+# ADR: 0005
+
 from __future__ import annotations
 
 from enum import Enum
 
 
 class Mode(str, Enum):
-    """A middleware instance mode. See ADR 0005 for what each one means."""
+    """A middleware instance mode. Each member below says what it means."""
+
+    # ADR: 0005, 0007
 
     RESOURCE = "resource"
     """Wrap one ``resource_iri``. Register a Service. Serve its workflows and parameters.
@@ -26,11 +30,11 @@ class Mode(str, Enum):
 
     SERVER = "server"
     """Reserved. Serve data with no physical resource. Not implemented. Construct one
-    raises. Rule out of scope for the scenario-3 controller. ADR 0005 third amendment states
-    this. A controller consumes a graph. It does not serve one."""
+    raises. Out of scope for the scenario-3 controller: a controller consumes a graph, and it
+    does not serve one."""
 
     WATCHDOG = "watchdog"
-    """Reserved. Sweep liveness from a central point (ADR 0007). Sweep stale Services. Register
+    """Reserved. Sweep liveness from a central point. Sweep stale Services. Register
     nothing of its own."""
 
     def __str__(self) -> str:

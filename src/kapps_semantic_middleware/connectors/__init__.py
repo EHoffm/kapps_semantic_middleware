@@ -4,10 +4,12 @@ When you import this package, it **registers the built-in binding descriptors** 
 ``semantic.default_registry``. That import is necessary. A middleware
 constructed with no explicit ``connector_registry`` gets the default one. An empty default
 registry means an empty prune set. An empty prune set means the northbound projection removes
-nothing, and every served parameter carries its broker address and topics (ADR 0028). The
+nothing, and every served parameter carries its broker address and topics. The
 registry tells the projection which properties are southbound. Population before serving is
 the requirement. Population before wiring is not enough on its own.
 """
+
+# ADR: 0028
 
 from kapps_semantic_middleware.connectors.knowledge_graph_connector import (
     KnowledgeGraphConnector,

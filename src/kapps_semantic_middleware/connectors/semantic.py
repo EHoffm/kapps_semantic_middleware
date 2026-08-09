@@ -1,4 +1,4 @@
-"""The semantic-connector seam: binding descriptors and their registry (ADR 0023).
+"""The semantic-connector seam: binding descriptors and their registry.
 
 A **semantic connector** is any connector that can register itself from the knowledge graph.
 The system realizes it not as a connector subclass, but as a **binding descriptor**. This is an
@@ -8,13 +8,15 @@ metadata into one or more ``add_synced_connector`` registrations.
 
 Reference a ``connector_cls`` rather than subclass it. This is the key point. ``aas_middleware``
 ships about ten connectors: MQTT, OPC-UA, HTTP request and polling, websocket and webhook
-client and server, AAS client, model. Root ADR 0001 forbids adding self-registration to any
+client and server, AAS client, model. Self-registration must not be added to any
 of them in the sibling repo. A descriptor lets a domain expert make a vendor's connector
 semantic, without owning or subclassing its source. It also lets two registration strategies
 for one protocol coexist without a shared ancestor.
 
 MQTT is the first instance of this seam, not its shape. See ``mqtt_binding.py``.
 """
+
+# ADR: root 0001, 0023
 
 from __future__ import annotations
 
@@ -72,8 +74,10 @@ class Registration:
 
     A binding yields these instead of touching the middleware directly. So a test can
     check the seam with no running middleware. So the caller decides whether to wire
-    them at all. This is what an inspecting instance needs (ADR 0022, ADR 0032).
+    them at all. This is what an inspecting instance needs.
     """
+
+    # ADR: 0022, 0032
 
     connector: Any
     """A constructed framework connector instance (e.g. ``MqttClientConnector``)."""
@@ -99,8 +103,10 @@ class ParameterBinding:
     """One interface-accessible parameter, resolved and ready to wire.
 
     Everything here comes from the ClassSpec and the graph, never from materialized instance
-    data. This is what makes construction-time registration possible (ADR 0023).
+    data. This is what makes construction-time registration possible.
     """
+
+    # ADR: 0023
 
     resource_iri: IRI
     """The individual carrying the parameter, for example a belt or barrier."""
@@ -122,8 +128,8 @@ class ParameterBinding:
     """The generated pydantic model for the parameter node itself.
 
     A formatter needs it to rebuild the node from an inbound scalar, because the framework
-    replaces the whole value on ``setattr`` and hands the formatter nothing but the payload
-    (ADR 0023). It comes from the **full** spec, not the pruned northbound one. The node the
+    replaces the whole value on ``setattr`` and hands the formatter nothing but the payload.
+    It comes from the **full** spec, not the pruned northbound one. The node the
     binding writes must still be the shape the graph expects."""
 
     root_iri: Optional[IRI] = None
@@ -159,7 +165,7 @@ class ParameterBinding:
         """The parameter's declared access mode, default to read-only.
 
         An absent or unrecognised value yields ``read``, so a parameter is never writable by
-        accident of omission (ADR 0023).
+        accident of omission.
         """
         raw = self.get(INF.accessMode)
         return raw if raw in AccessMode.ALL else AccessMode.READ
@@ -168,7 +174,7 @@ class ParameterBinding:
     def label(self) -> str:
         """A short human-readable label for a log line, e.g. "Belt1 hasConveyorSpeed".
 
-        Full mangled IRIs are correct in route paths (ADR 0021) but unreadable in a log line
+        Full mangled IRIs are correct in route paths but unreadable in a log line
         a human watches scroll past. Display-only: never parse it, never use it to address
         anything. Shared here rather than restated per binding descriptor — every binding
         builds one of these for its formatter's log lines.
@@ -224,9 +230,9 @@ class BindingDescriptor(Protocol):
     ) -> Iterable[Registration]:
         """Turn one resolved parameter into the registrations that realize it.
 
-        ``ensure_transport``, when given, is the deployment's transport hook (ADR 0034),
+        ``ensure_transport``, when given, is the deployment's transport hook,
         already deduped by ``plan_wiring`` to fire once per distinct ``(host, port)`` across
-        this resource's whole wiring. A binding with nothing to bring up (REST, ADR 0033)
+        this resource's whole wiring. A binding with nothing to bring up (REST)
         simply never calls it."""
         ...
 
@@ -236,14 +242,15 @@ class SemanticConnectorRegistry:
 
     Resolve by the **interface property**, not by ``rdf:type``. A parameter node has no
     named type of its own. It has only anonymous restriction nodes, which are inferred and so
-    absent from an explicit-graph fetch. The property hierarchy is what survives (ADR 0020).
+    absent from an explicit-graph fetch. The property hierarchy is what survives.
 
     Build and consult the registry for **every** connector wiring, including one that
     wires nothing. Do not implement "no connectors" as "no registry". With no registry,
     no property is recognized as a parameter. The parameter node then becomes ordinary
-    data, and is served northbound. The least-privileged instance would leak the most
-    (ADR 0020, ADR 0028).
+    data, and is served northbound. The least-privileged instance would leak the most.
     """
+
+    # ADR: 0020, 0028
 
     def __init__(self, descriptors: Optional[Sequence[Type[BindingDescriptor]]] = None) -> None:
         self._by_property: Dict[str, Type[BindingDescriptor]] = {}
@@ -321,7 +328,7 @@ def semantic_connector(cls):
 def resolve_direction(access_mode: str, flavour: SyncDirection) -> SyncDirection:
     """The most restrictive of the parameter access mode and the instance flavor.
 
-    Neither may widen the other (ADR 0023). A monitor can therefore never drive a writable
+    Neither may widen the other. A monitor can therefore never drive a writable
     belt, and a controller can never write a read-only sensor. This is structural, not by
     convention.
 
