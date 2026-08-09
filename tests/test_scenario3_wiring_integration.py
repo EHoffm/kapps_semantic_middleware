@@ -24,7 +24,6 @@ from kapps_semantic_middleware.connectors.semantic import SemanticConnectorRegis
 from kapps_semantic_middleware.connectors.wiring import plan_wiring
 from kapps_semantic_middleware.projection import (
     carries_southbound,
-    load_northbound,
     southbound_properties,
 )
 from kapps_semantic_middleware.vocabulary import INF, SVC, AccessMode
@@ -438,19 +437,30 @@ class TestNorthboundProjection:
 
 
 @requires_graphdb
-class TestLoadNorthbound:
-    """Prune-on-load path (ADR 0033, #78): a consumer fetches with the prune already applied."""
+class TestAConsumerLoadsThePrunedShape:
+    """Prune-on-load (ADR 0033, #78): a consumer fetching a peer's datamodel gets the prune.
+
+    These four tests used to drive ``projection.load_northbound``, a second entry point
+    nothing in the product called. #105 deleted it and moved them onto the path the
+    controller really takes: ``plan_wiring`` builds the plan, and the fetch runs with
+    ``WiringPlan.northbound_fetch_kwargs()`` (``demo/transferunits/controller.py:636``).
+
+    One of the four is gone rather than moved. It asserted that a protocol declared only
+    in the graph is pruned with no code change, which is exactly
+    ``TestNorthboundProjection.test_a_protocol_with_no_registered_binding_is_still_hidden``
+    on this same path -- keeping both would have been the same claim written twice.
+    """
+
+    def _loaded(self, ogm, unit_scope):
+        """What a consumer holds after loading a peer's datamodel."""
+        plan = _plan(ogm, unit_scope, autoregister=False)
+        node = ogm.fetch(instance_iri=seed.TRANSFER_UNIT_1, **plan.northbound_fetch_kwargs())
+        return plan, node.instance.model_dump()
 
     def test_a_loaded_transferunit_carries_no_mqtt_property(self, scenario3, unit_scope):
         _, ogm = scenario3
 
-        node = load_northbound(
-            ogm,
-            instance_iri=seed.TRANSFER_UNIT_1,
-            resource_class=seed.TRANSFER_UNIT_CLASS,
-            class_scope=unit_scope,
-        )
-        dumped = node.instance.model_dump()
+        _, dumped = self._loaded(ogm, unit_scope)
 
         assert "hasMQTT" not in str(dumped)
         assert not carries_southbound(
@@ -460,81 +470,30 @@ class TestLoadNorthbound:
         assert INF.accessMode.lined in str(dumped)
         assert seed.TU_HAS_UNIT.lined in str(dumped)
 
-    def test_an_unregistered_synthetic_marker_is_pruned_with_no_code_change(
-        self, scenario3, unit_scope
-    ):
-        """A protocol declared only in the graph is excluded -- the prune is ontology-derived."""
-        graphdb, ogm = scenario3
-        opcua_marker = IRI(f"{seed.INF_NS}isInterfaceAccessibleOPCUAParameter")
-        opcua_endpoint = IRI(f"{seed.INF_NS}hasOPCUAEndpoint")
-        owl, rdfs, xsd = (
-            "http://www.w3.org/2002/07/owl#",
-            "http://www.w3.org/2000/01/rdf-schema#",
-            "http://www.w3.org/2001/XMLSchema#",
-        )
+    def test_what_was_pruned_is_visible_per_parameter(self, scenario3, unit_scope):
+        """The consumer can say what it did not fetch, parameter by parameter.
 
-        graphdb.query(
-            f"""
-            INSERT DATA {{
-              <{opcua_marker}> a <{owl}ObjectProperty> ;
-                  <{rdfs}subPropertyOf> <{seed.INF_NS}isInterfaceAccessibleParameter> ;
-                  <{rdfs}range> [ a <{owl}Class> ; <{owl}intersectionOf> (
-                      [ a <{owl}Restriction> ; <{owl}onProperty> <{opcua_endpoint}> ;
-                        <{owl}allValuesFrom> <{xsd}string> ] ) ] .
-              <{opcua_endpoint}> a <{owl}DatatypeProperty> .
-              <{seed.TU_HAS_CONVEYOR_SPEED}> <{rdfs}subPropertyOf> <{opcua_marker}> .
-            }}
-            """,
-            update=True,
-        )
-        graphdb.query(
-            f'INSERT {{ ?n <{opcua_endpoint}> "opc.tcp://10.0.0.5:4840/belt" }} '
-            f"WHERE {{ <{seed.CONVEYOR_BELT_LEFT}> <{seed.TU_HAS_CONVEYOR_SPEED}> ?n }}",
-            update=True,
-        )
-
-        node = load_northbound(
-            ogm,
-            instance_iri=seed.TRANSFER_UNIT_1,
-            resource_class=seed.TRANSFER_UNIT_CLASS,
-            class_scope=unit_scope,
-        )
-        dumped = node.instance.model_dump()
-
-        assert "opc.tcp://10.0.0.5:4840/belt" not in str(dumped)
-        assert opcua_endpoint.lined not in str(dumped)
-        # Northbound content survives.
-        assert INF.accessMode.lined in str(dumped)
-
-    def test_what_was_pruned_is_logged_per_parameter(self, scenario3, unit_scope, caplog):
+        This replaces an INFO line per parameter that only the deleted function
+        emitted. The breakdown itself outlived it as ``southbound_by_property``, which
+        is what #82's station board renders under each row -- the display #78 deferred.
+        A union across the whole resource would not do: the point is that a viewer sees
+        which properties went from *this* parameter.
+        """
         _, ogm = scenario3
 
-        with caplog.at_level(logging.INFO, logger="kapps_semantic_middleware.projection"):
-            load_northbound(
-                ogm,
-                instance_iri=seed.TRANSFER_UNIT_1,
-                resource_class=seed.TRANSFER_UNIT_CLASS,
-                class_scope=unit_scope,
-            )
+        plan, _ = self._loaded(ogm, unit_scope)
+        per_parameter = plan.southbound_by_property
 
-        assert str(seed.TRANSFER_UNIT_1) in caplog.text
-        assert str(seed.TU_HAS_CONVEYOR_SPEED) in caplog.text
-        assert "hasMQTTTopic" in caplog.text or str(INF.hasMQTTTopic) in caplog.text
-        # One line per parameter: tu:hasConveyorSpeed and tu:isOccupied are both
-        # interface-accessible in the scenario-3 seed.
-        assert len([r for r in caplog.records if "pruned" in r.message]) >= 2
+        # Both interface-accessible properties of the scenario-3 seed appear.
+        assert str(seed.TU_HAS_CONVEYOR_SPEED) in per_parameter
+        assert len([props for props in per_parameter.values() if props]) >= 2
+        assert str(INF.hasMQTTTopic) in per_parameter[str(seed.TU_HAS_CONVEYOR_SPEED)]
 
     def test_a_consumer_keeps_only_the_pruned_shape(self, scenario3, unit_scope):
         """Unlike the serving path, nothing here ever holds a field to carry a broker address."""
         _, ogm = scenario3
 
-        node = load_northbound(
-            ogm,
-            instance_iri=seed.TRANSFER_UNIT_1,
-            resource_class=seed.TRANSFER_UNIT_CLASS,
-            class_scope=unit_scope,
-        )
-        served = node.instance.model_dump()
+        _, served = self._loaded(ogm, unit_scope)
 
         belt = served[seed.TU_HAS_CONVEYOR_BELT.lined][0]
         parameter = belt[seed.TU_HAS_CONVEYOR_SPEED.lined][0]

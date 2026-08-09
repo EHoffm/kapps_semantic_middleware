@@ -300,64 +300,15 @@ def cross_check(
     )
 
 
-def load_northbound(
-    ogm: Any,
-    *,
-    instance_iri: Any,
-    resource_class: Any,
-    class_scope: Any = None,
-    interface_root: Any = INF.isInterfaceAccessibleParameter,
-) -> Any:
-    """Fetch one resource with southbound metadata pruned before materialization.
-
-    This is the "prune on load" half of the consumer story: a consumer that fetches another middleware's
-    datamodel into its own instance must run the same prune automatically, or it ends up holding
-    the factory's broker addresses. The prune happens **before** any data is read through the spec,
-    so the materialized result has no field a connection detail could ever occupy — this is not a
-    data-side filter.
-
-    ``resource_class`` is a **required** keyword argument, not resolved from the graph the way a
-    bare ``ogm.fetch(instance_iri=...)`` resolves it. The caller already knows the class from its
-    own discovery/view query (a control station's flow queries ``tu:TransferUnit`` etc.
-    before ever fetching a hit), so there is nothing left to resolve, and inventing a second
-    class-resolution path here would duplicate ``OGM.fetch``'s own fallback for no benefit.
-
-    The full (unpruned) ``ClassSpec`` this function builds is a purely local variable. It is never
-    returned, never passed to the caller, and the fetch never runs against it — only the pruned
-    spec is fetched with. Contrast this with ``wiring.py``'s ``plan_wiring``, which keeps *both*
-    shapes because a serving instance's connector bindings need the full one to read a broker
-    address or topic out of. A consumer that only *loads* a fetched datamodel has no binding to
-    feed a full spec to, so nothing here needs to keep it around once pruning is done.
-
-    Logging occurs at INFO level, one line per parameter property that had something removed. This
-    is a bare library function with no REST stack or UI of its own to hang a ``/projection`` route
-    or a panel on (those belong to separate tickets, #77 and #80, which build the REST connector
-    and the controller UI on top of this primitive respectively) — an INFO log line is the one
-    discoverability surface every caller gets for free regardless of what it's embedded in, and it
-    costs no new route or schema.
-    """
-    cache: Dict[str, frozenset] = {}
-    full_spec = ogm.get_class_spec(class_iri=resource_class, class_scope=class_scope)
-    pruned_spec = prune_southbound(full_spec, ogm=ogm, interface_root=interface_root, cache=cache)
-    _log_removed_per_parameter(instance_iri, cache)
-    return ogm.fetch(
-        instance_iri=instance_iri,
-        class_spec=pruned_spec,
-        class_scope=class_scope,
-        materialize=True,
-    )
-
-
-def _log_removed_per_parameter(instance_iri: Any, cache: Dict[str, frozenset]) -> None:
-    """Log one INFO line per parameter property that had southbound metadata removed."""
-    for parameter_property, southbound in sorted(cache.items()):
-        if not southbound:
-            continue
-        logger.info(
-            "Loading %s pruned %d southbound propert%s from %s: %s",
-            instance_iri,
-            len(southbound),
-            "y" if len(southbound) == 1 else "ies",
-            parameter_property,
-            ", ".join(sorted(southbound)),
-        )
+# `load_northbound` stood here: a second entry point that built a spec, pruned it and fetched
+# with it, for the consumer that loads a peer's datamodel. Deleted on #105. Nothing in the
+# product ever called it -- a consumer reaches the same pruned fetch through
+# `WiringPlan.northbound_fetch_kwargs()` (`connectors/wiring.py`), which `plan_wiring` has
+# already built by the time anything has a datamodel to load, and which carries the class scope
+# a bare prune-and-fetch would have had to be told about separately. Two ways to obtain the one
+# shape ADR 0028 governs is one more than the invariant can afford, and the tests it had were
+# the only thing keeping the unused one honest.
+#
+# Its INFO line per pruned parameter went with it. The same breakdown survives as
+# `WiringPlan.southbound_by_property`, which #82's station board renders per parameter -- a
+# surface a viewer can actually read, rather than a log line in a library with no UI.
