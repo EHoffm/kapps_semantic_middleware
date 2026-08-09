@@ -80,7 +80,8 @@ source of truth, and this document only explains it.
 
 It lives on KIT's GitLab and has no public mirror. Without access to it the project cannot be built
 at all, because the two sync-layer fixes it carries (#92 and #94) are not in any released
-`aas-middleware`. There is no workaround.
+`aas-middleware`. There is no workaround. It also carries the manifest fix for #103, which changes
+no behaviour.
 
 ## When a sibling moves
 

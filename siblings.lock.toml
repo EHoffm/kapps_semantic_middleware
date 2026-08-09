@@ -49,12 +49,13 @@ path = "../aas_middleware_inf"
 url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git"
 remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "5c6daec"
+commit = "b0d7440"
 why = """
-Two sync-layer correctness fixes made under root ADR 0001's bugfix allowance, both recorded in
-that repo's CHANGELOG: #92 (a persistence-write notification was formatted before it was narrowed,
-and a read could echo back out its own write leg) and #94 (a write now names the field that moved,
-so an untouched parameter is not commanded -- ADR 0035). Without them the demo's northbound sync
-and its ramping belts are both broken. Private GitLab: access is required, there is no public
-mirror.
+Three fixes made under root ADR 0001's bugfix allowance, all recorded in that repo's CHANGELOG:
+#92 (a persistence-write notification was formatted before it was narrowed, and a read could echo
+back out its own write leg), #94 (a write now names the field that moved, so an untouched
+parameter is not commanded -- ADR 0035) and #103 (the package declares the httpx it imports at
+module level). Without the first two the demo's northbound sync and its ramping belts are both
+broken; the third changes no behaviour and makes the manifest honest. Private GitLab: access is
+required, there is no public mirror.
 """
