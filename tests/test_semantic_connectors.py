@@ -640,7 +640,7 @@ class TestActivityLogging:
         )
 
     def test_a_changed_inbound_value_logs_at_info(self, caplog):
-        """A changed value is news. Appear at INFO."""
+        """A changed value is news. Appear at INFO, naming the parameter and the value."""
         formatter = self._formatter(caplog)
 
         formatter.deserialize(1.5)
@@ -648,7 +648,11 @@ class TestActivityLogging:
 
         records = [r for r in caplog.records if r.levelname == "INFO"]
         assert len(records) == 2
-        assert all("belt/speed" in r.message for r in records)
+        assert all("Belt1 hasConveyorSpeed" in r.message for r in records)
+        assert [r.message for r in records] == [
+            "Belt1 hasConveyorSpeed <- 1.5",
+            "Belt1 hasConveyorSpeed <- 2.5",
+        ]
 
     def test_a_repeated_inbound_value_drops_to_debug(self, caplog):
         """A periodic republish of an unchanged value is noise. A change is news.
@@ -664,8 +668,10 @@ class TestActivityLogging:
         debug_records = [r for r in caplog.records if r.levelname == "DEBUG"]
 
         assert len(info_records) == 1
-        assert len(debug_records) == 1
-        assert "belt/speed" in info_records[0].message
+        # Every arrival is traced at DEBUG, changed or not. Only the unchanged one says so.
+        assert len(debug_records) == 2
+        assert "(unchanged)" not in debug_records[0].message
+        assert "(unchanged)" in debug_records[1].message
 
     def test_the_first_value_is_always_news_even_if_it_is_none(self, caplog):
         """The _UNSET sentinel ensures the first reading logs even when None.
@@ -679,7 +685,29 @@ class TestActivityLogging:
 
         records = [r for r in caplog.records if r.levelname == "INFO"]
         assert len(records) == 1
-        assert "belt/speed" in records[0].message
+        assert "Belt1 hasConveyorSpeed" in records[0].message
+
+    def test_no_topic_reaches_an_info_record(self, caplog):
+        """#76. The activity feed serves this package's INFO records over HTTP.
+
+        A topic is southbound metadata that ADR 0028 deletes from the served
+        datamodel. An INFO line carrying it hands a peer the bypass route the
+        projection withholds, over the same web server, one URL away. The topic
+        belongs at DEBUG, which the feed's handler never buffers.
+        """
+        formatter = self._formatter(caplog)
+
+        [node] = formatter.deserialize(1.5)
+        formatter.deserialize(2.5)
+        formatter.serialize([node])
+
+        info = [r.getMessage() for r in caplog.records if r.levelname == "INFO"]
+        assert info, "the test proves nothing if nothing logged at INFO"
+        assert not any("belt/speed" in message for message in info)
+        # The topic is not lost, only relevelled: a developer who asks for DEBUG still gets it.
+        debug = [r.getMessage() for r in caplog.records if r.levelname == "DEBUG"]
+        assert any("belt/speed" in message for message in debug)
+        assert any("belt/speed_set" in message for message in debug)
 
     def test_an_outbound_setpoint_always_logs_at_info(self, caplog):
         """Outbound logs at INFO every time. The asymmetry with inbound is deliberate.
@@ -698,4 +726,4 @@ class TestActivityLogging:
 
         records = [r for r in caplog.records if r.levelname == "INFO"]
         assert len(records) == 2
-        assert all("belt/speed_set" in r.message for r in records)
+        assert all("Belt1 hasConveyorSpeed" in r.message for r in records)

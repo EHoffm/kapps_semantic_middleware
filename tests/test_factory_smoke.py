@@ -507,12 +507,11 @@ class DrivenBelt:
     field_id: str
     """What the board needs back to identify the same parameter on a later call."""
 
-    position: str
-    """Which belt of the unit the board offered -- "left" or "right". Every topic of that
-    belt is a pure function of it (ADR 0023's scheme), so both directions are derivable."""
-
-    set_topic: str
-    """The MQTT topic that command travels on, derived rather than guessed."""
+    label: str
+    """How this belt's speed names itself in a feed line -- ``ConnectionMetadata.label``'s
+    ``"<holder fragment> <property fragment>"``, derived from what the board reported rather
+    than guessed. Both directions of this one parameter carry it, so it identifies *which*
+    belt a line is about; the ``<-`` / ``->`` marker is what says which way the value went."""
 
     middleware: str
     """The unit's own middleware -- the process whose feed carries both directions."""
@@ -554,16 +553,12 @@ def _drive_a_belt(factory: FactoryHandle, value: float) -> DrivenBelt:
         f"{[p['field_id'] for p in unit['parameters']]}",
     )
 
-    # ConveyorBelt2_left -> left. The board reports which belt it is offering, and the topic
-    # that belt's setpoint travels on is a pure function of that (ADR 0023's scheme, minted by
-    # seed._mqtt_topic), so the expected line is derived rather than guessed.
+    # ConveyorBelt2_left. The board reports which belt it is offering, and a feed line names
+    # that belt exactly as `ConnectionMetadata.label` builds it -- the holder's fragment, a
+    # space, the property's fragment -- so the expected line is derived rather than guessed.
     holder = speed["holder_iri"]
     local_name = holder.rsplit("#", 1)[-1]
-    assert "_" in local_name, (
-        f"the board offered a belt named {local_name}, which carries no position, so no "
-        "setpoint topic can be derived from it"
-    )
-    position = local_name.rsplit("_", 1)[-1]
+    label = f"{local_name} {seed.TU_HAS_CONVEYOR_SPEED.fragment}"
 
     driven = httpx.post(
         _url(station, "api/set"),
@@ -587,8 +582,7 @@ def _drive_a_belt(factory: FactoryHandle, value: float) -> DrivenBelt:
         unit_iri=unit_iri,
         holder_iri=holder,
         field_id=speed["field_id"],
-        position=position,
-        set_topic=seed._mqtt_topic(SURVIVING_UNIT, "ConveyorBelt", position, "speed_set"),
+        label=label,
         middleware=_first(
             [
                 u["middleware"]["address"]
@@ -625,17 +619,31 @@ class TestTheFeedCarriesRealLines:
         # for every value the belt publishes back, and the ramp passes through this setpoint on
         # its way there, so the direction is what separates the command from its echo.
         #
-        # Matched as one `topic = value` run rather than as three loose fragments, because a
-        # unit's two topics differ by a suffix -- `.../speed` is a prefix of `.../speed_set` --
-        # so fragments that merely co-occur in a line cannot tell the two apart.
+        # **The topic is deliberately absent from what this matches.** #76 moved it to DEBUG
+        # precisely so it cannot reach this feed, which is served over HTTP -- ADR 0028 strips
+        # a broker topic from the datamodel, and a log line one URL along was handing it back.
+        # The label pins which belt, and the marker pins the leg on its own: `->` is written in
+        # one place, `MQTTParameterFormatter.serialize`, and `<-` in one other. The topic was
+        # never what separated them -- this test's earlier probe had already found the pair
+        # matching loosely in either direction, because `.../speed` is a prefix of
+        # `.../speed_set`.
+        #
+        # Probed by mutation at the value instead, which is the mutation that means something
+        # here: both markers legitimately carry this label in a healthy run, so flipping one in
+        # the test asserts the other true fact rather than a false one. Matched against a value
+        # nobody drove, both this and the loop test below fail with the message written for
+        # them.
+        #
+        # That the value really travels on the right *topic* is asserted elsewhere in this
+        # file, by `_traffic_flows` subscribing to the real broker rather than by reading a log.
         carried, seen = _feed_search(
             belt.middleware,
-            ("->", f"{belt.set_topic} = {SETPOINT}"),
+            (f"{belt.label} -> {SETPOINT}",),
             FEED_TIMEOUT_SECONDS,
         )
         assert carried, (
-            f"unit {SURVIVING_UNIT}'s feed never carried the setpoint {SETPOINT} on "
-            f"{belt.set_topic}. In {FEED_TIMEOUT_SECONDS}s it carried {len(seen)} line(s): "
+            f"unit {SURVIVING_UNIT}'s feed never carried the setpoint {SETPOINT} for "
+            f"{belt.label}. In {FEED_TIMEOUT_SECONDS}s it carried {len(seen)} line(s): "
             f"{seen[-10:]}"
         )
 
@@ -674,34 +682,34 @@ class TestTheLoopCloses:
         belt climbs rather than jumps), it publishes its *actual* speed on its own topic, and
         the unit middleware's read leg observes that and logs it.
 
-        Matched on ``<-`` and the **actual** topic, never the set topic: the two differ by one
-        ``_set`` segment, and matching the wrong one would find the command again and prove
-        nothing about the device. A second setpoint, distinct from the one the class above
-        drove, so a line already in the feed cannot satisfy this.
+        **``<-`` is what makes this the device's reading rather than the command.** That
+        marker is written in one place, ``MQTTParameterFormatter.deserialize``, which runs
+        only on a message arriving *from* the broker -- so a matching line cannot have been
+        produced by the PUT that started this. A second setpoint, distinct from the one the
+        class above drove, so a line already in the feed cannot satisfy this either.
 
-        The topic is matched as one ``topic = value`` run rather than as loose fragments, and
-        that is load-bearing here rather than tidiness: ``.../speed`` is a **prefix** of
-        ``.../speed_set``, so a line about the command contains the actual topic too. Probed --
-        with the fragments loose, swapping ``<-`` for ``->`` still passed, which means the
-        topic was proving nothing and the direction marker was carrying the whole test.
+        This used to match the belt's **actual** topic as well, and take some care not to
+        match the set topic, since ``.../speed`` is a prefix of ``.../speed_set``. #76 took
+        the topic out of the feed -- it is southbound metadata, and the feed is HTTP -- and
+        the care went with it: the marker identifies the leg on its own, because one function
+        writes each. The label pins which belt. See the probe recorded on the test above:
+        flipping the marker is not the discriminating mutation here, since both legs carry
+        this label in a healthy run; driving a value nobody commanded is, and it fails.
         """
         belt = _drive_a_belt(factory, SECOND_SETPOINT)
-        actual_topic = seed._mqtt_topic(
-            SURVIVING_UNIT, "ConveyorBelt", belt.position, "speed"
-        )
 
-        # `= 2.5` rather than a parsed float: the ramp snaps exactly onto its target on the
+        # `2.5` rather than a parsed float: the ramp snaps exactly onto its target on the
         # last step (#83, "float-exact at rest"), so the settled publish reprs as the setpoint
         # itself, while every value on the way there is visibly short of it.
         observed, seen = _feed_search(
             belt.middleware,
-            ("<-", f"{actual_topic} = {SECOND_SETPOINT}"),
+            (f"{belt.label} <- {SECOND_SETPOINT}",),
             LOOP_TIMEOUT_SECONDS,
         )
         assert observed, (
-            f"unit {SURVIVING_UNIT}'s middleware never observed its belt reach "
-            f"{SECOND_SETPOINT} on {actual_topic}. The command was accepted, so the break is "
-            f"on the way back: the publish out, the PLC's ramp, or the read leg. In "
+            f"unit {SURVIVING_UNIT}'s middleware never observed {belt.label} reach "
+            f"{SECOND_SETPOINT}. The command was accepted, so the break is on the way back: "
+            f"the publish out, the PLC's ramp, or the read leg. In "
             f"{LOOP_TIMEOUT_SECONDS}s the feed carried {len(seen)} line(s): {seen[-10:]}"
         )
 

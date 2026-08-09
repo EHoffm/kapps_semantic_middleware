@@ -42,11 +42,13 @@ Service (`svc:address`). A peer middleware is a device as far as the seam is con
 Recognition and the **Projection** run identically in every combination, so connection metadata
 never reaches a **served datamodel** (ADR 0020, ADR 0032, ADR 0033).
 
-That claim is about the serving path, and it is deliberately narrower than "never leaks". The
-`/activity` feed goes around the projection: `connectors/mqtt_binding.py` logs the topic at INFO,
-and `activity.py` widens the package logger to INFO and serves those lines. So a broker topic is
-visible on `/activity` while the same instance's datamodel routes correctly hide it. That is
-**issue #76, open**, and it is a real hole in the demo's teaching rather than a subtlety.
+**The log path is held to the same claim** (issue #76, closed 2026-08-09). `activity.py` serves
+this package's INFO records over HTTP, which for a while made `/activity` a way around the
+projection: `connectors/mqtt_binding.py` logged each value with its topic at INFO. The topic now
+sits at DEBUG on both legs, and the feed's handler filters at its own level rather than the
+logger's — so widening the package logger to DEBUG for a debugging session still cannot put a
+topic on the page. The INFO line names the parameter and the value, which is what the feed is
+for.
 _Avoid_: Flavour, retired by ADR 0032. **Role**, retired by ADR 0033 — an instance has no property
 beyond its wiring. Consumer and Resource middleware as *defined* terms; they survive only as informal
 shorthand. Read-only mode, because a **Mode** is `resource`/`server`/`watchdog`, and a connector

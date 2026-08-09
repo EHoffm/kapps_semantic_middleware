@@ -90,7 +90,9 @@ sees only the payload.
 Connection metadata never travels in either direction: it is what the connector *uses*, and it
 is projected out of every **datamodel** served northbound (ADR 0028).
 
-One exception exists today, and it is a defect rather than a design: the `/activity` feed serves
-log lines, and this connector logs its topic at INFO. So a topic reaches a browser through
-`/activity` while the datamodel routes on the same instance correctly hide it. Tracked as
-**issue #76**.
+**That holds on the log path too**, which it did not until issue #76 closed. The `/activity` feed
+serves this package's INFO records over HTTP, and this connector used to log its topic there — so
+a topic reached a browser while the datamodel routes on the same instance hid it. Both legs now
+log the topic at DEBUG and the value at INFO. The feed's handler filters at INFO on its own
+account, so a developer who turns the package logger down to DEBUG gets the topic in the terminal
+and still not on the page.

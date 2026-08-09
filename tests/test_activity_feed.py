@@ -208,6 +208,51 @@ def test_a_log_record_reaches_the_feed(fake_middleware):
     assert records[0].logger == "kapps_semantic_middleware.connectors.mqtt_binding"
 
 
+def test_no_mqtt_topic_reaches_the_feed_even_at_debug(fake_middleware):
+    """#76. The feed serves this package's records over HTTP. Not one may carry a topic.
+
+    ADR 0028 deletes a parameter's broker address and topics from the served
+    datamodel, so that a peer learns values from the middleware rather than the
+    route around it. The feed is the same web server, one URL along, and it used
+    to print the topic on every value that moved.
+
+    Driven through the real ``MQTTParameterFormatter`` rather than a hand-written
+    log line, because the claim is about what this package emits and not about
+    what a test can phrase. The package logger is forced to DEBUG first: the
+    protection has to be the handler's own level, which the feed sets, and not
+    the logger level, which the host application owns and may widen at will.
+    """
+    from pydantic import create_model
+
+    from kapps_semantic_middleware.connectors.mqtt_binding import MQTTParameterFormatter
+    from kapps_semantic_middleware.vocabulary import INF
+
+    enable_activity_feed(fake_middleware)
+    logging.getLogger("kapps_semantic_middleware").setLevel(logging.DEBUG)
+
+    fields: dict[str, Any] = {INF.hasValue.lined: (list, [])}
+    model = create_model("AnonymousClass", **fields)
+    formatter = MQTTParameterFormatter(
+        model_type=model,
+        northbound_facets={},
+        value_field=INF.hasValue.lined,
+        parameter_label="Belt1 hasConveyorSpeed",
+        topic="unit1/ConveyorBelt/1/speed",
+        set_topic="unit1/ConveyorBelt/1/speed_set",
+    )
+
+    [node] = formatter.deserialize(1.5)
+    formatter.deserialize(2.5)
+    formatter.deserialize(2.5)
+    formatter.serialize([node])
+
+    served = [record.message for record in fake_middleware.activity_feed.snapshot()]
+    assert served, "the test proves nothing if the feed stayed empty"
+    assert not any("unit1/" in message for message in served)
+    # The parameter and its value still reach the feed -- this is a relevel, not a silencing.
+    assert any("Belt1 hasConveyorSpeed" in message for message in served)
+
+
 def test_enabling_lowers_the_package_logger_to_the_handler_level():
     """Enable the feed. Lower `kapps_semantic_middleware` level so records exist.
 

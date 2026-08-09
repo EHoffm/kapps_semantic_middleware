@@ -210,8 +210,12 @@ class TestConsecutiveChangesReachPersistence:
         # value assertions above, which are what this test is actually for.
         # `test_semantic_connectors.py::test_a_repeated_inbound_value_drops_to_debug` owns
         # that property directly and deterministically.
+        # `args[-1]` rather than a fixed index: the value is the last argument on both the
+        # inbound and the outbound line, and #76 dropped the topic out of the INFO record, so
+        # what used to sit at index 2 now sits at index 1. Read from the end and this survives
+        # the next such change too.
         logged_values = [
-            r.args[2]
+            r.args[-1]
             for r in caplog.records
             if r.levelno == logging.INFO and "ConveyorBelt1_left hasConveyorSpeed" in r.message
         ]
