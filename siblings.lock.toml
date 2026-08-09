@@ -6,7 +6,13 @@
 # content. Whatever commit happens to be checked out there is what gets imported.
 #
 # That is why a fresh machine does not reproduce a working demo: every sibling below is on an
-# unmerged feature branch, and a `main` checkout of any of them fails differently.
+# unmerged branch, and a `main` checkout of any of them fails differently.
+#
+# **All three now carry the same branch name, `dev_semantic_middleware`** (2026-08-09). Each one
+# points at exactly the commit this project is known to run against, so setting a machine up is
+# the same command three times instead of three different feature-branch names to look up. The
+# feature branches they came from still exist and are unchanged; this is a stable name in front
+# of them, not a replacement.
 #
 # Verify a machine with:  python scripts/check_siblings.py
 # Set one up with:        see SIBLINGS.md
@@ -15,7 +21,7 @@
 path = "../graph_db_interface"
 url = "https://github.com/SAWeindel/graph_db_interface.git"
 remote = "saweindel"
-branch = "fix/bnode-identity-in-triples-update"
+branch = "dev_semantic_middleware"
 commit = "da08373"
 why = """
 Blank-node identity in `triples_update`. `main` (2.0.1) mints a fresh blank node per
@@ -29,8 +35,8 @@ alone will not find it.
 path = "../kapps_ogm"
 url = "https://github.com/SAWeindel/kapps_ogm.git"
 remote = "origin"
-branch = "feature/merge-anonymous-ranges"
-commit = "7be21a2"
+branch = "dev_semantic_middleware"
+commit = "e447562"
 why = """
 Conjunctive `rdfs:range`. `main` (0.1.2) raises on a class with several declared ranges, which
 blocks both additive extension of the fixed `tu:` properties and ranges on the interface
@@ -42,8 +48,8 @@ defect; this branch is the fix.
 path = "../aas_middleware_inf"
 url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git"
 remote = "origin"
-branch = "rest_generalization"
-commit = "a6edf1c"
+branch = "dev_semantic_middleware"
+commit = "5c6daec"
 why = """
 Two sync-layer correctness fixes made under root ADR 0001's bugfix allowance, both recorded in
 that repo's CHANGELOG: #92 (a persistence-write notification was formatted before it was narrowed,

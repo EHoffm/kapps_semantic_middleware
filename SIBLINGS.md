@@ -35,8 +35,17 @@ wrong commit produces a different failure**:
 | `kapps_ogm` 0.1.2 | the seed step fails on the `isOccupied` range |
 | `aas_middleware_inf` | northbound sync goes deaf; ramping belts freeze short of their setpoint |
 
-**All three siblings are on unmerged feature branches.** A checkout of `main` in any of them does
-not reproduce a working demo, and never has. `siblings.lock.toml` is now the record of what does.
+**All three siblings are on unmerged branches.** A checkout of `main` in any of them does
+not reproduce a working demo, and never has. `siblings.lock.toml` is the record of what does.
+
+**Since 2026-08-09 all three carry the same branch name: `dev_semantic_middleware`.** Its head in
+each repository is exactly the commit this project is known to run against, so setup is one
+command repeated three times rather than three feature-branch names to look up. Every one of them
+is pushed, so a second machine can obtain them — which was not true before: `kapps_ogm` was on a
+local-only branch, and `aas_middleware_inf` had uncommitted changes nobody else could see.
+
+The feature branches those commits came from still exist and are untouched. This is a stable
+name in front of them, not a replacement for them.
 
 ## Setting up
 
@@ -52,10 +61,10 @@ git clone git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_mi
 git -C graph_db_interface remote add saweindel https://github.com/SAWeindel/graph_db_interface.git
 git -C graph_db_interface fetch saweindel
 
-# 3. Check out the pinned branch in each sibling.
-git -C graph_db_interface checkout fix/bnode-identity-in-triples-update
-git -C kapps_ogm          checkout feature/merge-anonymous-ranges
-git -C aas_middleware_inf checkout rest_generalization
+# 3. Check out the pinned branch in each sibling. All three carry the same name.
+git -C graph_db_interface checkout dev_semantic_middleware
+git -C kapps_ogm          checkout dev_semantic_middleware
+git -C aas_middleware_inf checkout dev_semantic_middleware
 
 # 4. Verify before building anything.
 cd kapps_semantic_middleware
