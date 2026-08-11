@@ -142,13 +142,20 @@ class MQTTParameterFormatter:
         # every value on a fixed interval (0.2–0.5s per topic), so logging every message at
         # INFO makes the feed unreadable within seconds. A periodic republish of an unchanged
         # value is noise. A change is news.
+        #
+        # The topic never appears at INFO. `enable_activity_feed` serves this package's INFO
+        # records over HTTP, and a topic is southbound metadata the northbound projection
+        # deletes from the served datamodel -- so an INFO line carrying it would hand a peer,
+        # over the same web server, the bypass route the projection exists to withhold. The
+        # topic stays at DEBUG, which the feed's handler filters out at its own level whatever
+        # the logger is set to.
         label = self.parameter_label or "parameter"
         topic = self.topic or "topic"
-        if _is_a_change(value, self._last_value):
-            logger.info("%s <- %s = %r", label, topic, value)
+        changed = _is_a_change(value, self._last_value)
+        logger.debug("%s <- %s = %r%s", label, topic, value, "" if changed else " (unchanged)")
+        if changed:
+            logger.info("%s <- %r", label, value)
             self._last_value = value
-        else:
-            logger.debug("%s <- %s = %r (unchanged)", label, topic, value)
         return [self.model_type(**fields)]
 
     def serialize(self, data: Any) -> bytes:
@@ -191,10 +198,12 @@ class MQTTParameterFormatter:
             cursor[leaf] = value
             result = json.dumps(envelope).encode()
         # Log outbound setpoints unconditionally at INFO. A setpoint is always news. It is
-        # an operator or a controller acting, so no change-detection here.
+        # an operator or a controller acting, so no change-detection here. The set topic
+        # stays at DEBUG for the same reason the inbound topic does -- see `deserialize`.
         label = self.parameter_label or "parameter"
         topic = self.set_topic or "set_topic"
-        logger.info("%s -> %s = %r", label, topic, value)
+        logger.debug("%s -> %s = %r", label, topic, value)
+        logger.info("%s -> %r", label, value)
         return result
 
     def _extract(self, data: Any) -> Any:

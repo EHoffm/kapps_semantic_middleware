@@ -3,6 +3,8 @@ name = "kapps-semantic-middleware"
 version = "0.1.0"
 description = "Semantic middleware for industrial data integration, built on aas-middleware"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 authors = [{ name = "Etienne Hoffmann", email = "etienne.hoffmann@kit.edu" }]
 maintainers = [{ name = "Etienne Hoffmann", email = "etienne.hoffmann@kit.edu" }]

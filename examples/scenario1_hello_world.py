@@ -62,7 +62,25 @@ def step_1_seed_clean_repository(db: GraphDB) -> None:
 
 
 def _start_server(middleware: SemanticMiddleware, port: int) -> tuple[uvicorn.Server, threading.Thread]:
-    """Start a middleware server and wait until its startup registration completes."""
+    """Start a middleware server and wait until its startup registration completes.
+
+    **The thread is what costs you the signal handlers, and it is why the caller must stop
+    this server explicitly.** Uvicorn installs signal handlers only on the main thread
+    (``uvicorn/server.py``: *"Signals can only be listened to from the main thread"*), so off
+    it, SIGTERM and SIGINT never reach the ASGI lifespan, and the library's three
+    ``on_shutdown`` callbacks -- deregistration among them (ADR 0007) -- never run. A daemon
+    thread then dies with the process without unwinding, leaving an ``svc:address`` published
+    for a process that is gone.
+
+    A walkthrough script wants to keep doing things after the server is up, which is why the
+    thread is here at all. The mitigation is ``_stop`` below: ``server.should_exit = True`` and
+    join. Uvicorn runs its own lifespan shutdown off that flag with no signal involved, so the
+    callbacks fire. **Copy this helper and you inherit both halves** -- if the copy never calls
+    ``_stop``, it leaks a Service on every run (#65).
+
+    ``demo/transferunits/`` takes the other route: one process per middleware with uvicorn on
+    the main thread, which turns the callbacks on for free (ADR 0029).
+    """
     config = uvicorn.Config(middleware.app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
