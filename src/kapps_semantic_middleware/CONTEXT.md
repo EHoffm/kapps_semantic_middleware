@@ -3,6 +3,12 @@
 One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others
 (SHACL Interop, Example Scenarios, Module Requirements).
 
+> This file defines the **vocabulary**. For how to *use* the mechanisms it names — and for the
+> constraints that do not surface in a type signature — read `AGENTS.md` and the `docs/mechanics/`
+> set beside it. The `ADR 00nn` citations below are provenance markers for the development
+> repository; those records are not distributed, and `docs/mechanics/` is their shipped
+> replacement.
+
 The reference implementation of the KAPPS architecture's Semantic Middleware Runtime: the
 Interface-Layer component that lets a piece of Python code running on or next to a shopfloor
 resource (or as a standalone service) expose functionality through the knowledge graph, and

@@ -115,6 +115,24 @@ dev-mode-dirs = ["src", "."]
 "src/kapps_semantic_middleware" = "kapps_semantic_middleware"
 "demo" = "kapps_semantic_middleware/demonstrations"
 
+[tool.hatch.build.targets.wheel.force-include]
+# The agent-facing documentation lives at the repo root, so without this it reaches someone
+# browsing GitHub and nobody else. A consuming subproject's agent reads its dependency in
+# site-packages, where it would otherwise find `CONTEXT.md` -- which cites decision records by
+# number throughout -- and none of the pages written to replace them. That is backwards: the
+# citations arrive and their replacements do not.
+#
+# Costs nothing on balance. These three are 84 KB; the 32 ADRs that stop shipping alongside this
+# (#129) are 268 KB, so the wheel gets ~184 KB smaller while gaining the useful half.
+#
+# Deliberately NOT a release-time edit. `prepare_release.py`'s manifest edits all remove facts
+# that are only true in a dev checkout (sibling path sources, the ADR genre); this one is equally
+# true in both trees. Release-only would also mean the wheel #129's cross-check builds and tests
+# is not the wheel that ships.
+"AGENTS.md" = "kapps_semantic_middleware/AGENTS.md"
+"CONTEXT-MAP.md" = "kapps_semantic_middleware/CONTEXT-MAP.md"
+"docs/mechanics" = "kapps_semantic_middleware/docs/mechanics"
+
 [tool.uv.sources]
 aas-middleware = { path = "../aas_middleware_inf", editable = true }
 kapps-ogm = { path = "../kapps_ogm", editable = true }
