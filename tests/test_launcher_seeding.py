@@ -129,7 +129,7 @@ class TestEnvironmentHandling:
 
         captured_env: dict = {}
 
-        def fake_popen(cmdline, *, stdout, stderr, env, text, bufsize):
+        def fake_popen(cmdline, *, stdout, stderr, env, text, bufsize, creationflags):
             captured_env.update(env)
             proc = MagicMock()
             proc.pid = 12345
@@ -149,7 +149,7 @@ class TestEnvironmentHandling:
         needs its own echo point, distinct from the background-thread drain used by
         middleware/controller (#85)."""
 
-        def fake_popen(cmdline, *, stdout, stderr, env, text, bufsize):
+        def fake_popen(cmdline, *, stdout, stderr, env, text, bufsize, creationflags):
             proc = MagicMock()
             proc.pid = 12345
             proc.stdout = iter(["Panel running on http://127.0.0.1:54321/\n"])
