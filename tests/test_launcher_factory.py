@@ -6,6 +6,7 @@ in for a subprocess.Popen, and the graph lookup is monkeypatched.
 
 from __future__ import annotations
 
+import subprocess
 import time
 from unittest.mock import MagicMock
 
@@ -246,6 +247,71 @@ class TestOutput:
         factory.children = [ctrl]
 
         assert factory.output(0, "controller") == ["controller booted"]
+
+
+class TestTerminateAndWait:
+    """This class tests _terminate_and_wait uses the Popen API and enforces graceful-before-forced."""
+
+    def test_graceful_exit_no_kill_needed(self):
+        proc = MagicMock()
+        proc.poll.return_value = 0
+        proc.wait.side_effect = None
+        child = ChildHandle(proc=proc, pid=4242, kind="middleware", unit_index=1, cmdline="x")
+
+        stragglers = launcher._terminate_and_wait([child], timeout=5.0)
+
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()
+        assert stragglers == []
+
+    def test_straggler_is_killed_and_reported(self):
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=5.0)
+        child = ChildHandle(proc=proc, pid=4242, kind="middleware", unit_index=1, cmdline="x")
+
+        stragglers = launcher._terminate_and_wait([child], timeout=5.0)
+
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
+        assert stragglers == ["middleware[unit=1]"]
+
+    def test_graceful_before_forced_ordering(self):
+        proc = MagicMock()
+        proc.poll.return_value = None
+        proc.wait.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=5.0)
+        child = ChildHandle(proc=proc, pid=4242, kind="middleware", unit_index=1, cmdline="x")
+
+        call_order = []
+        proc.terminate.side_effect = lambda: call_order.append("terminate")
+        proc.kill.side_effect = lambda: call_order.append("kill")
+
+        launcher._terminate_and_wait([child], timeout=5.0)
+
+        assert call_order == ["terminate", "kill"]
+
+
+class TestRequestStop:
+    """This class tests _request_stop dispatches to the correct platform call."""
+
+    def test_posix_branch_calls_terminate(self, monkeypatch):
+        proc = MagicMock()
+        monkeypatch.setattr(launcher.sys, "platform", "linux")
+
+        launcher._request_stop(proc)
+
+        proc.terminate.assert_called_once()
+        proc.send_signal.assert_not_called()
+
+    def test_windows_branch_calls_send_signal_ctrl_break(self, monkeypatch):
+        proc = MagicMock()
+        monkeypatch.setattr(launcher.sys, "platform", "win32")
+        monkeypatch.setattr(launcher.signal, "CTRL_BREAK_EVENT", 999, raising=False)
+
+        launcher._request_stop(proc)
+
+        proc.send_signal.assert_called_once_with(999)
+        proc.terminate.assert_not_called()
 
 
 class TestEchoAddressLines:

@@ -39,6 +39,10 @@ _PACKAGE = __package__ or "demo.transferunits"
 
 SLOW_AFTER_SECONDS = 30.0
 WATCH_INTERVAL_SECONDS = 1.0
+if sys.platform == "win32":
+    _NEW_PROCESS_GROUP = subprocess.CREATE_NEW_PROCESS_GROUP
+else:
+    _NEW_PROCESS_GROUP = 0
 
 
 @dataclass
@@ -124,6 +128,7 @@ def _spawn_plc(unit_index: int) -> ChildHandle:
         env=env,
         text=True,
         bufsize=1,
+        creationflags=_NEW_PROCESS_GROUP,
     )
 
     handle = ChildHandle(proc=proc, pid=proc.pid, kind="plc", unit_index=unit_index, cmdline=cmdline_str)
@@ -171,6 +176,7 @@ def _spawn_middleware(unit_index: int) -> ChildHandle:
         env=os.environ.copy(),
         text=True,
         bufsize=1,
+        creationflags=_NEW_PROCESS_GROUP,
     )
 
     return ChildHandle(proc=proc, pid=proc.pid, kind="middleware", unit_index=unit_index, cmdline=cmdline_str)
@@ -189,6 +195,7 @@ def _spawn_controller() -> ChildHandle:
         env=os.environ.copy(),
         text=True,
         bufsize=1,
+        creationflags=_NEW_PROCESS_GROUP,
     )
 
     return ChildHandle(proc=proc, pid=proc.pid, kind="controller", unit_index=None, cmdline=cmdline_str)
@@ -233,42 +240,55 @@ def probe_and_seed(units: int, force: bool = False) -> None:
     print(f"Seeded factory with {units} unit(s).", flush=True)
 
 
-def _wait_for_exit(pids: List[int], timeout: float) -> List[int]:
-    """Poll every pid until it exits or the timeout runs out. Returns the pids still alive."""
-    deadline = time.time() + timeout
-    pending = set(pids)
+def _request_stop(proc: subprocess.Popen) -> None:
+    """Send the platform's graceful stop signal to a child process.
 
-    while pending and time.time() < deadline:
-        for pid in list(pending):
-            try:
-                reaped_pid, _ = os.waitpid(pid, os.WNOHANG)
-                if reaped_pid == pid:
-                    pending.discard(pid)
-            except ChildProcessError:
-                pending.discard(pid)
-        if pending:
-            time.sleep(0.1)
-
-    return list(pending)
+    On POSIX this is SIGTERM via ``proc.terminate()``. On Windows this is
+    ``CTRL_BREAK_EVENT`` via ``proc.send_signal()`` — not ``proc.terminate()``,
+    because on Windows ``terminate()`` calls ``TerminateProcess``, which is
+    forced and gives the child no chance to run shutdown handlers. By contrast,
+    ``CTRL_BREAK_EVENT`` is delivered as SIGBREAK, which uvicorn handles
+    gracefully, allowing deregistration before exit (ADR 0029). Each child is
+    spawned in its own process group (``_NEW_PROCESS_GROUP``) so the event
+    reaches that child alone and never the launcher. This mirrors the "graceful
+    then forced" shape that SIGTERM provides on POSIX.
+    """
+    if sys.platform == "win32":
+        proc.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        proc.terminate()
 
 
 def _terminate_and_wait(handles: List[ChildHandle], timeout: float) -> List[str]:
-    """SIGTERM every handle, wait up to timeout, then SIGKILL and report stragglers."""
+    """Graceful-stop every handle, wait up to timeout, then force-kill and report stragglers.
+
+    ``_request_stop`` sends the platform's graceful stop (SIGTERM / CTRL_BREAK) to every handle
+    first, so they shut down in parallel; the wait shares one ``timeout`` deadline across them.
+    A child still alive past the deadline is force-killed (``Popen.kill``: SIGKILL /
+    TerminateProcess) and reported. The whole path uses the cross-platform ``subprocess.Popen``
+    API, so it holds on Windows, where the old ``signal.SIGKILL`` did not exist.
+    """
     for h in handles:
         try:
-            os.kill(h.pid, signal.SIGTERM)
-        except ProcessLookupError:
+            _request_stop(h.proc)
+        except (ProcessLookupError, OSError):
             continue
 
-    still_alive = _wait_for_exit([h.pid for h in handles], timeout)
+    deadline = time.time() + timeout
+    for h in handles:
+        remaining = max(0.0, deadline - time.time())
+        try:
+            h.proc.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            pass
 
     stragglers = []
     for h in handles:
-        if h.pid in still_alive:
+        if h.proc.poll() is None:
             try:
-                os.kill(h.pid, signal.SIGKILL)
-                os.waitpid(h.pid, 0)
-            except (ProcessLookupError, ChildProcessError):
+                h.proc.kill()
+                h.proc.wait(timeout=timeout)
+            except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
                 pass
             stragglers.append(f"{h.kind}[unit={h.unit_index}]" if h.unit_index else h.kind)
     return stragglers
