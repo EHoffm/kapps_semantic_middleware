@@ -21,6 +21,33 @@ uv sync
 pytest -m "not live"               # the tier that needs no GraphDB
 ```
 
+## Run a local GraphDB (Docker)
+
+Docker is needed only for the examples and the demo, never for the library itself.
+
+1. Start GraphDB and create the repository:
+   ```bash
+   cd docker && docker compose up -d
+   ```
+   GraphDB runs on http://localhost:7200. The `kapps-demo` repository is created automatically.
+   This works identically on Linux, macOS, and Windows.
+
+2. Set the environment variables:
+   ```bash
+   cp .env.example .env
+   ```
+   Or export the four `GRAPHDB_*` variables manually. The examples and demo read them to reach
+   GraphDB.
+
+3. Reset or isolate the repository:
+   ```bash
+   docker compose down -v
+   ```
+   This wipes the throwaway repository. The demo re-seeds it on the next run.
+
+**Warning:** Never point `GRAPHDB_URL` or `GRAPHDB_REPOSITORY` at a shared GraphDB instance.
+The demo wipes whatever repository you name.
+
 ## Where things are
 
 | | |
@@ -51,4 +78,4 @@ mock PLC, one per middleware instance, plus a controller that discovers every un
 and drives it over REST. See [`demo/transferunits/README.md`](demo/transferunits/README.md).
 
 It needs a reachable GraphDB (`GRAPHDB_*` in the environment) and will write to the repository those
-variables point at.
+variables point at. For a one-command local option, see [Run a local GraphDB (Docker)](#run-a-local-graphdb-docker).
