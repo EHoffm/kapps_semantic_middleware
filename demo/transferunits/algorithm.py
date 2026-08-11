@@ -145,8 +145,12 @@ def _barrier_snapshot(controller: Controller) -> Dict[str, Tuple[bool, ...]]:
     return snapshot
 
 
-def build_view_query() -> str:
-    """Build the SPARQL SELECT query that finds live, even-indexed TransferUnits.
+def build_view_query(parity: str = "all") -> str:
+    """Build the SPARQL SELECT query that finds live TransferUnits, optionally by parity.
+
+    ``parity`` is "all" (default -- every live unit, no parity filter), "even", or "odd".
+    The station board's quick-select dropdown reaches this through
+    :func:`named_view_queries`, and "all" is the board's default view.
 
     This realizes ADR 0033 step 1: the view is the query, and the query text supplies
     the domain class and any heuristic. ``Controller.view()`` runs this verbatim and
@@ -169,17 +173,49 @@ def build_view_query() -> str:
     Returns:
         A SPARQL ``SELECT ?resource`` query string.
     """
+    if parity == "all":
+        heuristic = ""
+    else:
+        target = "0" if parity == "even" else "1"
+        heuristic = (
+            'BIND(STRAFTER(STR(?resource), "#TransferUnit") AS ?suffix)\n'
+            '        FILTER(?suffix != "" &&\n'
+            f'               (xsd:integer(?suffix) - 2 * FLOOR(xsd:integer(?suffix) / 2)) = {target})'
+        )
     return f"""
     PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
     SELECT ?resource WHERE {{
         ?resource a <{seed.TRANSFER_UNIT_CLASS}> .
         ?svc <{SVC.isServiceOf}> ?resource .
         ?svc <{SVC.address}> ?addr .
-        BIND(STRAFTER(STR(?resource), "#TransferUnit") AS ?suffix)
-        FILTER(?suffix != "" &&
-               (xsd:integer(?suffix) - 2 * FLOOR(xsd:integer(?suffix) / 2)) = 0)
+        {heuristic}
     }}
     """
+
+
+def named_view_queries() -> list[dict[str, str]]:
+    """Prewritten view heuristics for the station board's quick-select dropdown (#82).
+
+    All TransferUnits first (the board's default), then the even/odd parity pair, then a
+    "Custom" starter the Control Expert edits into their own heuristic. Each entry is a
+    display name and a full ``SELECT ?resource`` query the board drops verbatim into its
+    query field.
+    """
+    custom_starter = f"""
+    PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+    SELECT ?resource WHERE {{
+        ?resource a <{seed.TRANSFER_UNIT_CLASS}> .
+        ?svc <{SVC.isServiceOf}> ?resource .
+        ?svc <{SVC.address}> ?addr .
+        # Add your own FILTER here.
+    }}
+    """
+    return [
+        {"name": "All TransferUnits", "query": build_view_query("all")},
+        {"name": "Even-indexed TransferUnits", "query": build_view_query("even")},
+        {"name": "Odd-indexed TransferUnits", "query": build_view_query("odd")},
+        {"name": "Custom — edit your own", "query": custom_starter},
+    ]
 
 
 def unit_class_scope() -> ClassScope:

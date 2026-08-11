@@ -94,7 +94,7 @@ from kapps_semantic_middleware.vocabulary import INF, SVC
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_POLL_INTERVAL_SECONDS = 2.0
+DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 """Default cadence of the northbound read leg's poll loop. See the module docstring's
 "REST has no push" section for why this value is provisional rather than measured."""
 
