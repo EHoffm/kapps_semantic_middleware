@@ -70,8 +70,14 @@ def _spec(repo: Path, commit: str) -> dict:
 
 
 def _advice(repo: Path, commit: str) -> str:
-    """What the tool would print about a sibling pinned at `commit`, as one string."""
-    return "\n".join(check_siblings.repair("sibling", _spec(repo, commit), repo))
+    """What the tool would print about a sibling pinned at `commit`, as one string.
+
+    Goes through `check` rather than calling `repair` with a hand-built problem list, because
+    the pairing of the two is the thing under test: advice that does not answer the problem
+    that actually fired is the defect this file exists to catch.
+    """
+    spec = _spec(repo, commit)
+    return "\n".join(check_siblings.repair("sibling", spec, check_siblings.check("sibling", spec)))
 
 
 def test_pin_at_branch_tip_advises_a_checkout(sibling: Path) -> None:
@@ -116,6 +122,40 @@ def test_pin_not_on_the_branch_at_all_says_so(sibling: Path, tmp_path: Path) -> 
     assert f"checkout {BRANCH}" not in advice
     assert orphan in advice
     assert BRANCH in advice
+
+
+def test_a_dirty_tree_is_told_to_commit_or_stash(sibling: Path) -> None:
+    """The advice has to answer the problem that actually fired, not the one it can compute.
+
+    HEAD sits exactly on the pin here, so the pin is not the complaint -- the uncommitted change
+    is. Reasoning only about pin-versus-tip produces a confident sentence about the lock being
+    out of date while the developer's real problem goes unmentioned.
+    """
+    pin = _git(sibling, "rev-parse", "--short", "HEAD").strip()
+    _commit(sibling, "second")
+    _git(sibling, "push", "-q", "origin", BRANCH)
+    _git(sibling, "reset", "-q", "--hard", pin)
+    (sibling / "file.txt").write_text("edited, not committed")
+
+    advice = _advice(sibling, pin)
+
+    assert "stash" in advice or "commit or" in advice
+    assert "the lock is what is out of date" not in advice
+
+
+def test_an_unpushed_pin_is_told_to_push(sibling: Path) -> None:
+    """A pin nobody else can fetch. The answer is `git push`, and it is not about the branch.
+
+    The checkout is on the right branch at the right commit; what is wrong is that the commit
+    exists on one machine only. Advice that calls the pin foreign sends the reader hunting for
+    a rewrite that never happened.
+    """
+    pin = _commit(sibling, "second")
+
+    advice = _advice(sibling, pin)
+
+    assert "push" in advice
+    assert "rewritten" not in advice
 
 
 def test_missing_checkout_points_at_the_setup_document(tmp_path: Path) -> None:
