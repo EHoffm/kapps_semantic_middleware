@@ -85,6 +85,26 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"{BOLD}State loaded: v{version} from {branch} @ {sha[:7]}{OFF}")
 
+    # `cross_checked` is absent from a state file written before the field existed; treat that
+    # as unknown rather than as false, so an old file does not read as an alarm (#158).
+    cross_checked = state.get("cross_checked")
+    if cross_checked is False:
+        print(
+            f"{YELLOW}This release was prepared with --skip-cross-check. The wheel was never "
+            f"built, installed or probed.{OFF}"
+        )
+        if args.yes:
+            # --yes exists to skip the typed confirmation, which is also the only place a
+            # human would read the warning above. Refusing here is the fail-closed reading:
+            # the two ways of not checking must not combine into publishing unexamined.
+            print(
+                f"{RED}Refusing --yes on an un-cross-checked release. Re-run "
+                f"prepare_release.py without --skip-cross-check, or confirm interactively."
+                f"{OFF}",
+                file=sys.stderr,
+            )
+            return 1
+
     # Step 2: Refuse a moved tip.
     # The review must be a gate, not a ceremony. If the branch tip has moved since
     # preparation, the tree a human approved is not the tree about to be published.
