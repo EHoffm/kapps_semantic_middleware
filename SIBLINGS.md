@@ -93,13 +93,37 @@ file documents.
 It also fails on **unpushed** commits and on a **dirty** working tree. A commit that exists only on
 one machine reproduces nowhere, so from every other machine's point of view it does not exist.
 
+**When that does not happen, the check says so instead of misdirecting you.** A pin left behind its
+own branch used to draw an unconditional *"fetch, then check the branch out"* — which lands on the
+branch tip, not on the pin, so the check stayed red and now reported a different sha. The tool was
+telling you to do something it would then reject. It now names both commits and says which of the
+two is out of date, because when a branch has moved past its pin the answer is always to advance
+the pin here, never to change the checkout (#152).
+
+**A sibling's manifest change lands in `uv.lock`, and that change gets committed.** The path source
+carries no revision, so every resolve re-reads the sibling's *current* metadata: change a dependency
+there and the next `uv run` here rewrites `uv.lock` with a diff nobody typed. That diff is real —
+the lock now describes what this project actually installs — so it belongs in the same commit as the
+pin that caused it. Do not `git restore` it. `prepare_release.py` refuses to run against a modified
+tracked file deliberately, and clearing that gate by hand before every release is how a gate stops
+being believed.
+
+The first instance was #103's `httpx = "^0.27.0"` in `aas_middleware_inf`: two lines under the
+`aas-middleware 0.2.6` block, returning after every `git restore`. Both this and the pin drift above
+expire with #120, which replaces the path sources with published version pins and deletes
+`siblings.lock.toml` and `check_siblings.py` with them.
+
 ## The environment
 
 Separately from the siblings, the integration tests and the demo need a reachable GraphDB:
 
 ```bash
-GRAPHDB_URL=...  GRAPHDB_USERNAME=...  GRAPHDB_PASSWORD=...  GRAPHDB_REPOSITORY=...
+GRAPHDB_URL=...  GRAPHDB_USERNAME=...  GRAPHDB_PASSWORD=...
 ```
+
+Three, not four. The repository is named in code — `Tests` for the suite, `kapps-demo` for the demo
+and the examples — and a `GRAPHDB_REPOSITORY` in your environment is ignored rather than obeyed,
+because these are the parts that wipe whatever they connect to (#146).
 
 Tests that need it are marked `live` automatically and skip when those are unset, so
 `pytest -m "not live"` runs anywhere.
