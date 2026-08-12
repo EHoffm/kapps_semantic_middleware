@@ -17,24 +17,13 @@ import json
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
-import io
 from pathlib import Path
 
-# Import the collaborator module; it lives in the same directory.
+# Import the collaborator modules; they live in the same directory.
 import release_checks
-
-GREEN, YELLOW, RED, DIM, BOLD, OFF = (
-    "\033[32m",
-    "\033[33m",
-    "\033[31m",
-    "\033[2m",
-    "\033[1m",
-    "\033[0m",
-)
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
+import release_plumbing
+from release_plumbing import BOLD, DIM, GREEN, OFF, RED, REPO_ROOT, YELLOW
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -163,8 +152,8 @@ def main(argv: list[str] | None = None) -> int:
     # commits and no checked-out branch. Handle it: determine the default branch name,
     # and if there are no commits, the first release commit becomes the root.
     clone_dir = Path(tempfile.mkdtemp(prefix="publish-release-"))
-    clone_succeeded = False
     commit_made = False
+    published = False
 
     try:
         print(f"{BOLD}Cloning public repo...{OFF}")
@@ -174,7 +163,6 @@ def main(argv: list[str] | None = None) -> int:
             text=True,
             check=True,
         )
-        clone_succeeded = True
 
         # Determine the default branch name.
         # In an empty repo, symbolic-ref HEAD fails; fall back to init.defaultBranch config.
@@ -232,14 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     item.unlink()
 
-        # Export and extract.
-        archive_proc = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "archive", sha],
-            capture_output=True,
-            check=True,
-        )
-        with tarfile.open(fileobj=io.BytesIO(archive_proc.stdout), mode="r|") as archive:
-            archive.extractall(clone_dir, filter="data")
+        release_plumbing.export_tree(REPO_ROOT, sha, clone_dir)
 
         print(f"Tree copied from dev repo @ {sha[:7]}.")
 
@@ -250,11 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         violations = release_checks.run_all(clone_dir, args.repo)
         if violations:
             print(f"{RED}Release checks failed:{OFF}", file=sys.stderr)
-            for violation in violations:
-                print(
-                    f"  {violation.check}  {violation.path}  {violation.detail}",
-                    file=sys.stderr,
-                )
+            release_plumbing.print_violations(violations)
             return 1
         print("All five checks passed.")
 
@@ -308,7 +285,14 @@ def main(argv: list[str] | None = None) -> int:
                 check=True,
             ).stdout.strip()
 
-            file_count = len(list(clone_dir.glob("*"))) - 1  # exclude .git
+            # Every file about to be published, at any depth -- not the top-level entry
+            # count, which for this tree is about a dozen. This is the one number a human
+            # reads before approving an irreversible push, so it has to mean what it says.
+            shipped_files = [
+                path
+                for path in clone_dir.rglob("*")
+                if path.is_file() and ".git" not in path.relative_to(clone_dir).parts
+            ]
 
             if not args.yes:
                 print(f"\n{BOLD}Ready to publish:{OFF}")
@@ -316,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  Branch:   {default_branch}")
                 print(f"  Version:  {version}")
                 print(f"  Commit:   {commit_subject}")
-                print(f"  Files:    {file_count}")
+                print(f"  Files:    {len(shipped_files)}")
                 print(f"\n{DIM}Type the version string to confirm:{OFF}")
                 confirm = input(f"  Enter '{version}': ")
                 if confirm != version:
@@ -339,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             print("Pushed branch and tag.")
 
-        # Step 10: Report.
+        # Step 10: Report, and retire the state file.
         print(f"\n{GREEN}Release published.{OFF}")
         if not args.dry_run:
             print(f"Commit: {tip_sha}")
@@ -350,28 +334,33 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"{DIM}That is the last irreversible act.{OFF}")
 
+            # The state file describes a release that has now happened. Leaving it invites a
+            # second run against a tip that is already public, which the moved-tip guard
+            # would wave straight through -- the tip has not moved.
+            #
+            # This has to happen here rather than after the `finally` block: every path out
+            # of the `try` returns, so nothing below the block can ever run. The first draft
+            # put it there, and the deletion silently never happened.
+            state_path.unlink()
+            print(f"{DIM}State file deleted.{OFF}")
+
+        published = True
         return 0
 
     finally:
-        # Clean up the temporary clone unless the run failed after committing.
-        # In that case, leave it so a human can inspect what went wrong.
-        if clone_succeeded:
-            if commit_made:
-                # Failed after commit; preserve for inspection.
-                if not args.dry_run:
-                    print(f"\n{YELLOW}Clone preserved for inspection: {clone_dir}{OFF}")
-            else:
-                # No commit made; safe to clean up.
-                shutil.rmtree(clone_dir)
+        # Preserve the clone in exactly one state: a real publish that failed after the
+        # commit was made. That is the only case where a human has something to inspect and
+        # nothing else records it.
+        #
+        # Every other exit cleans up, including a failed clone -- `mkdtemp` created the
+        # directory before git ever ran, so there is always something to remove -- and
+        # including a successful publish, which the first draft misreported as a failure
+        # ("Clone preserved for inspection") on every single run because `commit_made` is
+        # true by then.
+        if commit_made and not published and not args.dry_run:
+            print(f"\n{YELLOW}Clone preserved for inspection: {clone_dir}{OFF}")
         else:
-            # Clone failed; nothing to clean.
-            pass
-
-    # After successful non-dry-run publish, delete the state file.
-    # It describes a release that has now happened; leaving it invites a second run.
-    if not args.dry_run and commit_made:
-        state_path.unlink()
-        print(f"{DIM}State file deleted.{OFF}")
+            shutil.rmtree(clone_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

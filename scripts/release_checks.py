@@ -3,8 +3,8 @@
 
 Run from the repo root:
 
-    python scripts/release_checks.py [TREE]                 # checks 3-5 over TREE (default ".")
-    python scripts/release_checks.py [TREE] --origin URL    # additionally run checks 1-2
+    python scripts/release_checks.py [TREE]                 # checks 2-5 over TREE (default ".")
+    python scripts/release_checks.py [TREE] --origin URL    # additionally run check 1
 
 Exit code 0 if all checks pass, 1 otherwise. Nothing is modified.
 
@@ -309,6 +309,25 @@ def run_tree_checks(tree: Path) -> list[Violation]:
     return violations
 
 
+def run_ci_checks(repo: Path) -> list[Violation]:
+    """Run checks 2-5 — the backstop the release repo's own CI runs (#129).
+
+    Check 1 (remotes) is the one check a CI checkout cannot answer: the runner's remote is
+    whatever `actions/checkout` configured, and says nothing about where a release was pushed
+    from. Check 2 is different, and is exactly why this runner exists rather than
+    ``run_tree_checks``: a commit made **directly in the public repo** never passes the
+    pre-push gate, and an agent trailer on it is the leak the gate cannot see. The workflow
+    checks out with ``fetch-depth: 0`` so the whole history is there to scan.
+
+    On a tree that is not a git repository, ``check_trailers`` finds no history and returns
+    nothing, so this degrades to the tree scans rather than failing.
+    """
+    violations: list[Violation] = []
+    violations.extend(check_trailers(repo))
+    violations.extend(run_tree_checks(repo))
+    return violations
+
+
 def run_all(repo: Path, expected_origin: str) -> list[Violation]:
     """Run all five checks (1-5).
 
@@ -317,8 +336,7 @@ def run_all(repo: Path, expected_origin: str) -> list[Violation]:
     """
     violations: list[Violation] = []
     violations.extend(check_remotes(repo, expected_origin))
-    violations.extend(check_trailers(repo))
-    violations.extend(run_tree_checks(repo))
+    violations.extend(run_ci_checks(repo))
     return violations
 
 
@@ -327,14 +345,22 @@ def main(argv: list[str] | None = None) -> int:
 
     Supports::
 
-        python scripts/release_checks.py [TREE]                    # checks 3-5
+        python scripts/release_checks.py [TREE]                    # checks 2-5
         python scripts/release_checks.py [TREE] --origin URL       # checks 1-5
+
+    Without ``--origin`` this is the release repo's CI backstop, which #129 specifies as
+    checks 2-5. Only check 1 needs the expected origin, so only check 1 waits for it.
     """
     parser = argparse.ArgumentParser(
         description="Hygiene checks for a public release tree.",
     )
     parser.add_argument("tree", nargs="?", default=".", help="Tree to check (default: .)")
-    parser.add_argument("--origin", dest="origin", default=None, help="Expected origin URL")
+    parser.add_argument(
+        "--origin",
+        dest="origin",
+        default=None,
+        help="Expected origin URL. Adds check 1; without it, checks 2-5 run.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -344,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.origin:
         violations = run_all(tree, args.origin)
     else:
-        violations = run_tree_checks(tree)
+        violations = run_ci_checks(tree)
 
     for v in violations:
         print(f"{v.check}  {v.path}  {v.detail}")

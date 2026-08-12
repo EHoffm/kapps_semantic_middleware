@@ -76,6 +76,11 @@ RULES: tuple[Rule, ...] = (
         "Tests prepare_release, which does not ship.",
     ),
     Rule(
+        "tests/test_publish_release.py",
+        False,
+        "Tests publish_release, which does not ship, and which has no public counterpart.",
+    ),
+    Rule(
         "scripts/release_checks.py",
         True,
         "The one file out of scripts/ that ships: .github/workflows/hygiene.yml runs it.",

@@ -17,32 +17,21 @@ import argparse
 import json
 import os
 import re
-import io
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import tomllib
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Import the three collaborator modules; they live in the same directory.
+# Import the four collaborator modules; they live in the same directory.
 import release_allowlist
 import release_checks
 import release_edits
-
-GREEN, YELLOW, RED, DIM, BOLD, OFF = (
-    "\033[32m",
-    "\033[33m",
-    "\033[31m",
-    "\033[2m",
-    "\033[1m",
-    "\033[0m",
-)
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
+import release_plumbing
+from release_plumbing import BOLD, DIM, GREEN, OFF, RED, REPO_ROOT, YELLOW
 
 
 PACKAGE = "kapps_semantic_middleware"
@@ -172,20 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     # Create staging directory.
     staging = Path(tempfile.mkdtemp(prefix="prepare-release-"))
     try:
-        # Step 2: Stage the tree via git archive.
-        # This gives exactly the tracked files at that commit, with no .git and no untracked
-        # residue — a stray local file cannot reach a release.
-        archive_proc = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "archive", args.from_branch],
-            capture_output=True,
-            check=True,
-        )
-        # Extracted with the stdlib rather than an external `tar`, which Windows has no
-        # guarantee of. Map #108 makes Windows first-class for everything a user touches, and
-        # a release mechanism that dies before its first hygiene check is the worst place to
-        # discover a missing tool.
-        with tarfile.open(fileobj=io.BytesIO(archive_proc.stdout), mode="r|") as archive:
-            archive.extractall(staging, filter="data")
+        # Step 2: Stage the tree at the branch being released from.
+        release_plumbing.export_tree(REPO_ROOT, args.from_branch, staging)
 
         # Gather all relative paths in staging for the allowlist.
         relpaths = [
@@ -236,6 +213,11 @@ def main(argv: list[str] | None = None) -> int:
             "# This workflow is the backstop for commits made directly in the public repo.\n"
             "# The pre-push gate in the dev checkout cannot see those commits, so the public\n"
             "# repo needs its own CI that runs the same hygiene checks.\n"
+            "#\n"
+            "# Checks 2-5. Only check 1 (remotes) is left out: a runner's remote is whatever\n"
+            "# actions/checkout configured and says nothing about the release. Check 2 is the\n"
+            "# reason this file exists, and fetch-depth: 0 below is what lets it read the\n"
+            "# whole history rather than the one commit a shallow checkout would give it.\n"
             "\n"
             "name: hygiene\n"
             "\n"
@@ -336,11 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         violations = release_checks.run_tree_checks(staging)
         if violations:
             print(f"{RED}Release checks failed:{OFF}", file=sys.stderr)
-            for violation in violations:
-                print(
-                    f"  {violation.check}  {violation.path}  {violation.detail}",
-                    file=sys.stderr,
-                )
+            release_plumbing.print_violations(violations)
             return 1
         print("All release checks passed.")
 
@@ -368,17 +346,24 @@ def main(argv: list[str] | None = None) -> int:
                 "GIT_WORK_TREE": str(staging),
             }
 
-            def git_plumbing(*args: str) -> str:
+            def git_scratch_index(*command: str) -> str:
+                """Run git against the scratch index and the staging work tree.
+
+                Named for the index it writes rather than for git's porcelain/plumbing
+                split, and taking `*command` rather than `*args`: the enclosing `args` is
+                the argparse namespace the rest of `main` reads, and shadowing it here made
+                two different things answer to one name in the same function.
+                """
                 return subprocess.run(
-                    ["git", "-C", str(REPO_ROOT), *args],
+                    ["git", "-C", str(REPO_ROOT), *command],
                     env=git_env,
                     capture_output=True,
                     text=True,
                     check=True,
                 ).stdout.strip()
 
-            git_plumbing("add", "-A")
-            tree_sha = git_plumbing("write-tree")
+            git_scratch_index("add", "-A")
+            tree_sha = git_scratch_index("write-tree")
 
             # Parent is the branch being released from, so the release branch reads as a diff
             # against it -- which is the whole point of stopping here for review.
@@ -389,10 +374,10 @@ def main(argv: list[str] | None = None) -> int:
                 check=True,
             ).stdout.strip()
 
-            tip_sha = git_plumbing(
+            tip_sha = git_scratch_index(
                 "commit-tree", tree_sha, "-p", parent_sha, "-m", f"release: v{args.version}"
             )
-            git_plumbing("update-ref", "refs/heads/prepare-release", tip_sha)
+            git_scratch_index("update-ref", "refs/heads/prepare-release", tip_sha)
             index_file.unlink(missing_ok=True)
 
             # Step 9: push the review branch to the DEV repo. Force is acceptable here and
@@ -418,7 +403,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Tip SHA: {tip_sha}")
         print(f"{DIM}Reminder: .release-state.json must be in .gitignore.{OFF}")
         print("\nNext command after review:")
-        print("  python scripts/publish_release.py")
+        # Spelled with `--repo`, which publish_release.py requires. Printed without it, this
+        # line was a command that could only fail -- the handoff between the two halves of
+        # the mechanism, and the one instruction a releaser is most likely to paste blind.
+        print("  python scripts/publish_release.py --repo https://github.com/circularfactory/<repo>.git")
 
         return 0
 

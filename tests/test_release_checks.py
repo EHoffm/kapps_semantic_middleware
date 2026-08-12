@@ -16,12 +16,12 @@ Prose about a banned string is still the banned string.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 import release_checks
+from conftest import git_in as _git
 from release_checks import (
     Violation,
     check_paths,
@@ -29,31 +29,11 @@ from release_checks import (
     check_remotes,
     check_secrets,
     check_trailers,
+    run_ci_checks,
     run_tree_checks,
 )
 
 ORIGIN = "https://github.com/circularfactory/kapps_semantic_middleware.git"
-
-
-def _git(repo: Path, *args: str) -> str:
-    """Run git in ``repo``, with an identity so commits work on a bare runner."""
-    out = subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.email=test@example.invalid",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "commit.gpgsign=false",
-            *args,
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return out.stdout
 
 
 @pytest.fixture
@@ -346,12 +326,12 @@ def test_check_references_ignores_the_git_directory(repo: Path) -> None:
 
 
 # --------------------------------------------------------------------------------------
-# The runner the CI backstop calls.
+# The two runners: the tree scans, and what the CI backstop actually calls.
 # --------------------------------------------------------------------------------------
 
 
-def test_run_tree_checks_covers_three_four_and_five_but_not_the_git_ones(repo: Path) -> None:
-    """The public workflow runs checks 2-5; 1 is about a local clone and means nothing in CI."""
+def test_run_tree_checks_covers_three_four_and_five_only(repo: Path) -> None:
+    """The scans that need no git history. `prepare_release.py` calls this on a bare tree."""
     (repo / "SIBLINGS.md").write_text("x\n")
     (repo / "leak.md").write_text(release_checks.PRIVATE_HOST + "\n")
     (repo / "dead.md").write_text(release_checks.DEAD_REFERENCE_DIRS[1] + "\n")
@@ -361,6 +341,25 @@ def test_run_tree_checks_covers_three_four_and_five_but_not_the_git_ones(repo: P
 
 def test_run_tree_checks_is_empty_on_a_clean_tree(repo: Path) -> None:
     assert run_tree_checks(repo) == []
+
+
+def test_run_ci_checks_adds_the_trailer_scan_to_the_tree_scans(repo: Path) -> None:
+    """#129: the public workflow runs checks 2-5, and 2 is the reason it exists.
+
+    A commit made directly in the public repo bypasses the pre-push gate entirely, so its
+    trailer is visible only from inside the release repo's own CI.
+    """
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "chore: tidy\n\nGenerated with a tool")
+    (repo / "SIBLINGS.md").write_text("x\n")
+
+    checks_fired = {v.check for v in run_ci_checks(repo)}
+    assert checks_fired == {"trailers", "paths"}
+
+
+def test_run_ci_checks_leaves_the_remote_alone(repo: Path) -> None:
+    """Check 1 stays out: a runner's remote is whatever actions/checkout configured."""
+    _git(repo, "remote", "set-url", "origin", "https://example.invalid/wrong.git")
+    assert run_ci_checks(repo) == []
 
 
 def test_this_repos_own_scripts_dir_holds_the_checker_where_the_allowlist_expects_it() -> None:

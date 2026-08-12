@@ -14,34 +14,15 @@ literal — every planted violation is built from the checker's own constants.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 import release_checks
+from conftest import git_in as _git
 from release_checks import main
 
 ORIGIN = "https://github.com/circularfactory/kapps_semantic_middleware.git"
-
-
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.email=test@example.invalid",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "commit.gpgsign=false",
-            *args,
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
 
 
 @pytest.fixture
@@ -131,7 +112,8 @@ def test_probe_five_a_bare_directory_mention_fails_the_run(clean_release: Path) 
 
 
 # --------------------------------------------------------------------------------------
-# The CI backstop runs without --origin, so checks 1 and 2 are out of scope there.
+# The CI backstop runs without --origin. #129 specifies it as checks 2-5: only check 1 is
+# out of scope there, because only check 1 needs to know where the release came from.
 # --------------------------------------------------------------------------------------
 
 
@@ -140,10 +122,41 @@ def test_without_an_origin_the_tree_checks_still_run(clean_release: Path) -> Non
     assert main([str(clean_release)]) == 1
 
 
+def test_without_an_origin_an_agent_trailer_still_fails_the_run(clean_release: Path) -> None:
+    """The check the backstop exists for, and the one it used to skip.
+
+    A commit made **directly in the public repo** never meets the pre-push gate, so its
+    trailer can only be caught here. Running the backstop as checks 3-5 left the one leak
+    that reaches the public log unwatched -- and it is the leak a hurried hotfix committed
+    through the GitHub web UI would produce.
+    """
+    (clean_release / "hotfix.md").write_text("committed straight into public\n")
+    _git(clean_release, "add", "-A")
+    _git(
+        clean_release,
+        "commit",
+        "-q",
+        "-m",
+        "fix: a typo\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+    )
+    assert main([str(clean_release)]) == 1
+
+
 def test_without_an_origin_a_bad_remote_is_not_examined(clean_release: Path) -> None:
     """`hygiene.yml` passes no origin: a CI checkout's remote says nothing about the release."""
     _git(clean_release, "remote", "add", "dev", "https://example.invalid/x.git")
     assert main([str(clean_release)]) == 0
+
+
+def test_a_tree_that_is_not_a_repository_still_gets_its_tree_checks(tmp_path: Path) -> None:
+    """No history to scan is not a violation: check 2 finds nothing and the scans still run."""
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    (loose / "README.md").write_text("# not a repo\n")
+    assert main([str(loose)]) == 0
+
+    (loose / "SIBLINGS.md").write_text("x\n")
+    assert main([str(loose)]) == 1
 
 
 def test_the_run_reports_every_violation_not_only_the_first(
