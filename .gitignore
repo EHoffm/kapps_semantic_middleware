@@ -15,3 +15,8 @@ build/
 # Sphinx build output (#116). The docs site is deployed as a Pages artifact,
 # never committed -- the release repo keeps one clean commit of source only.
 docs/site/_build/
+# The scenario pages are the notebooks themselves, copied in from examples/ by
+# conf.py at build time (#141). Generated, so never committed -- same rule as the
+# build output above.
+docs/site/scenarios/hello-world.ipynb
+docs/site/scenarios/door.ipynb
