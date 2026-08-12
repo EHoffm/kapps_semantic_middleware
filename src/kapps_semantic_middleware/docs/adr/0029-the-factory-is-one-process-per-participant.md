@@ -270,3 +270,41 @@ broker dies with its unit* true with no teardown code at all.
 
 **The port is `18830 + unit_index`** (ADR 0030 as amended). The launcher hands each PLC its own
 `--broker-port`; `_start_broker`, `BROKER_HOST` and `BROKER_PORT` leave `launcher.py`.
+
+## Amendment, 2026-08-12, ticket #146 — the environment carries credentials, not the repository
+
+**`GRAPHDB_REPOSITORY` is no longer read by anything the launcher starts.** The section above says
+`GraphDB.from_env()` reads `GRAPHDB_URL` / `GRAPHDB_USERNAME` / `GRAPHDB_PASSWORD` /
+`GRAPHDB_REPOSITORY`, *"so the environment is the established credential transport"*. Three of those
+four remain the credential transport. The fourth stops being transport at all: every process the
+launcher starts now names its repository in code, through
+`kapps_semantic_middleware.credentials.graphdb_for`, and a `GRAPHDB_REPOSITORY` in the environment is
+ignored.
+
+**Why.** The launcher's injection is what makes the asymmetry above real — the children that talk to
+the graph receive credentials, and a PLC cannot reach the graph even by accident. But the same
+injection carried a variable that names *which repository to destroy*, and the demo wipes and
+re-seeds whatever it is handed (`seeding.clear_repository`). On a shared server that is somebody
+else's data: the KIT instance this project develops against holds eleven repositories, among them
+`Production` and a colleague's thesis. A process boundary that reliably delivers the wrong
+repository name is worse than one that delivers nothing.
+
+**What is unchanged.** `_strip_graphdb_env` still removes every `GRAPHDB_*` key from a PLC's
+environment. The asymmetry this ADR demonstrates is enforced exactly as before; the stripped set
+simply no longer includes a variable that would have been ignored anyway. Credentials still travel
+by environment, topology still travels by command line, and a person can still copy-paste one
+printed line and run that process alone.
+
+**This is a stopgap, and cleaning it up is a decision already taken.** Naming the repository in code
+buys one property — *never touch a repository the caller did not name* — and no more. It does not
+give a run a clean slate, because the suite still clears at the *start* of a run rather than the end,
+so the previous run's data sits in the repository until the next one begins. Meeting the full
+requirement (start clean, never touch user data, leave no trace) needs a disposable repository per
+run, created and dropped around the work.
+
+That is deliberately **not** built here. `graph_db_interface` has no repository lifecycle at all — no
+create, no delete — so a disposable repository means raw GraphDB REST plus `ROLE_ADMIN`, which would
+make server-admin rights a prerequisite for running tests. The library is also mid-restructure into
+`kapps-triplestore-interface` (root ADR 0001's sibling policy; ticket #133), so the lifecycle belongs
+to that interface rather than to this consumer. Ticket #149 owns it and is blocked on #133. Until it
+lands, this ADR's transport story is: **credentials by environment, repository by code.**
