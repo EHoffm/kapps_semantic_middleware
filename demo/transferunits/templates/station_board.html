@@ -23,6 +23,10 @@
   .view-frame button { padding:7px 14px; border:1px solid var(--line); background:#fff;
                        border-radius:5px; font:inherit; cursor:pointer; }
   .view-frame button:hover { background:#f0f0ee; }
+  .preset-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .preset-row label { font-size:13px; color:var(--muted); }
+  .preset-row select { padding:6px 10px; border:1px solid var(--line); border-radius:5px;
+                       font:inherit; background:#fff; cursor:pointer; }
   .error-line { font-size:12px; margin-top:8px; min-height:18px; }
   .error-line.error { color:var(--warn); font-weight:600; }
   .error-line.note { color:var(--muted); }
@@ -92,6 +96,10 @@
 
   <div class="card view-frame" data-teach="view-box">
     <div>
+      <div class="preset-row">
+        <label for="query-preset">Prewritten query</label>
+        <select id="query-preset" onchange="applyPreset()"></select>
+      </div>
       <pre>SELECT ?resource WHERE {
   ?resource a tu:TransferUnit ; svc:hasService ?s .
   ?s svc:address ?a .</pre>
@@ -126,6 +134,7 @@
 
 <script>
 const TEACH = __TEACH__;
+const QUERIES = __QUERIES__;
 let frozen = false;
 let dirty = false;
 let lastState = null;
@@ -174,6 +183,22 @@ async function resetQuery() {
   await post('/api/view/reset');
   dirty = false;
   poll();
+}
+
+function populatePresets() {
+  // Fill the dropdown from the injected QUERIES list (algorithm.named_view_queries()).
+  const sel = document.getElementById('query-preset');
+  sel.innerHTML = '<option value="" disabled selected>— choose a prewritten query —</option>'
+    + QUERIES.map((item, i) => `<option value="${i}">${item.name}</option>`).join('');
+}
+
+function applyPreset() {
+  // Drop the chosen prewritten query into the field. dirty=true so the next poll does not
+  // overwrite it; the Control Expert still presses "run" to apply it.
+  const i = parseInt(document.getElementById('query-preset').value, 10);
+  if (Number.isNaN(i)) return;
+  document.getElementById('query-text').value = QUERIES[i].query;
+  dirty = true;
 }
 
 async function setMode(mode) {
@@ -398,7 +423,8 @@ async function poll() {
 
 idle();
 bind(); // Binds the static view-box/algo-bar/show-iris hovers before the first poll.
+populatePresets(); // Fill the prewritten-query dropdown from the injected QUERIES list.
 poll();
-setInterval(poll, 2000);
+setInterval(poll, 1000);
 </script>
 
