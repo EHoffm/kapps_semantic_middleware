@@ -81,6 +81,12 @@ RULES: tuple[Rule, ...] = (
         "Tests publish_release, which does not ship, and which has no public counterpart.",
     ),
     Rule(
+        "tests/test_check_siblings.py",
+        False,
+        "Tests check_siblings.py, which does not ship. Its own name carries the fragment "
+        "check 3 bans, so shipping it would fail the hygiene gate as well as fail on import.",
+    ),
+    Rule(
         "scripts/release_checks.py",
         True,
         "The one file out of scripts/ that ships: .github/workflows/hygiene.yml runs it.",
