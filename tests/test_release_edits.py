@@ -137,6 +137,38 @@ def test_the_source_docstring_is_still_valid_python(tree: Path) -> None:
     compile(edited.read_text(), str(edited), "exec")
 
 
+def test_the_released_readme_describes_the_end_state_not_the_dev_world(tree: Path) -> None:
+    """The README must wind forward to what is true at release, not what is true today.
+
+    By release every dependency resolves from PyPI. A README still describing editable path
+    checkouts on unmerged branches -- and telling a stranger they need private KIT GitLab
+    access -- would be false on the day it shipped, and correcting it would cost a whole
+    second release. No hygiene check catches this: check 3 bans the *files*, and nothing bans
+    a shipped file from talking about them.
+    """
+    apply_all(tree)
+    readme = (tree / "README.md").read_text()
+
+    for dev_only in ("SIBLINGS.md", "check_siblings.py", "editable path checkout", "GitLab"):
+        assert dev_only not in readme, f"released README still mentions {dev_only!r}"
+
+    assert "pip install kapps-semantic-middleware" in readme
+
+
+def test_no_shipped_file_names_a_file_that_does_not_ship(tree: Path) -> None:
+    """The general form of the bug above, over every file the edits touch.
+
+    Not a hygiene check yet -- `release_checks.py` itself lists these names in
+    BANNED_PATH_FRAGMENTS, so a content scan would flag the checker. Asserted here instead,
+    where the checker is not in scope.
+    """
+    apply_all(tree)
+    for path in sorted({r.path for r in REWRITES} | {d.path for d in SECTION_DROPS}):
+        text = (tree / path).read_text()
+        for dead in ("SIBLINGS.md", "siblings.lock.toml", "check_siblings.py", "docs/agents/"):
+            assert dead not in text, f"{path} still points at {dead}, which never ships"
+
+
 def test_the_claude_stub_loses_its_link_to_the_excluded_directory(tree: Path) -> None:
     apply_all(tree)
     assert (tree / "CLAUDE.md").read_text().strip() == "See [AGENTS.md](AGENTS.md)."
