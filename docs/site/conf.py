@@ -12,9 +12,50 @@ This config is meant to be **vendored** into ``kapps_ogm`` and
 ``kapps_triplestore_interface`` with only the ``project``/``release`` block and
 the reference pages changed -- the same per-repo rule #110 applied to the
 release scripts, and for the same reason: the three release at their own pace.
+
+One exception to that, for #137: the scenario-notebook block below is specific
+to this repository, which is the only one of the three that has scenario
+notebooks. A vendored copy drops it, rather than carrying a step that would
+raise on a repository with no ``examples/``.
 """
 
+import shutil
 from importlib.metadata import version as _installed_version
+from pathlib import Path
+
+# -- The scenario notebooks -------------------------------------------------
+
+# The two scenario pages ARE their notebooks. #135 put the explanation into the
+# markdown cells rather than around them, so a separate page would do nothing but
+# restate the first cell, and the two copies would drift. Sphinx cannot read a
+# source file from outside its source directory, so the notebooks are copied in
+# here -- before Sphinx enumerates sources, which is why this runs at import time
+# rather than from ``setup(app)``.
+#
+# The copies are generated, so they are gitignored: #116 requires that nothing
+# generated enters git, which is what keeps #110's one-commit-per-release honest.
+# ``examples/`` ships to the release repo (the allowlist admits it), so the copy
+# finds its source there too.
+_NOTEBOOK_PAGES = {
+    "scenario1_hello_world.ipynb": "scenarios/hello-world.ipynb",
+    "scenario2_door.ipynb": "scenarios/door.ipynb",
+}
+
+
+def _copy_notebook_pages() -> None:
+    here = Path(__file__).parent
+    examples = here.parent.parent / "examples"
+    for source_name, destination in _NOTEBOOK_PAGES.items():
+        source = examples / source_name
+        if not source.is_file():
+            raise FileNotFoundError(
+                f"{source} is missing, so the scenario pages cannot be built. "
+                "The docs build reads the notebooks from examples/."
+            )
+        shutil.copyfile(source, here / destination)
+
+
+_copy_notebook_pages()
 
 # -- Project ----------------------------------------------------------------
 
