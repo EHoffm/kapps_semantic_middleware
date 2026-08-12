@@ -99,6 +99,7 @@ RULES: tuple[Rule, ...] = (
     Rule("docs/research/", False, "Working notes."),
     Rule("docs/agents/", False, "Dev-side agent configuration. Named by check 3."),
     Rule("docs/brownfield-gap-analysis.md", False, "A dev-side analysis document."),
+    Rule("docs/docs-site-rollout.md", False, "#137's per-repo procedure for standing a docs site up. Read from a dev checkout."),
     # -- dev-only ------------------------------------------------------------------------------
     Rule("scripts/", False, "check.sh and check_siblings.py drive a dev checkout, and the release scripts run from one."),
     Rule(".github/", False, "Replaced, not copied: the release repo's workflows are tag->PyPI, CI, Pages and hygiene."),
