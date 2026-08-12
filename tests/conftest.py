@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -60,6 +62,36 @@ def methods_at(app, path: str) -> set:
         if getattr(route, "path", None) == path
         for method in route.methods
     }
+
+
+def git_in(repo: Path, *args: str) -> str:
+    """Run git in ``repo`` with a fixed identity and no signing, returning stdout.
+
+    The release tests (#129) each build a throwaway repository to plant a violation in, and
+    every one of them needs the same three ``-c`` overrides: a bare CI runner has no
+    ``user.email``, so ``commit`` fails outright, and a developer with ``commit.gpgsign``
+    set globally would have every test commit reach for a signing key.
+
+    It lives here because three test files needed it and two of them had grown their own
+    copy, which is one copy away from the two drifting on which of them strips stdout.
+    """
+    out = subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout
 
 
 @pytest.fixture(autouse=True)

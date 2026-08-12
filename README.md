@@ -79,3 +79,9 @@ and drives it over REST. See [`demo/transferunits/README.md`](demo/transferunits
 
 It needs a reachable GraphDB (`GRAPHDB_*` in the environment) and will write to the repository those
 variables point at. For a one-command local option, see [Run a local GraphDB (Docker)](#run-a-local-graphdb-docker).
+
+## Acknowledgements
+
+This package is developed as part of the INF subproject of the CRC 1574: Circular Factory for the
+Perpetual Product. This work is therefore supported by the Deutsche Forschungsgemeinschaft (DFG,
+German Research Foundation) [grant-number: SFB-1574-471687386].

@@ -119,6 +119,43 @@ REWRITES: tuple[Rewrite, ...] = (
         "this file entirely, and it is the first thing a stranger reads.",
     ),
     Rewrite(
+        "README.md",
+        "**Read [SIBLINGS.md](SIBLINGS.md) first.** This project depends on three sibling repositories as\n"
+        "editable path checkouts, all three are on unmerged feature branches, and `uv.lock` records none of\n"
+        "that. A `main` checkout of any sibling fails, each in its own way.\n"
+        "\n"
+        "**You need KIT GitLab access to build this today.** One sibling, `aas_middleware_inf`, lives on a\n"
+        "private KIT GitLab instance and has no public mirror. Without an account there, `uv sync` cannot\n"
+        "resolve it, and no amount of local setup works around that.\n"
+        "\n"
+        "```bash\n"
+        "python scripts/check_siblings.py   # verify the three siblings\n"
+        "uv sync\n"
+        'pytest -m "not live"               # the tier that needs no GraphDB\n'
+        "```",
+        "Everything this project needs resolves from PyPI.\n"
+        "\n"
+        "```bash\n"
+        "pip install kapps-semantic-middleware\n"
+        "```\n"
+        "\n"
+        "To also get the scenario notebooks and the TransferUnit factory demo:\n"
+        "\n"
+        "```bash\n"
+        'pip install "kapps-semantic-middleware[demonstrations]"\n'
+        "```\n"
+        "\n"
+        "Working from a checkout instead? `uv sync` installs the same set, and\n"
+        '`pytest -m "not live"` runs the tier that needs no GraphDB.',
+        "The whole setup section described the dev world: three siblings as editable path "
+        "checkouts on unmerged branches, and -- worst -- 'You need KIT GitLab access to build "
+        "this today'. In the public release that is not merely stale, it is the opposite of "
+        "what the release means, and it points at two files that never ship (SIBLINGS.md, "
+        "scripts/check_siblings.py). The released README has to describe the END state, "
+        "because by then every dependency is on PyPI; leaving it would cost a second release "
+        "to say so. Raised by Etienne, 2026-08-12.",
+    ),
+    Rewrite(
         "AGENTS.md",
         "The `CONTEXT.md` files cite architecture decision records as **ADR 00nn** and **root ADR 000n**, and\n"
         "in five places quote a full `docs/adr/....md` or `docs/prd/....md` path. Those records are\n"
