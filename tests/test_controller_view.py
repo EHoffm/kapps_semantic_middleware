@@ -243,12 +243,18 @@ async def _wait_for_field(url: str, value_field: str, expected, timeout: float =
     raise AssertionError(f"{url} never reported {value_field}={expected!r} (last error: {last_error})")
 
 
-def _spawn_peer_middleware(unit_index: int) -> subprocess.Popen:
+def _spawn_peer_middleware(unit_index: int, repository: str) -> subprocess.Popen:
     """Spawn a real unit middleware as a genuine OS process (ADR 0029), never a thread
     in this test process -- see the module docstring for why that distinction is
     load-bearing here, not just a style preference. Wires real MQTT connectors, on its
     own in-process broker (ADR 0034); nothing here needs a PLC, since these tests only
     exercise the REST side.
+
+    ``repository`` must be passed explicitly, and must be the one this test seeded. The
+    child names its repository in code and ignores GRAPHDB_REPOSITORY (issue #146), so
+    inheriting the environment is no longer enough to put both ends in the same graph --
+    without this the peer would join the demo's repository and publish its svc:address
+    where the test is not looking.
     """
     return subprocess.Popen(
         [
@@ -259,6 +265,8 @@ def _spawn_peer_middleware(unit_index: int) -> subprocess.Popen:
             str(unit_index),
             "--port",
             "0",
+            "--repository",
+            repository,
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -311,7 +319,7 @@ async def running_peer_and_controller(graphdb, unit_scope):
     seed.seed_factory(graphdb, seeding_ogm, units=2)
     unit_iri = seed._mint_transfer_unit_iri(2)
 
-    peer_proc = _spawn_peer_middleware(2)
+    peer_proc = _spawn_peer_middleware(2, graphdb.repository)
     try:
         peer_address = await _await_service_address(graphdb, unit_iri)
 

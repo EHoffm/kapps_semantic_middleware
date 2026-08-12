@@ -166,6 +166,11 @@ def _spawn_middleware(unit_index: int) -> ChildHandle:
         str(unit_index),
         "--port",
         "0",
+        # Named, not inherited: the child ignores GRAPHDB_REPOSITORY (issue #146), so a
+        # shared default is the only other thing that could keep parent and child in one
+        # graph -- and a default is exactly what drifts when one side changes.
+        "--repository",
+        DEMO_REPOSITORY,
     ]
     cmdline_str = " ".join(cmdline)
     print(cmdline_str, flush=True)
