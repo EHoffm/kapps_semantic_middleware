@@ -22,7 +22,7 @@ path = "../kapps_triplestore_interface"
 url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/kapps_triplestore_interface.git"
 remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "9c7c303"
+commit = "02cadc3"
 why = """
 Blank-node identity in `triples_update`. The pre-fork 2.0.1 mints a fresh blank node per
 serialization, which orphans a parameter's connection metadata, and rejects a host:port form in
@@ -39,7 +39,7 @@ The rename is applied in the dev tree rather than at release time (unlike the si
 this commit is what both consumers import: `kapps_semantic_middleware` and `kapps_ogm` were both
 swept in the same change, because a half-swept tree does not import.
 
-Moved from c096ba6 to 9c7c303 for the code review's findings. **No package code changed**
+Moved from c096ba6 to 02cadc3 for the code review's findings and the publish repo's name. **No package code changed**
 (`git diff c096ba6..9c7c303 -- kapps_triplestore_interface/` is empty); what moved is the build
 backend, from poetry-core to hatchling, because poetry-core writes only the first entry of
 `authors` into a wheel and so credited one of the library's four authors. The manifest is PEP
