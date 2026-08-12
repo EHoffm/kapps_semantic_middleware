@@ -63,13 +63,21 @@ On atomic exit, the context manager records the terminal `done` or `failed` stat
 raises an exception, the transaction reverts and the status updates to `failed` with provenance.
 
 ```python
-with mw.claim_next(scope=view_scope) as op:
-    # Domain logic executes here
-    # Physical actuation, calculations, etc.
-    result = perform_work(op)
-    op.result = result
+with mw.claim_next(scope=view_scope) as claimed:
+    # Read the Operation's domain fields off `claimed.operation`
+    # (re-fetched under the ClassScope you passed to claim_next).
+    op = claimed.operation
+
+    result = perform_work(op)          # physical actuation, calculations, etc.
+
+    # Assign a str to `claimed.result` to attach a result. On clean exit the
+    # middleware records it as `executionResult`, alongside `executedByWorkflow`
+    # and `executionTimestamp`.
+    claimed.result = result
 # Exit records done/failed and dumps state on failure
 ```
+
+Inside the block, `claimed.operation` is the read side — the Operation materialized under your `ClassScope` — and `claimed.result` is the write side. Setting `claimed.result` is optional; a body that only actuates need not set it.
 
 ## Handover Primitive
 

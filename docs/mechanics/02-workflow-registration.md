@@ -77,7 +77,7 @@ def open_door(direction: str) -> bool:  # Type hints become SHACL shape
 
 The precondition shape describes the arguments the underlying Python function requires. The outcome shape describes the return value. Both are derived automatically — you do not author SHACL by hand for workflow signatures.
 
-A function with no arguments produces an empty precondition shape, which is valid. Currently, only zero-argument and simple-typed functions are exercised in the reference scenarios. Complex nested types may not yet be fully supported in shape generation.
+Arguments are supported: `build_workflow_shape` introspects the signature and mints an argument property per parameter (`{workflow_class_iri}#param_{name}`) plus a `#return` property. A function with no arguments produces an empty precondition shape, which is valid. The note in `shacl_interop/CONTEXT.md` that "only zero-argument functions" are exercised describes test coverage, not a capability limit; the `open_door(direction: str)` example above works. Complex nested types may not yet be fully exercised.
 
 ## Address and Endpoint
 
