@@ -28,7 +28,7 @@ jobs:
       - name: Install ruff
         # Pinned to the floor declared in pyproject.toml's dev group, so CI and a developer's
         # checkout disagree about style only when someone changes that floor deliberately.
-        run: pipx install "ruff>=0.15.15"
+        run: pipx install "ruff==0.15.15"
 
       - name: Lint
         run: ruff check .
