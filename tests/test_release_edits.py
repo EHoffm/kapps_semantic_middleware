@@ -23,6 +23,7 @@ from release_edits import (
     REWRITES,
     SECTION_DROPS,
     RewriteError,
+    SectionDrop,
     apply_all,
     apply_rewrite,
     apply_section_drop,
@@ -246,3 +247,88 @@ def test_edit_pyproject_still_builds_a_wheel(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert list((tmp_path / "dist").glob("*.whl"))
+
+
+def test_a_section_ends_at_a_shallower_heading_not_only_an_equal_one() -> None:
+    """A `##` section followed by a `#` one used to swallow the rest of the file.
+
+    The scan matched only an *exactly* equal rank. Deeper headings were skipped correctly and
+    shallower ones were missed entirely, so the section never found its end, ran to EOF, and
+    the replacement took every remaining line with it -- silently, in a tree whose whole review
+    is a diff. It bites wherever a README and a docs copy sit one heading rank apart. Found
+    during #118's release in the fork; brought back by #158.
+    """
+    text = (
+        "## Doomed\n"
+        "\n"
+        "body that goes\n"
+        "\n"
+        "# Survivor\n"
+        "\n"
+        "this line must still be here\n"
+    )
+    drop = SectionDrop("x.md", "## Doomed", "## Replacement\n\n", "test")
+
+    result = apply_section_drop(text, drop)
+
+    assert "body that goes" not in result
+    assert "# Survivor" in result
+    assert "this line must still be here" in result
+    assert result.startswith("## Replacement")
+
+
+def test_a_section_still_ends_at_an_equal_heading() -> None:
+    """The behaviour that was already correct, pinned so the fix cannot overshoot."""
+    text = "## First\n\nbody\n\n## Second\n\nkept\n"
+    drop = SectionDrop("x.md", "## First", "## New\n\n", "test")
+
+    result = apply_section_drop(text, drop)
+
+    assert "body" not in result
+    assert "## Second" in result and "kept" in result
+
+
+def test_a_deeper_heading_does_not_end_the_section() -> None:
+    """A `###` inside a `##` section is part of it, and must be taken with it."""
+    text = "## Outer\n\nbody\n\n### Inner\n\nalso body\n\n## Next\n\nkept\n"
+    drop = SectionDrop("x.md", "## Outer", "## New\n\n", "test")
+
+    result = apply_section_drop(text, drop)
+
+    assert "body" not in result and "also body" not in result
+    assert "### Inner" not in result
+    assert "## Next" in result and "kept" in result
+
+
+def test_a_hashtag_at_the_start_of_a_line_does_not_end_a_section() -> None:
+    """`#nothing` is not a heading, and ending a section on one truncates the drop.
+
+    The trailing-space check is what separates a heading from a word that happens to start
+    with a hash. Without it this section would end early and leave half its body behind.
+    """
+    text = "## Doomed\n\nbody\n\n#nothashtag not a heading\n\nmore body\n\n# Real\n\nkept\n"
+    drop = SectionDrop("x.md", "## Doomed", "## New\n\n", "test")
+
+    result = apply_section_drop(text, drop)
+
+    assert "body" not in result and "more body" not in result
+    assert "#nothashtag" not in result
+    assert "# Real" in result and "kept" in result
+
+
+def test_apply_all_reads_and_writes_bytes_so_crlf_survives(tree: Path) -> None:
+    """Text mode would rewrite every line ending as a side effect of editing one paragraph.
+
+    A CRLF checkout is normal on Windows, which #113 made a first-class target. The damage is
+    invisible in the working tree and enormous in the diff -- and the diff is the only review a
+    release tree gets.
+    """
+    target = tree / "CONTEXT-MAP.md"
+    target.write_bytes(target.read_bytes().replace(b"\n", b"\r\n"))
+
+    apply_all(tree)
+
+    result = target.read_bytes()
+    assert b"\r\n" in result, "the file lost its CRLF endings entirely"
+    # No bare LF survives except as the second half of a CRLF pair.
+    assert result.replace(b"\r\n", b"") .count(b"\n") == 0

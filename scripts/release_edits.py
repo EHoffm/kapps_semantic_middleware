@@ -223,7 +223,14 @@ class RewriteError(RuntimeError):
 
 
 def apply_section_drop(text: str, drop: SectionDrop) -> str:
-    """Replace ``drop.heading`` and its body, up to the next heading of equal rank or EOF."""
+    """Replace ``drop.heading`` and its body, up to the next heading of equal or shallower rank.
+
+    **Equal or shallower**, not equal alone. Matching only an exactly-equal rank skips deeper
+    headings correctly and misses shallower ones entirely, so a `##` section followed by a `#`
+    one never finds its end: it runs to EOF and the replacement swallows the rest of the file,
+    silently. It bites when a README and a docs copy sit one heading rank apart, which is the
+    shape `aas_middleware_inf` has -- and where #118 found it (#158 brings the fix back).
+    """
     start = text.find(drop.heading)
     if start == -1:
         raise RewriteError(
@@ -234,7 +241,12 @@ def apply_section_drop(text: str, drop: SectionDrop) -> str:
     after = start + len(drop.heading)
     end = len(text)
     for candidate in range(after, len(text)):
-        if text.startswith("\n" + "#" * rank + " ", candidate):
+        if not text.startswith("\n#", candidate):
+            continue
+        hashes = len(text[candidate + 1 :]) - len(text[candidate + 1 :].lstrip("#"))
+        # The trailing space matters: without it `#hashtag` at the start of a line reads as a
+        # rank-1 heading and ends the section early.
+        if hashes <= rank and text.startswith(" ", candidate + 1 + hashes):
             end = candidate + 1
             break
     return text[:start] + drop.replacement + text[end:]
@@ -252,21 +264,51 @@ def apply_rewrite(text: str, rewrite: Rewrite) -> str:
 
 
 def apply_all(tree: Path) -> list[str]:
-    """Apply every rewrite and section drop to ``tree``. Returns the paths changed, sorted."""
+    """Apply every rewrite and section drop to ``tree``. Returns the paths changed, sorted.
+
+    **Bytes in, bytes out, with the line ending carried across.** Three behaviours are possible
+    here and only one of them is right (#158):
+
+    - *Text mode.* Python's universal newlines hand the rewrite ``\\n``, so it matches -- and
+      writing back emits ``\\n`` everywhere, silently converting a CRLF file in full. Invisible
+      in the working tree, enormous in the diff, and the diff is the only review a release tree
+      gets.
+    - *Raw bytes.* Nothing is converted, but the rewrite tables in this module are written with
+      ``\\n`` literals, so on a CRLF file every one of them matches zero times and the release
+      stops with `RewriteError`. Loud rather than silent, which is this module's stated
+      preference -- but it means a Windows checkout cannot cut a release at all, and #113 made
+      Windows a first-class target.
+    - *Normalise, edit, restore.* What happens below. The rewrites see the ``\\n`` they were
+      written against, and the file keeps the endings it arrived with.
+    """
+
+    def read(path: Path) -> tuple[str, bool]:
+        """Return the text with ``\\n`` endings, and whether the file used CRLF."""
+        raw = path.read_bytes().decode("utf-8")
+        return raw.replace("\r\n", "\n"), "\r\n" in raw
+
+    def write(path: Path, text: str, crlf: bool) -> None:
+        """Write ``text`` back, restoring CRLF if that is what the file had."""
+        if crlf:
+            text = text.replace("\n", "\r\n")
+        path.write_bytes(text.encode("utf-8"))
+
     changed: set[str] = set()
 
     for rewrite in REWRITES:
         target = tree / rewrite.path
         if not target.exists():
             raise RewriteError(f"{rewrite.path}: declared in REWRITES but missing from the tree.")
-        target.write_text(apply_rewrite(target.read_text(), rewrite))
+        text, crlf = read(target)
+        write(target, apply_rewrite(text, rewrite), crlf)
         changed.add(rewrite.path)
 
     for drop in SECTION_DROPS:
         target = tree / drop.path
         if not target.exists():
             raise RewriteError(f"{drop.path}: declared in SECTION_DROPS but missing from the tree.")
-        target.write_text(apply_section_drop(target.read_text(), drop))
+        text, crlf = read(target)
+        write(target, apply_section_drop(text, drop), crlf)
         changed.add(drop.path)
 
     return sorted(changed)

@@ -384,3 +384,56 @@ def test_a_run_that_stops_before_committing_cleans_up_too(
 
     assert _publish(public_repo) == 1
     assert set(_temp_clones()) == before
+
+
+def test_yes_is_refused_on_a_release_prepared_without_the_cross_check(
+    dev_repo: Path, public_repo: str, state_file: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """The two ways of not checking must not combine into publishing something unexamined.
+
+    `--skip-cross-check` means the wheel was never built, installed or probed. `--yes` skips the
+    typed confirmation, which is the only place a human would read the warning about it. Either
+    alone is a judgement call; together they are a release nobody looked at, so this refuses
+    fail-closed (#158).
+    """
+    state = json.loads(state_file.read_text())
+    state["cross_checked"] = False
+    state_file.write_text(json.dumps(state, indent=2) + "\n")
+
+    code = publish_release.main(["--repo", public_repo, "--yes"])
+
+    assert code == 1
+    assert "Refusing --yes" in capsys.readouterr().err
+
+
+def test_an_un_cross_checked_release_still_publishes_interactively(
+    dev_repo: Path, public_repo: str, state_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipping the cross-check is a judgement call, not a ban.
+
+    Someone who reads the warning and types the version anyway has made the decision the
+    warning exists to prompt. Refusing outright would push people toward editing the state file
+    by hand, which is worse than the thing being guarded against.
+    """
+    state = json.loads(state_file.read_text())
+    state["cross_checked"] = False
+    state_file.write_text(json.dumps(state, indent=2) + "\n")
+    monkeypatch.setattr("builtins.input", lambda _prompt: VERSION)
+
+    assert publish_release.main(["--repo", public_repo]) == 0
+
+
+def test_a_state_file_without_the_cross_check_field_is_not_treated_as_a_failure(
+    dev_repo: Path, public_repo: str, state_file: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """An older state file predates the field, and unknown is not the same as false.
+
+    Reading a missing key as `False` would refuse `--yes` on a release that was in fact fully
+    cross-checked, and the operator would have no way to tell the difference from the message.
+    """
+    assert "cross_checked" not in json.loads(state_file.read_text())
+
+    code = publish_release.main(["--repo", public_repo, "--yes"])
+
+    assert code == 0
+    assert "Refusing --yes" not in capsys.readouterr().err

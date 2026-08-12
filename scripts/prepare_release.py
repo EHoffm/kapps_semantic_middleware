@@ -327,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{DIM}[dry-run] Would delete existing prepare-release branch.{OFF}")
             print(f"{DIM}[dry-run] Would create prepare-release from {args.from_branch}.{OFF}")
             print(f"{DIM}[dry-run] Would copy staging tree and commit.{OFF}")
-            tip_sha = "(not computed in dry-run)"
+            tip_sha = ""
         else:
             # The branch is built with plumbing, so the developer's working tree is never
             # touched. The obvious implementation -- checkout -b, `git rm -rf .`, copy the
@@ -390,13 +390,30 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         # Step 10: Record the tip.
+        #
+        # **Never on a dry run.** The state file IS the review gate: `publish_release.py` reads
+        # the SHA out of it and refuses to publish a tip that has moved since. A dry run has no
+        # tip, so writing one here overwrites a real, reviewed record with a placeholder --
+        # destroying the gate #110 calls "enforced, not ceremonial" as a side effect of a
+        # command whose whole promise is to change nothing. Found during #118's release; the
+        # fix was made in the fork and never came back until #158.
+        state_path = REPO_ROOT / ".release-state.json"
+        if args.dry_run:
+            print(f"\n{GREEN}Dry run complete. Nothing was branched, pushed or recorded.{OFF}")
+            if state_path.exists():
+                print(f"{DIM}An existing {state_path.name} was left untouched.{OFF}")
+            return 0
+
         release_state = {
             "version": args.version,
             "branch": "prepare-release",
             "sha": tip_sha,
             "prepared_at": datetime.now(timezone.utc).isoformat(),
+            # Recorded so the second script can tell a gated release from an ungated one.
+            # Without it, --skip-cross-check leaves no trace anywhere and publish_release.py
+            # cannot know the wheel was never built, installed or probed.
+            "cross_checked": not args.skip_cross_check,
         }
-        state_path = REPO_ROOT / ".release-state.json"
         state_path.write_text(json.dumps(release_state, indent=2) + "\n")
 
         print(f"\n{GREEN}Release prepared on branch prepare-release.{OFF}")
