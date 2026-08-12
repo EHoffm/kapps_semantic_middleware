@@ -63,6 +63,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `scripts/` is not a package and is not installed, but `release_checks.py` there is covered by
+# tests/test_release_checks.py -- it gates every public release (#129), so it is tested like
+# library code rather than trusted like a shell one-liner.
+pythonpath = ["scripts"]
 addopts = ["--strict-markers", "-m", "not lap and not smoke"]
 markers = [
     "live: needs a reachable GraphDB (the GRAPHDB_* env vars). Applied automatically to any test that requests the `graphdb` fixture, so `-m 'not live'` selects the tier that runs anywhere.",
@@ -78,7 +82,7 @@ python_version = "3.12"
 # The library and the demo. `demo` typechecks only because demo/ and demo/transferunits/
 # carry an __init__.py -- without them mypy stops at the first relative import and checks
 # nothing at all. ADR 0030 already called demo/transferunits a real package; now it is one.
-files = ["src", "demo"]
+files = ["src", "demo", "scripts"]
 
 [[tool.mypy.overrides]]
 # None of the three siblings ships a py.typed marker, and neither does amqtt. Left
