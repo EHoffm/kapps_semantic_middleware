@@ -293,17 +293,25 @@ def main(argv: list[str] | None = None) -> int:
                     check=True,
                     capture_output=True,
                 )
-                uv_pip = venv_dir / "bin" / "uv"
-                if not uv_pip.exists():
-                    uv_pip = venv_dir / "Scripts" / "uv"  # Windows
+                # `uv` is not installed *into* a venv -- it is the tool driving one, and it is
+                # told which interpreter to target with `--python`. Windows puts that
+                # interpreter under Scripts/ rather than bin/, and #113 made Windows a
+                # first-class target for everything a user touches.
+                python_exe = venv_dir / "bin" / "python"
+                if not python_exe.exists():
+                    python_exe = venv_dir / "Scripts" / "python.exe"
                 subprocess.run(
-                    [str(uv_pip), "pip", "install", "--force-reinstall", str(wheel_path)],
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        str(python_exe),
+                        str(wheel_path),
+                    ],
                     check=True,
                     capture_output=True,
                 )
-                python_exe = venv_dir / "bin" / "python"
-                if not python_exe.exists():
-                    python_exe = venv_dir / "Scripts" / "python"  # Windows
                 subprocess.run(
                     [str(python_exe), "-c", f"import {package}"],
                     check=True,
