@@ -49,7 +49,7 @@ path = "../aas_middleware_inf"
 url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git"
 remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "b0d7440"
+commit = "999ef52"
 why = """
 Three fixes made under root ADR 0001's bugfix allowance, all recorded in that repo's CHANGELOG:
 #92 (a persistence-write notification was formatted before it was narrowed, and a read could echo
@@ -58,4 +58,10 @@ parameter is not commanded -- ADR 0035) and #103 (the package declares the httpx
 module level). Without the first two the demo's northbound sync and its ramping belts are both
 broken; the third changes no behaviour and makes the manifest honest. Private GitLab: access is
 required, there is no public mirror.
+
+Moved from b0d7440 to 999ef52 for #118, which added that repo's release mechanism under
+`scripts/` and `tests_release/`. **No package code changed**, so nothing this project imports
+moved -- the pin advances only so `check_siblings.py` stops reporting the checkout as dirty.
+The rename to `transitional_sync_middleware` is applied at release time to a staged tree and is
+NOT in this commit; the import name here stays `aas_middleware` until #120 does the sweep.
 """
