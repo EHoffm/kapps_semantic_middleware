@@ -35,7 +35,7 @@ class TransferUnit:
         ...
 ```
 
-The surrounding class is the consumer's own domain model. If an instance already carries connection metadata in the graph **and** a `@mw.state` decorator is bound to the same field, the middleware warns about the conflict.
+The surrounding class is the consumer's own domain model — a plain Python class, a `@dataclass` in the examples. **There is no base class to subclass and no decorator the class itself needs.** `DataModel` and `DataModelRebuilder` are internal wrappers the middleware builds around your class; the consumer neither imports nor extends them. What decides which properties materialize is the `ClassScope` passed to `SemanticMiddleware`, not the class's own type. If an instance already carries connection metadata in the graph **and** a `@mw.state` decorator is bound to the same field, the middleware warns about the conflict.
 
 ## Committed Value vs. Locator
 

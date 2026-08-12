@@ -50,7 +50,23 @@ Both properties are removed on deregistration. Storing the endpoint directly on 
 
 Every resource-mode instance runs an internal periodic Workflow that refreshes `svc:lastHeartbeat` on its Service individual. Watchdog-mode instances query for Services whose heartbeat has exceeded a staleness threshold and remove their `svc:address` and `svc:endpoint` triples.
 
-A deployment needs at least one running watchdog instance to guarantee no dangling registrations after crashes or power loss. Heartbeat interval and staleness threshold are runtime parameters requiring tuning against a real fleet.
+A deployment needs at least one running watchdog instance to guarantee no dangling registrations after crashes or power loss. Set the three liveness parameters as keyword arguments to `SemanticMiddleware`:
+
+- `heartbeat_interval` (default `30.0`) — seconds between heartbeat refreshes, resource mode.
+- `staleness_threshold` (default `90.0`) — seconds before a Service is considered stale, watchdog mode.
+- `sweep_interval` (default `30.0`) — seconds between staleness sweeps, watchdog mode.
+
+```python
+mw = SemanticMiddleware(
+    mode=Mode.RESOURCE,
+    resource_iri=resource_iri,
+    service_class=service_class,
+    ogm=ogm,
+    heartbeat_interval=30.0,
+)
+```
+
+The defaults suit most deployments; tune them against a real fleet's network latency and crash-recovery requirements.
 
 ## Deregistration
 

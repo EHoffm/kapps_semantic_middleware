@@ -40,7 +40,9 @@ A view names properties down to the parameter and no further. The parameter blan
 
 ## Empty Projections Are Legitimate
 
-Omitting `class_scope` falls back to an unscoped fetch that materializes the `id` alone. This is not an error condition. A resource whose view is a bare individual serves a one-field datamodel and starts normally. The middleware acts on a projection; the knowledge graph holds the information. Writing an absent attribute raises `ValueError: object has no field ...`, and committing an undeclared property raises during scope hydration.
+Omitting `class_scope` falls back to an unscoped fetch that materializes the `id` alone. This is not an error condition. A resource whose view is a bare individual serves a one-field datamodel and starts normally. The middleware acts on a projection; the knowledge graph holds the information.
+
+Fetch and commit are two different mechanisms, so their handling of a property outside the scope differs — do not conflate them. A **fetch** silently discards a property the scope does not name: it simply does not appear in the materialized model. A **commit** is strict the other way: writing an attribute the scope did not declare raises `ValueError: object has no field ...` during scope hydration. Silent discard is a read-path rule; the `ValueError` is a write-path rule.
 
 ## The Northbound Projection Prunes Before Fetching
 
