@@ -19,11 +19,11 @@ import asyncio
 import socket
 import threading
 
-from graph_db_interface import GraphDB
 from kapps_ogm import OGM
 from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware import Mode, SemanticMiddleware
+from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 
 from . import seed
 
@@ -141,7 +141,7 @@ async def main() -> None:
         else str(seed._mint_transfer_unit_iri(args.unit_index))
     )
 
-    db = GraphDB.from_env()
+    db = graphdb_for(DEMO_REPOSITORY)
     ogm = OGM(db=db)
     class_scope = ClassScope.from_property_chains(
         [

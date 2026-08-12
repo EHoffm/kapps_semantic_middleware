@@ -29,8 +29,9 @@ import asyncio
 import logging
 import socket
 
-from graph_db_interface import GraphDB
 from kapps_ogm import OGM
+
+from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 
 from . import algorithm, seed, station_board
 from .controller import Controller
@@ -156,7 +157,7 @@ async def main() -> None:
         args.resource_iri if args.resource_iri is not None else str(seed.CONTROL_STATION)
     )
 
-    db = GraphDB.from_env()
+    db = graphdb_for(DEMO_REPOSITORY)
     ogm = OGM(db=db)
 
     controller = Controller(

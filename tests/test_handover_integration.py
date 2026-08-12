@@ -9,7 +9,6 @@ env vars are absent (see conftest).
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from rdflib.namespace import RDF
 
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware.credentials import graphdb_env_present, graphdb_for
 from kapps_semantic_middleware.registration import (
     HandoverPreconditionError,
     create_possession,
@@ -27,10 +27,7 @@ from kapps_semantic_middleware.registration import (
 from kapps_semantic_middleware.vocabulary import CFC, MES
 
 requires_graphdb = pytest.mark.skipif(
-    not all(
-        os.getenv(n)
-        for n in ("GRAPHDB_URL", "GRAPHDB_USERNAME", "GRAPHDB_PASSWORD", "GRAPHDB_REPOSITORY")
-    ),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 
@@ -48,7 +45,7 @@ def _source_middleware(graphdb) -> SemanticMiddleware:
         mode="resource",
         resource_iri=seed.HANDOVER_SOURCE,
         service_class=_TRANSFER_SERVICE_CLASS,
-        ogm=OGM(db=graphdb.__class__.from_env()),
+        ogm=OGM(db=graphdb_for(graphdb.repository)),
         host="127.0.0.1",
         port=8999,
     )

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
 from graph_db_interface import GraphDB
+from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 from kapps_semantic_middleware.vocabulary import SVC
 
 from . import seed
@@ -224,7 +225,7 @@ def probe_and_seed(units: int, force: bool = False) -> None:
     Raises:
         RuntimeError: A live factory exists, and force is False.
     """
-    db = GraphDB.from_env()
+    db = graphdb_for(DEMO_REPOSITORY)
     live_services = seed.factory_is_live(db)
 
     if live_services and not force:
@@ -319,7 +320,7 @@ class Factory:
 
     def __init__(self) -> None:
         self.children: List[ChildHandle] = []
-        self._db = GraphDB.from_env()
+        self._db = graphdb_for(DEMO_REPOSITORY)
 
     def start(self, units: int, force: bool = False) -> None:
         """Seed the graph and spawn every participant. Blocking; call once at startup.

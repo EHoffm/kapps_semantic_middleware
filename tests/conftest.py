@@ -10,27 +10,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
-REQUIRED_GRAPHDB_ENV = (
-    "GRAPHDB_URL",
-    "GRAPHDB_USERNAME",
-    "GRAPHDB_PASSWORD",
-    "GRAPHDB_REPOSITORY",
-)
+from kapps_semantic_middleware.credentials import graphdb_env_present
 
-
-def _graphdb_env_present() -> bool:
-    return all(os.getenv(name) for name in REQUIRED_GRAPHDB_ENV)
+# The suite wipes the repository it connects to, so it names that repository itself rather
+# than inheriting GRAPHDB_REPOSITORY, which may point at anything (issue #146). Capitalised
+# to match the repository on the KIT server; tests do not ship, so this name is dev-only.
+TEST_REPOSITORY = "Tests"
 
 
 requires_graphdb = pytest.mark.skipif(
-    not _graphdb_env_present(),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 
@@ -139,11 +134,11 @@ def graphdb():
     blank-node ids, which is a collision guard that is happier the longer it lives.
     Tests that need a clean *graph* re-seed it; that is separate from the client.
     """
-    if not _graphdb_env_present():
+    if not graphdb_env_present():
         pytest.skip("GRAPHDB_* environment variables not set")
-    from graph_db_interface import GraphDB
+    from kapps_semantic_middleware.credentials import graphdb_for
 
-    db = GraphDB.from_env()
+    db = graphdb_for(TEST_REPOSITORY)
     yield db
     db.close()
 

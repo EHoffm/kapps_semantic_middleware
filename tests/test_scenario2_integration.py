@@ -14,7 +14,6 @@ are absent (see conftest).
 
 from __future__ import annotations
 
-import os
 import sys
 import threading
 import time
@@ -27,6 +26,7 @@ from rdflib.namespace import RDF
 
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware.credentials import graphdb_env_present, graphdb_for
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
     mint_state_property_iri,
@@ -35,10 +35,7 @@ from kapps_semantic_middleware.registration import (
 from kapps_semantic_middleware.vocabulary import SVC
 
 requires_graphdb = pytest.mark.skipif(
-    not all(
-        os.getenv(n)
-        for n in ("GRAPHDB_URL", "GRAPHDB_USERNAME", "GRAPHDB_PASSWORD", "GRAPHDB_REPOSITORY")
-    ),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 
@@ -130,7 +127,7 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
         mode="resource",
         resource_iri=seed.DOOR_RESOURCE,
         service_class=seed.DOOR_SERVICE_CLASS,
-        ogm=OGM(db=graphdb.__class__.from_env()),
+        ogm=OGM(db=graphdb_for(graphdb.repository)),
         host="127.0.0.1",
         port=DOOR_PORT,
     )
@@ -174,7 +171,7 @@ def test_scenario2_door_direct_invocation_by_mobile_robot(graphdb):
             mode="resource",
             resource_iri=seed.MOBILE_ROBOT,
             service_class=seed.MOBILE_ROBOT_SERVICE_CLASS,
-            ogm=OGM(db=graphdb.__class__.from_env()),
+            ogm=OGM(db=graphdb_for(graphdb.repository)),
             host="127.0.0.1",
             port=ROBOT_PORT,
         )
