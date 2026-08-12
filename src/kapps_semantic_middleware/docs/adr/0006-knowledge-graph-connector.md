@@ -1,7 +1,0 @@
-# Wrap OGM access as an aas_middleware Connector
-
-Wrap knowledge graph reads/writes (`kapps_ogm.OGM.fetch`/`commit`) in a `KnowledgeGraphConnector`. This connector implements `aas_middleware`'s `Connector` protocol (`connect`/`disconnect`/`provide`/`consume`). Do not call them directly and separately by every piece of registration/execution logic that needs the graph.
-
-**Why**: the paper names this pattern explicitly. The paper describes knowledge-graph synchronization itself as a connector. An upstream connector wraps the OGM operations. It persists changes through explicit commit calls. This mirrors the transaction pattern of a conventional MES. Wrap OGM access this way. Do not call `ogm.fetch`/`ogm.commit` ad hoc from workflow/state registration code. `kapps_semantic_middleware`'s own internal graph access goes through the same connector abstraction as OT devices (MQTT/OPC UA/HTTP). Any future MES-style synchronization pattern (`SyncedConnector`, `SyncRole`/`SyncDirection`) that `aas_middleware` already provides for other connectors becomes available for knowledge-graph synchronization too. This requires no new plumbing.
-
-**Consequence**: this also becomes the extension point for `@state`'s value source. Any `aas_middleware` connector can back a StateProperty's getter. For example, an `OpcUaConnector` reads a PLC register. An `MqttClientConnector` subscribes to a topic. An arbitrary Python function does not back it alone. Reuse the existing IT/OT bridge directly. Do not require every device integration to hand-roll its own polling loop.

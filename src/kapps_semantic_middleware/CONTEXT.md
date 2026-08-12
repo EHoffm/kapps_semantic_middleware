@@ -331,8 +331,8 @@ by watchdog-mode instances to decide staleness.
 deregistration/staleness. `svc:endpoint` is the full, directly callable URL for one specific
 Workflow or StateProperty, also set on startup and removed on deregistration/staleness. Both
 being present is a deliberate divergence from the paper's literal "address on Service only"
-wording — see
-`src/kapps_semantic_middleware/docs/adr/0004-endpoint-on-service-and-workflow.md`.
+wording — see the "Address and endpoint" section of
+`docs/mechanics/02-workflow-registration.md`.
 _Avoid_: URL, endpoint URL used interchangeably for both — they are distinct properties on
 distinct entity types.
 
@@ -340,8 +340,8 @@ distinct entity types.
 An `aas_middleware`-protocol `Connector` (`connect`/`disconnect`/`provide`/`consume`) whose
 `provide`/`consume` wrap `kapps_ogm.OGM.fetch`/`commit`. The mechanism by which any
 `aas_middleware` construct (workflows, synced connectors) can read/write the knowledge graph
-without going around the OGM's validated write path. See
-`src/kapps_semantic_middleware/docs/adr/0006-knowledge-graph-connector.md`.
+without going around the OGM's validated write path. See "The graph-facing connector"
+in `docs/mechanics/04-connector-binding.md`.
 
 **Deregistration**:
 The reverse of registration: on shutdown (or, for watchdog-mode-detected staleness), removing

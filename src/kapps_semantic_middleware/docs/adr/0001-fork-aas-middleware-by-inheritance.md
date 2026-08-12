@@ -1,7 +1,0 @@
-# Fork aas_middleware by inheritance, reimplement locally over time
-
-`SemanticMiddleware` subclasses `aas_middleware.Middleware`. It reuses the `workflow()` decorator, connector protocol, and REST/FastAPI/lifespan machinery directly. It does not write a fresh middleware from scratch. `aas_middleware`'s AAS-specific parts (data model, persistence layer, `AasMiddleware` subclass) remain unchanged. Only the orchestration, connector, and REST core change. This core is already data-model-agnostic.
-
-**Why**: the paper frames KAPPS's semantic middleware as a "refactor" of `aas_middleware` with the AAS-specific parts removed. It is not a rewrite. The orchestration/connector/REST core (`workflow()`, `Connector` protocol, lifespan hooks) is real, working, data-model-agnostic code. Writing it again from scratch before you prove out the knowledge-graph-registration layer on top of it would be pure cost with no corresponding benefit. `__init__.py`'s migration comment ("as each layer is migrated locally, swap the import") already commits to an incremental strategy. Depend on `aas_middleware` now. Replace pieces with local implementations one at a time. Replace each piece when you understand it well enough to own it.
-
-**Consequence**: `kapps_semantic_middleware` inherits `aas_middleware`'s naming/vocabulary (`workflow`, `Connector`, `capability=` kwarg) even where it does not perfectly match the paper's own terms. It does not introduce a second vocabulary on day one.

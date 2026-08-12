@@ -1,7 +1,0 @@
-# Store the callable endpoint on both Service and Workflow/StateProperty
-
-The paper describes the middleware populating a single `address` property on the *Service* individual. From this property, reconstruct a workflow's endpoint by convention. This project stores `svc:address` on the Service (the base URL). It also writes the full, directly callable `svc:endpoint` on each Workflow and StateProperty individual.
-
-**Why**: a caller resolves "what URL do I invoke for this specific Workflow". `execute()` must do this, given an Operation IRI several hops away from any Service. The caller would otherwise need to walk `Workflow -> isWorkflowOf -> Service -> address`. The caller would then know, out-of-band, the route-naming convention to append (`/workflows/{name}/execute`). That convention knowledge would have to live somewhere. Duplicate it into every caller. Or centralize it in a shared library function every caller depends on. Store the resolved endpoint directly on the Workflow. Trade a small amount of duplication (the same host:port appears in both `address` and every `endpoint` under it) for removing that coupling entirely. Any caller with just a Workflow IRI can invoke it with one property read.
-
-**Consequence**: deregistration must remove *both* properties to preserve the paper's invariant. The invariant states that "no workflow exposed by the service appears as invokeable" once deregistered. Remove only `Service.address`. This would leave stale-but-present `Workflow.endpoint` triples. Those triples would still resolve.

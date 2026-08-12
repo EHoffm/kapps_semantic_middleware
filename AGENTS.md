@@ -39,10 +39,10 @@ without forward references.
 
 ### A note on the citations you will find in the glossaries
 
-The `CONTEXT.md` files cite architecture decision records as **ADR 00nn** and **root ADR 000n**, and
-in five places quote a full `docs/adr/....md` or `docs/prd/....md` path. Those records are
-development-repository material and are **not part of this distribution** — the paths do not
-resolve here, and no copy of them ships.
+The `CONTEXT.md` files cite architecture decision records as **ADR 00nn** and **root ADR
+000n**. Those records are development-repository material and are **not part of this
+distribution** — no copy of them ships, and the release rewrites every path that pointed
+at one, so a citation here is never a link you can follow.
 
 **Do not go looking for them.** The citations are provenance markers, not links. Every mechanism a
 glossary cites a record for is explained in full by the mechanics page covering it — ADR 0004's

@@ -2,10 +2,9 @@
 
 One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others.
 
-Self-contained, runnable Jupyter notebooks demonstrate Core Middleware end-to-end (see
-`examples/docs/adr/0001-self-contained-example-notebooks.md`). Seed-data/ontology-provisioning
-logic makes each one reproducible against a dummy repository, rather than production
-knowledge-graph state.
+Self-contained, runnable Jupyter notebooks demonstrate Core Middleware end-to-end.
+Seed-data/ontology-provisioning logic makes each one reproducible against a dummy
+repository, rather than production knowledge-graph state.
 
 ## Language
 

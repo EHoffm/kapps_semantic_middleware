@@ -136,15 +136,3 @@ dev-mode-dirs = ["src", "."]
 "AGENTS.md" = "kapps_semantic_middleware/AGENTS.md"
 "CONTEXT-MAP.md" = "kapps_semantic_middleware/CONTEXT-MAP.md"
 "docs/mechanics" = "kapps_semantic_middleware/docs/mechanics"
-
-[tool.uv.sources]
-aas-middleware = { path = "../aas_middleware_inf", editable = true }
-kapps-ogm = { path = "../kapps_ogm", editable = true }
-graph-db-interface = { path = "../graph_db_interface", editable = true }
-
-[tool.uv]
-# kapps_ogm's Poetry manifest pins graph_db_interface to a git branch (SAWeindel/kapps_ogm#22,
-# a temporary dev pin for the unreleased triples_update fix). uv sees that git URL and this
-# project's editable path source as conflicting URLs for one package and refuses to resolve.
-# The two are the same commit; the editable checkout is the one we develop against.
-override-dependencies = ["graph-db-interface"]

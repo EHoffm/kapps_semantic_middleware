@@ -7,19 +7,20 @@ graph and the device in step.
 
 ## Setting up
 
-**Read [SIBLINGS.md](SIBLINGS.md) first.** This project depends on three sibling repositories as
-editable path checkouts, all three are on unmerged feature branches, and `uv.lock` records none of
-that. A `main` checkout of any sibling fails, each in its own way.
-
-**You need KIT GitLab access to build this today.** One sibling, `aas_middleware_inf`, lives on a
-private KIT GitLab instance and has no public mirror. Without an account there, `uv sync` cannot
-resolve it, and no amount of local setup works around that.
+Everything this project needs resolves from PyPI.
 
 ```bash
-python scripts/check_siblings.py   # verify the three siblings
-uv sync
-pytest -m "not live"               # the tier that needs no GraphDB
+pip install kapps-semantic-middleware
 ```
+
+To also get the scenario notebooks and the TransferUnit factory demo:
+
+```bash
+pip install "kapps-semantic-middleware[demonstrations]"
+```
+
+Working from a checkout instead? `uv sync` installs the same set, and
+`pytest -m "not live"` runs the tier that needs no GraphDB.
 
 ## Run a local GraphDB (Docker)
 
@@ -52,13 +53,12 @@ The demo wipes whatever repository you name.
 
 | | |
 |---|---|
-| [`CONTEXT-MAP.md`](CONTEXT-MAP.md) | **Start here.** The five contexts, and which ADR governs which. |
+| [`CONTEXT-MAP.md`](CONTEXT-MAP.md) | **Start here.** The five contexts and how they relate. |
 | `src/kapps_semantic_middleware/` | The library. |
-| `src/kapps_semantic_middleware/docs/adr/` | Core Middleware and TransferUnit Factory decision records. |
-| `docs/adr/` | Root records — decisions above every context, including the sibling dependency policy. |
+| [`AGENTS.md`](AGENTS.md) | Consumption rules and the mechanics index, for an agent building against this. |
+| [`docs/mechanics/`](docs/mechanics/) | How each mechanic is used, one page each. |
 | `demo/transferunits/` | The factory demo: N units, a controller, one launcher command. |
 | `examples/` | Scenario 1 (operation coordination) and scenario 2 (direct state). |
-| [`docs/agents/`](docs/agents/) | Issue tracker, triage labels, and domain conventions for agents. |
 
 ### Which of the three do you want?
 

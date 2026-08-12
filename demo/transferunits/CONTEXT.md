@@ -6,9 +6,9 @@ This is a runnable multi-process demonstration. It stands up a small factory of 
 controller, and a person drives it from a browser. Each participant is a separate process
 (ADR 0029).
 
-Its decisions are **ADR 0029, ADR 0030 and ADR 0032**. They live in the ADR directory of the Core
-Middleware context, in one shared sequence: `../../src/kapps_semantic_middleware/docs/adr/`. The root
-`CONTEXT-MAP.md` records which context each ADR governs.
+Its decisions are **ADR 0029, ADR 0030 and ADR 0032**. Those records are
+development-repository material and do not ship; what they decided is described, without
+the deliberation, in `docs/mechanics/`.
 
 **Root ADR 0004 governs what belongs here.** Every part of a scenario lives in this directory. The
 library holds generic functions only. The controller and the TransferUnit resource logic are parts

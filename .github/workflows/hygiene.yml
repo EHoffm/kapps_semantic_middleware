@@ -1,0 +1,19 @@
+# This workflow is the backstop for commits made directly in the public repo.
+# The pre-push gate in the dev checkout cannot see those commits, so the public
+# repo needs its own CI that runs the same hygiene checks.
+
+name: hygiene
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run the release hygiene checks
+        run: python scripts/release_checks.py .

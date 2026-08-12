@@ -1,9 +1,8 @@
 """Generate SHACL NodeShapes, from the type hints of a Python function.
 
-This is temporary scaffolding for workflow signature representation. See
-docs/adr/0001-shacl-for-workflow-signatures.md for context. This logic properly
-belongs in kapps_ogm. See docs/prd/kapps-ogm-shacl-support.md at the repo root.
-Delete this logic from here once that support lands.
+This is temporary scaffolding for workflow signature representation. This logic
+properly belongs in kapps_ogm. Delete this logic from here once that support
+lands.
 
 The shape targets the Workflow *class* (sh:targetClass). It does not target instances. Mint argument
 property IRIs as ``{workflow_class_iri}#param_{name}``. Mint the return property IRI as

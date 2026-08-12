@@ -6,12 +6,10 @@ One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for
 > and the `docs/mechanics/` set beside it — workflow signatures and the shapes derived from them
 > are covered by `docs/mechanics/02-workflow-registration.md`.
 
-Temporary scaffolding (see
-`src/kapps_semantic_middleware/shacl_interop/docs/adr/0001-shacl-for-workflow-signatures.md`)
-that generates
+Temporary scaffolding that generates
 and parses the SHACL shapes describing a Workflow or StateProperty class's precondition/
-outcome, in place of the native `kapps_ogm` support this logic properly belongs in (see
-`docs/prd/kapps-ogm-shacl-support.md` at the repo root). Deliberately kept separate from Core
+outcome, in place of the native `kapps_ogm` support this logic properly belongs in.
+Deliberately kept separate from Core
 Middleware so it can be deleted wholesale, without untangling it from Core Middleware's own
 vocabulary, once `kapps_ogm` absorbs this capability.
 
