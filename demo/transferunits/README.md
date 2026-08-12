@@ -95,10 +95,10 @@ Then open **<http://127.0.0.1:8080/>** in your browser.
 ### If you installed the package instead of cloning it
 
 The demo also ships inside the installed library, under a longer name. You need the
-`demonstrations` extra, because a plain install brings the library alone:
+`examples` extra, because a plain install brings the library alone:
 
 ```bash
-uv add "kapps-semantic-middleware[demonstrations]"
+uv add "kapps-semantic-middleware[examples]"
 kapps-transferunit-factory --units 2
 ```
 

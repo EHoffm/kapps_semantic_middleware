@@ -18,29 +18,45 @@ dependencies = [
     # here. Declaring it is also what stops the OGM repo's #15 failure -- importing a module
     # the manifest never mentions -- from recurring.
     "aiomqtt>=2.1.0",
+    # fastapi is imported directly by the library itself -- middleware.py, rest_router.py and
+    # activity.py all `from fastapi import ...`, not just the demo. It only survived until now by
+    # arriving transitively through aas-middleware, which is not a promise that repo makes, so it
+    # is declared here (#115). The transitive route stays as a backup.
+    "fastapi>=0.111.0",
 ]
 
 [project.scripts]
 # Installed unconditionally, because a console script cannot be gated on an extra. Without
-# `[demonstrations]` it exits on a missing fastapi, which is the honest failure: the demo is
-# present and its dependencies are not.
+# `[examples]` the factory exits on a missing uvicorn/amqtt, which is the honest failure: the
+# demo is present and its runtime dependencies are not.
 kapps-transferunit-factory = "kapps_semantic_middleware.demonstrations.transferunits.__main__:main"
+# Copies the runnable scenario files out of the installed package into a directory the user
+# chooses, because a notebook inside site-packages cannot be opened, edited or re-run (#115).
+kapps-examples = "kapps_semantic_middleware.examples_cli:main"
 
 [project.optional-dependencies]
-# What `demo/` needs on top of the library, and nothing the library itself needs.
-# A plain `uv add kapps-semantic-middleware` installs the reference implementation only.
-# `uv add "kapps-semantic-middleware[demonstrations]"` adds what the factory demo runs on.
-#
-# All three were undeclared before the milestone-1 release review. fastapi and uvicorn
-# arrived transitively through aas-middleware, which is not a promise that repo makes;
-# amqtt sat in the dev group, so `uv sync --no-dev` produced a demo that raised
-# ImportError at demo/transferunits/middleware.py's `_serve_broker`.
-demonstrations = [
-    "fastapi>=0.111.0",
+# `[examples]` is the one umbrella a learner installs to RUN everything: scenario 1, scenario 2
+# (as .py or .ipynb) and the six-process factory demo. A plain `uv add kapps-semantic-middleware`
+# installs the reference implementation alone; `uv add "kapps-semantic-middleware[examples]"` adds
+# what the runnable examples need on top of it. fastapi is NOT here: the library imports it
+# directly, so it moved to the core dependencies above (#115).
+examples = [
     "uvicorn>=0.29.0",
     # The per-unit broker (ADR 0034). Pure Python and run in-process, because mosquitto
-    # would need root, which a fresh checkout cannot assume.
+    # would need root, which a fresh checkout cannot assume. The factory needs it; the
+    # scenarios do not; the single umbrella covers both.
     "amqtt>=0.11.0",
+    # scenario 2 imports rdflib.namespace directly. Declared here rather than leaned on
+    # transitively through kapps-ogm / graph-db-interface (#115).
+    "rdflib>=7.1.3",
+]
+# The notebook toolchain is a separate, heavier opt-in -- only someone who opens the .ipynb
+# needs it (jupyter alone pulls ~100 packages). The scenarios run as plain .py with `[examples]`
+# alone; `uv add "kapps-semantic-middleware[examples,notebooks]"` adds the interactive path.
+notebooks = [
+    "jupyter>=1.1.1",
+    "jupytext>=1.16.0",
+    "nbconvert>=7.16.0",
 ]
 
 [dependency-groups]
@@ -57,7 +73,7 @@ dev = [
     # A pure-Python MQTT broker, run in-process as a pytest fixture. mosquitto would need
     # root to install, which no CI runner and no fresh checkout can assume; this keeps the
     # mock PLC's round-trip genuinely live and portable (#40). Also declared under the
-    # `demonstrations` extra, because the demo runs one per unit at runtime (ADR 0034).
+    # `examples` extra, because the demo runs one per unit at runtime (ADR 0034).
     "amqtt>=0.11.0",
 ]
 
@@ -106,7 +122,7 @@ build-backend = "hatchling.build"
 # Nothing here decides whether a consumer gets the demo's dependencies: that is the
 # `demonstrations` extra. Wheels cannot select files by extra, so the demo's ~200 KB always
 # ships, and importing it without the extra fails on fastapi with a clear ImportError.
-packages = ["src/kapps_semantic_middleware", "demo"]
+packages = ["src/kapps_semantic_middleware", "demo", "examples"]
 
 # An editable install cannot follow the rewrite below -- hatchling refuses a dev-mode build
 # when a source rewrite *changes* a prefix instead of removing one. So dev mode puts `src`
@@ -118,6 +134,7 @@ dev-mode-dirs = ["src", "."]
 [tool.hatch.build.targets.wheel.sources]
 "src/kapps_semantic_middleware" = "kapps_semantic_middleware"
 "demo" = "kapps_semantic_middleware/demonstrations"
+"examples" = "kapps_semantic_middleware/examples"
 
 [tool.hatch.build.targets.wheel.force-include]
 # The agent-facing documentation lives at the repo root, so without this it reaches someone

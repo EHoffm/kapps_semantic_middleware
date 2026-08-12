@@ -68,8 +68,11 @@ The code lives in three places, and the one to open depends on what you came for
   no domain term. Read this to use the middleware in your own project.
 - **`demo/transferunits/`** — the runnable factory. Read this to watch the middleware work end to
   end, and to drive it from a browser. One command starts it.
-- **`examples/`** — notebooks for scenario 1 and scenario 2, each self-contained, plus the seed
-  logic they share with the test suite. Read this for the smallest possible introduction.
+- **`examples/`** — scenario 1 and scenario 2, each self-contained, as both a Jupyter notebook and
+  a plain-Python script, plus the seed logic they share with the test suite. Read this for the
+  smallest possible introduction. When installed from PyPI, get them with
+  `pip install "kapps-semantic-middleware[examples]"` and run `kapps-examples` to copy them into a
+  directory you can edit and run; add the `[notebooks]` extra to open the `.ipynb` in Jupyter.
 
 ## The demo
 
