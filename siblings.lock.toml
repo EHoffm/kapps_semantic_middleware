@@ -49,7 +49,7 @@ path = "../aas_middleware_inf"
 url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git"
 remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "999ef52"
+commit = "8dc7291"
 why = """
 Three fixes made under root ADR 0001's bugfix allowance, all recorded in that repo's CHANGELOG:
 #92 (a persistence-write notification was formatted before it was narrowed, and a read could echo
@@ -64,4 +64,11 @@ Moved from b0d7440 to 999ef52 for #118, which added that repo's release mechanis
 moved -- the pin advances only so `check_siblings.py` stops reporting the checkout as dirty.
 The rename to `transitional_sync_middleware` is applied at release time to a staged tree and is
 NOT in this commit; the import name here stays `aas_middleware` until #120 does the sweep.
+
+Moved again from 999ef52 to 8dc7291 for #152. #118 kept committing to the branch after recording
+its pin, and the ticket that would have noticed was already closed. The gap is one commit --
+`RELEASE.md` and a `scripts/release_allowlist.py` tweak, both of them that repo's own release
+machinery. **No package code changed** here either (`git diff 999ef52..8dc7291 -- aas_middleware/`
+is empty), so this is again a pin catching up with a branch rather than a version this project
+runs differently against.
 """
