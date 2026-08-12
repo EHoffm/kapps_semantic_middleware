@@ -5,9 +5,13 @@ criterion #129 states: "Each of the five checks fails the run when violated. Pro
 time."
 
 **No banned literal appears in this file.** The checks scan the whole shipped tree, and the
-allowlist ships `tests/` -- so a test that spelled out `gitlab.kit.edu` or a decision-record path
-would be caught by the very check it exercises. The constants are imported from the module under
-test instead, which also means a test cannot drift from the value the check actually uses.
+allowlist ships `tests/` -- so a test that spelled out either banned value would be caught by the
+very check it exercises. The constants are imported from the module under test instead, which
+also means a test cannot drift from the value the check actually uses.
+
+The first draft of this docstring quoted both values while explaining why not to, and
+`prepare_release.py` failed on it -- the same trap `AGENTS.md` fell into, caught the same way.
+Prose about a banned string is still the banned string.
 """
 
 from __future__ import annotations
