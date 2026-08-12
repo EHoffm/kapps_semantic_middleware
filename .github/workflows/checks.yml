@@ -26,8 +26,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install ruff
-        # Pinned to the floor declared in pyproject.toml's dev group, so CI and a developer's
-        # checkout disagree about style only when someone changes that floor deliberately.
+        # Pinned exactly, not as a floor. `>=` here meant CI silently tracked the newest ruff
+        # while developers ran the 0.15.15 in the lockfile, and when 0.16 widened the default
+        # rule set the lint job went red on every branch including main -- for days, on work
+        # nobody had changed. An exact pin makes a style change a deliberate edit to this line.
         run: pipx install "ruff==0.15.15"
 
       - name: Lint

@@ -133,6 +133,24 @@ def test_check_remotes_catches_no_origin_at_all(repo: Path) -> None:
     assert check_remotes(repo, ORIGIN)
 
 
+def test_check_remotes_catches_a_diverted_push_url(repo: Path) -> None:
+    """`git remote -v` lists a fetch URL and a push URL, and they can differ.
+
+    `remote set-url --push` leaves the fetch URL alone, so a check that reads only the first
+    line per remote sees the right address and passes -- while every push goes somewhere else.
+    That is precisely the accident check 1 exists to prevent, so both lines are read.
+    """
+    _git(
+        repo,
+        "remote",
+        "set-url",
+        "--push",
+        "origin",
+        "https://github.com/EHoffm/kapps_semantic_middleware.git",
+    )
+    assert check_remotes(repo, ORIGIN)
+
+
 # --------------------------------------------------------------------------------------
 # Check 2 -- trailers. No agent co-authorship in the public log.
 # --------------------------------------------------------------------------------------

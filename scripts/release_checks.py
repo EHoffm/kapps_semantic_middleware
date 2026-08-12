@@ -105,34 +105,41 @@ def check_remotes(repo: Path, expected_origin: str) -> list[Violation]:
     except subprocess.CalledProcessError:
         return [Violation("remotes", "", "no remotes configured")]
 
-    lines = raw.splitlines()
-    remotes: dict[str, str] = {}
-    for line in lines:
+    # `git remote -v` prints one line per direction:
+    #
+    #     origin  https://host/repo.git (fetch)
+    #     origin  https://host/repo.git (push)
+    #
+    # and `git remote set-url --push` changes only the second. Reading just the first line per
+    # remote would see the right address and pass while every push went elsewhere -- which is
+    # the exact accident this check exists to catch. So every line is kept and checked.
+    remotes: dict[str, list[tuple[str, str]]] = {}
+    for line in raw.splitlines():
         parts = line.split()
         if len(parts) < 2:
             continue
-        name = parts[0]
-        url = parts[1]
-        if name not in remotes:
-            remotes[name] = url
+        name, url = parts[0], parts[1]
+        direction = parts[2].strip("()") if len(parts) > 2 else "fetch"
+        remotes.setdefault(name, []).append((url, direction))
 
     if "origin" not in remotes:
         violations.append(Violation("remotes", "", "no origin remote configured"))
     else:
-        origin_norm = _normalize(remotes["origin"])
-        if origin_norm != expected_norm:
-            violations.append(
-                Violation(
-                    "remotes",
-                    "",
-                    f"origin URL is {remotes['origin']}, expected {expected_origin}",
+        for url, direction in remotes["origin"]:
+            if _normalize(url) != expected_norm:
+                violations.append(
+                    Violation(
+                        "remotes",
+                        "",
+                        f"origin {direction} URL is {url}, expected {expected_origin}",
+                    )
                 )
-            )
 
-    for name in sorted(remotes.keys()):
+    for name in sorted(remotes):
         if name != "origin":
+            url = remotes[name][0][0]
             violations.append(
-                Violation("remotes", "", f"extra remote '{name}' configured at {remotes[name]}")
+                Violation("remotes", "", f"extra remote '{name}' configured at {url}")
             )
 
     return violations

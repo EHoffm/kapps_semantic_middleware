@@ -16,9 +16,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import io
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import zipfile
@@ -40,6 +42,38 @@ GREEN, YELLOW, RED, DIM, BOLD, OFF = (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+PACKAGE = "kapps_semantic_middleware"
+
+
+def wheel_problems(entries: list[str], package: str = PACKAGE) -> list[str]:
+    """Judge a built wheel's entry list. Empty means the wheel is what #129 asked for.
+
+    Two assertions, and they are twins: the decision records must be **gone**, and the pages
+    #130 wrote to replace them must be **present**. Only checking the first would let a wheel
+    pass that had dropped the records and the replacements together, which is the worse
+    outcome -- a consuming agent reading the installed tree would get `CONTEXT.md`'s citations
+    and nothing that answers them.
+
+    Matched as a **substring, not a prefix**. There are two record directories at different
+    depths -- `<pkg>/docs/adr/` and `<pkg>/shacl_interop/docs/adr/` -- and #129 names that
+    shape explicitly as the trap: a rule written for the first silently misses the second. A
+    prefix test misses both, because every wheel entry starts with the package name.
+    """
+    problems: list[str] = []
+
+    for dead in release_checks.DEAD_REFERENCE_DIRS:
+        problems.extend(f"forbidden: {entry}" for entry in entries if dead in entry)
+
+    for required in (f"{package}/AGENTS.md", f"{package}/CONTEXT-MAP.md"):
+        if required not in entries:
+            problems.append(f"missing: {required}")
+
+    if not any(entry.startswith(f"{package}/docs/mechanics/") for entry in entries):
+        problems.append("missing: every mechanics page")
+
+    return problems
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -145,11 +179,12 @@ def main(argv: list[str] | None = None) -> int:
             capture_output=True,
             check=True,
         )
-        subprocess.run(
-            ["tar", "-x", "-C", str(staging)],
-            input=archive_proc.stdout,
-            check=True,
-        )
+        # Extracted with the stdlib rather than an external `tar`, which Windows has no
+        # guarantee of. Map #108 makes Windows first-class for everything a user touches, and
+        # a release mechanism that dies before its first hygiene check is the worst place to
+        # discover a missing tool.
+        with tarfile.open(fileobj=io.BytesIO(archive_proc.stdout), mode="r|") as archive:
+            archive.extractall(staging, filter="data")
 
         # Gather all relative paths in staging for the allowlist.
         relpaths = [
@@ -246,40 +281,11 @@ def main(argv: list[str] | None = None) -> int:
             with zipfile.ZipFile(wheel_path, "r") as whl:
                 entries = whl.namelist()
 
-            # Build the forbidden prefix from DEAD_REFERENCE_DIRS without spelling it out.
-            # DEAD_REFERENCE_DIRS[0] is something like "src/kapps_semantic_middleware/docs/adr/",
-            # so we strip "src/" and use the rest as the wheel-entry prefix.
-            forbidden_repo_path = release_checks.DEAD_REFERENCE_DIRS[0]
-            forbidden_prefix = "/".join(forbidden_repo_path.split("/")[1:])
-
-            wheel_problems: list[str] = []
-
-            # No entry may contain the decision-record directory.
-            for entry in entries:
-                if entry.startswith(forbidden_prefix):
-                    wheel_problems.append(f"forbidden: {entry}")
-
-            # Required entries must be present.
-            package = "kapps_semantic_middleware"
-            required = [
-                f"{package}/AGENTS.md",
-                f"{package}/CONTEXT-MAP.md",
-            ]
-            for req in required:
-                if req not in entries:
-                    wheel_problems.append(f"missing: {req}")
-
-            # At least one mechanics file must exist.
-            mechanics_entries = [
-                e for e in entries if e.startswith(f"{package}/docs/mechanics/")
-            ]
-            if not mechanics_entries:
-                wheel_problems.append("missing: at least one mechanics page")
-
-            if wheel_problems:
+            problems = wheel_problems(entries)
+            if problems:
                 print(f"{RED}Wheel content violations:{OFF}", file=sys.stderr)
-                for v in wheel_problems:
-                    print(f"  {v}", file=sys.stderr)
+                for problem in problems:
+                    print(f"  {problem}", file=sys.stderr)
                 return 1
 
             print(f"Wheel has {len(entries)} entries; content checks passed.")
@@ -313,16 +319,19 @@ def main(argv: list[str] | None = None) -> int:
                     capture_output=True,
                 )
                 subprocess.run(
-                    [str(python_exe), "-c", f"import {package}"],
+                    [str(python_exe), "-c", f"import {PACKAGE}"],
                     check=True,
                     capture_output=True,
                 )
-                print(f"Import of {package} succeeded in isolated venv.")
+                print(f"Import of {PACKAGE} succeeded in isolated venv.")
             finally:
                 shutil.rmtree(venv_dir)
 
-        # Step 7: Run the five checks over the staging tree.
-        print(f"{BOLD}Running release checks...{OFF}")
+        # Step 7: checks 3-5 over the staging tree. Not 1 and 2: there is no git repo
+        # here yet (the branch is cut in step 8), so remotes and trailers have nothing to
+        # read. publish_release.py runs the full five against the release clone, which is
+        # where a wrong remote or a stray trailer could actually do damage.
+        print(f"{BOLD}Running tree checks (3-5)...{OFF}")
         violations = release_checks.run_tree_checks(staging)
         if violations:
             print(f"{RED}Release checks failed:{OFF}", file=sys.stderr)
