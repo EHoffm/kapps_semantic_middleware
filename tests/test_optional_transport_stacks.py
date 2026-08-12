@@ -223,7 +223,7 @@ def _mqtt_binding_for(*, host: str, port: int):
     with it. ``root_iri`` is left ``None``, which ``ParameterBinding`` documents as the
     by-hand case.
     """
-    from graph_db_interface import IRI
+    from kapps_triplestore_interface import IRI
 
     from kapps_semantic_middleware.connectors.semantic import ParameterBinding
     from kapps_semantic_middleware.connectors.mqtt_binding import MQTTBinding

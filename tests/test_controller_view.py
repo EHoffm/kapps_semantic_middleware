@@ -35,7 +35,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from kapps_ogm import OGM
 
 from kapps_semantic_middleware.connectors.rest_binding import (

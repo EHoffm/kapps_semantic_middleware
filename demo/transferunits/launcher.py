@@ -25,7 +25,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
-from graph_db_interface import GraphDB
+from kapps_triplestore_interface import GraphDB
 from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 from kapps_semantic_middleware.vocabulary import SVC
 

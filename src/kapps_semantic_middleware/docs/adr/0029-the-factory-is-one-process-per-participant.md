@@ -302,7 +302,7 @@ so the previous run's data sits in the repository until the next one begins. Mee
 requirement (start clean, never touch user data, leave no trace) needs a disposable repository per
 run, created and dropped around the work.
 
-That is deliberately **not** built here. `graph_db_interface` has no repository lifecycle at all — no
+That is deliberately **not** built here. `kapps_triplestore_interface` has no repository lifecycle at all — no
 create, no delete — so a disposable repository means raw GraphDB REST plus `ROLE_ADMIN`, which would
 make server-admin rights a prerequisite for running tests. The library is also mid-restructure into
 `kapps-triplestore-interface` (root ADR 0001's sibling policy; ticket #133), so the lifecycle belongs

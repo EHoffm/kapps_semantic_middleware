@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from kapps_ogm.utils.class_scope import ClassScope
 from rdflib import Literal
 from rdflib.namespace import RDF, RDFS

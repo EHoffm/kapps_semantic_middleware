@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from . import algorithm
 from .controller import Controller

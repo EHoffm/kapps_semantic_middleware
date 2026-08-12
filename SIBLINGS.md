@@ -13,9 +13,9 @@ dependencies** under root ADR 0001:
 
 ```toml
 [tool.uv.sources]
-aas-middleware     = { path = "../aas_middleware_inf", editable = true }
-kapps-ogm          = { path = "../kapps_ogm",          editable = true }
-graph-db-interface = { path = "../graph_db_interface", editable = true }
+aas-middleware              = { path = "../aas_middleware_inf",            editable = true }
+kapps-ogm                   = { path = "../kapps_ogm",                     editable = true }
+kapps-triplestore-interface = { path = "../kapps_triplestore_interface",   editable = true }
 ```
 
 That is a deliberate choice — it lets a defect be fixed where it lives instead of worked around
@@ -31,7 +31,7 @@ wrong commit produces a different failure**:
 
 | sibling on `main` | how it fails |
 |---|---|
-| `graph_db_interface` 2.0.1 | `mint_service_iri` rejects a `host:port` form; and `GraphDB` has no `close()`, so every live test session ends in `AttributeError` at fixture teardown — `close` arrived with `c90c940`, which is on `dev_semantic_middleware` and not on `main` |
+| `kapps_triplestore_interface` on the pre-fork tree | `mint_service_iri` rejects a `host:port` form; and `GraphDB` has no `close()`, so every live test session ends in `AttributeError` at fixture teardown — `close` arrived with `c90c940`, which is on `dev_semantic_middleware` and not on `main` |
 | `kapps_ogm` 0.1.2 | the seed step fails on the `isOccupied` range |
 | `aas_middleware_inf` | northbound sync goes deaf; ramping belts freeze short of their setpoint |
 
@@ -53,20 +53,15 @@ name in front of them, not a replacement for them.
 # 1. All four repositories side by side in one parent directory.
 git clone https://github.com/EHoffm/kapps_semantic_middleware.git
 git clone https://github.com/SAWeindel/kapps_ogm.git
-git clone https://github.com/JaFeKl/graph_db_interface.git
+git clone git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/kapps_triplestore_interface.git
 git clone git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git
 
-# 2. graph_db_interface's branch is on the SAWeindel FORK, not on origin.
-#    Cloning origin alone will not find it.
-git -C graph_db_interface remote add saweindel https://github.com/SAWeindel/graph_db_interface.git
-git -C graph_db_interface fetch saweindel
+# 2. Check out the pinned branch in each sibling. All three carry the same name.
+git -C kapps_triplestore_interface checkout dev_semantic_middleware
+git -C kapps_ogm                   checkout dev_semantic_middleware
+git -C aas_middleware_inf          checkout dev_semantic_middleware
 
-# 3. Check out the pinned branch in each sibling. All three carry the same name.
-git -C graph_db_interface checkout dev_semantic_middleware
-git -C kapps_ogm          checkout dev_semantic_middleware
-git -C aas_middleware_inf checkout dev_semantic_middleware
-
-# 4. Verify before building anything.
+# 3. Verify before building anything.
 cd kapps_semantic_middleware
 python scripts/check_siblings.py
 uv sync
@@ -76,12 +71,24 @@ The exact commits, and the reason for each, are in
 [`siblings.lock.toml`](siblings.lock.toml). `check_siblings.py` reads that file — it is the single
 source of truth, and this document only explains it.
 
-## `aas_middleware_inf` is private
+## Two of the three are private
 
-It lives on KIT's GitLab and has no public mirror. Without access to it the project cannot be built
-at all, because the two sync-layer fixes it carries (#92 and #94) are not in any released
-`aas-middleware`. There is no workaround. It also carries the manifest fix for #103, which changes
-no behaviour.
+`aas_middleware_inf` and `kapps_triplestore_interface` both live on KIT's GitLab and neither has a
+public mirror. Without access to them the project cannot be built at all: the two sync-layer fixes
+`aas_middleware_inf` carries (#92 and #94) are in no released `aas-middleware`, and there is no
+workaround. It also carries the manifest fix for #103, which changes no behaviour.
+
+`kapps_triplestore_interface` is the newer of the two and the reason the step that used to say
+*"its branch is on the SAWeindel FORK, not on origin"* is gone. #133 forked
+`JaFeKl/graph_db_interface`, renamed it, and gave it a home of its own -- so the branch and the
+repository finally agree, and there is one remote to add instead of two.
+
+Its public counterpart, `kapps-triplestore-interface` on PyPI, is a **publish target and not a
+mirror**: it receives one commit per release, so it is not somewhere to clone from and develop
+against.
+
+> The GitLab group `semantic_middleware_dev` is expected to be renamed to `KAPPS_Dev`. When that
+> happens, both URLs above and both in `siblings.lock.toml` move together.
 
 ## When a sibling moves
 

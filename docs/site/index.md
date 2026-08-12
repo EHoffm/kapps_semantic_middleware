@@ -62,7 +62,7 @@ GraphDB must be reachable before the first registration. Set the `GRAPHDB_*` env
 The middleware depends on a specific order of operations. Follow this sequence to reach a running middleware:
 
 ```python
-from graph_db_interface import GraphDB
+from kapps_triplestore_interface import GraphDB
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware, Mode
 from kapps_semantic_middleware.seeding import load_shared_ontologies

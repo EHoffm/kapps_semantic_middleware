@@ -45,7 +45,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import anyio
 from aas_middleware.middleware.registries import ConnectionInfo
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from kapps_semantic_middleware import Mode, SemanticMiddleware
 from kapps_semantic_middleware.connectors.rest_binding import RESTBinding

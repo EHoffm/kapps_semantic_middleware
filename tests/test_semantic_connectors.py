@@ -13,7 +13,7 @@ import json
 
 import pytest
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from pydantic import BaseModel
 
 from kapps_semantic_middleware.connectors.mqtt_binding import (

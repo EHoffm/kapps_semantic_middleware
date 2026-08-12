@@ -62,10 +62,10 @@ WHERE  { <…ConveyorBelt1_left> tu:hasConveyorSpeed ?oldbn1 .
 
 The link is deleted. The old node keeps topic, set topic and broker with **no inbound edge**. It is
 unreachable. The new node cannot reach the device. This is `#4`. The additional finding is that
-`graph_db_interface.triples_update` builds **two separate** blank-node→variable maps
+`kapps_triplestore_interface.triples_update` builds **two separate** blank-node→variable maps
 (`triple_multi.py:394-400`, `414-416`). A Python-stable `BNode` on both sides still becomes a
 freshly minted store node on the INSERT side. Identity preservation is therefore impossible today
-without a change in `graph_db_interface` as well.
+without a change in `kapps_triplestore_interface` as well.
 
 ### Stage 3 — scenario 3 cannot survive its own second startup
 
@@ -226,7 +226,7 @@ the Open World Assumption the absence of a triple is incompleteness. It is never
 closed-world statement. It must come from SHACL `sh:minCount` (`#3`). `allValuesFrom` is the correct
 vocabulary for typing. It constrains all values rather than asserts one exists.
 
-**R11 — Blank-node identity in `graph_db_interface`.** `triples_update` must build **one** blank-node→
+**R11 — Blank-node identity in `kapps_triplestore_interface`.** `triples_update` must build **one** blank-node→
 variable map shared across the DELETE and INSERT patterns. Emit `BIND(BNODE() AS ?v)` only for
 blank nodes exclusive to the new side. A `BNode` appearing on both sides *is* the same node. It must
 render as the same variable. Independent of skolemisation. Correct either way.
@@ -374,7 +374,7 @@ northbound-safety ordering. Decide how SHACL shapes target parameter nodes (with
 
 Plus the merged-spec work in `PropertySpec.specify`. Plus the five defects above.
 
-**`graph_db_interface`.** R11.
+**`kapps_triplestore_interface`.** R11.
 
 **`kapps_semantic_middleware` (Etienne).** Supply R8 source 2 from embedding code. Retire ADR 0023's
 static-facet caching (its purpose was to survive whole-node replacement. This no longer happens).

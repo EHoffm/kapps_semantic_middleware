@@ -21,6 +21,6 @@ The alternative of keeping blank nodes and preserving their labels in Python was
 - **ADR 0024's committed-value pattern is unblocked.** Its warning that committing a parameter orphans its connection metadata was the same defect. It can be lifted when the OGM change lands.
 - Domain experts keep authoring `[ … ]`. Authored Turtle is never rewritten. A `genid` IRI must never be hand-authored. Store and file then differ in form, never in meaning.
 - The minting authority for Skolem IRIs is an ontology-governance decision (Ratan). The IRIs become globally visible. They bind the CI/CD pipeline and the federation outlook in the paper's §7.
-- Depends on `SAWeindel/kapps_ogm#4`. It also depends on `graph_db_interface` rendering a blank node. That node appears on both sides of an update as one variable.
+- Depends on `SAWeindel/kapps_ogm#4`. It also depends on `kapps_triplestore_interface` rendering a blank node. That node appears on both sides of an update as one variable.
 
 Resolves part of wayfinder ticket #52 under map #24. See `docs/prd/kapps-ogm-anonymous-node-identity.md` requirements R1–R6 and R12.

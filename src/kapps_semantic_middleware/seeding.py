@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from importlib import resources
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from kapps_semantic_middleware.vocabulary import CORE_ONTOLOGY, MES_ONTOLOGY, SVC_ONTOLOGY
 

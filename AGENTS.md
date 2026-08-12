@@ -61,7 +61,7 @@ often *not* from `kapps_semantic_middleware`. Use this table rather than guessin
 | Name | Import from |
 |---|---|
 | `SemanticMiddleware`, `Mode` | `kapps_semantic_middleware` |
-| `IRI`, `GraphDB` | `graph_db_interface` |
+| `IRI`, `GraphDB` | `kapps_triplestore_interface` |
 | `OGM` | `kapps_ogm` |
 | `ClassScope` | `kapps_ogm.utils.class_scope` |
 | `SyncDirection` | `aas_middleware.middleware.sync.synced_connector` |
@@ -140,7 +140,7 @@ instances automatically but never mints classes. A domain-specific subclass of `
 all pre-exist. Startup fails immediately, naming the missing class.
 
 **All knowledge-graph writes go through the OGM.** Raw SPARQL `UPDATE` or direct
-`graph_db_interface` mutation calls bypass the validated write path, so the written node passes no
+`kapps_triplestore_interface` mutation calls bypass the validated write path, so the written node passes no
 shape check and a property replacement loses its atomicity — the intermediate state fails
 validation. Reads may use the access module directly; only writes are constrained.
 

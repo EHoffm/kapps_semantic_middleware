@@ -24,7 +24,7 @@ import anyio
 import httpx
 from fastapi import APIRouter
 from fastapi.responses import Response
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from pydantic import BaseModel
 
 from aas_middleware import Middleware

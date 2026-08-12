@@ -18,7 +18,7 @@ Operation/Mode registration and execution machinery. It delegates the actual gen
 parsing of workflow precondition/outcome SHACL shapes to the SHACL Interop context.
 
 Built on `aas_middleware` (forked by inheritance, being incrementally reimplemented locally),
-`kapps_ogm` (all knowledge graph reads/writes), and `graph_db_interface` (raw triple store
+`kapps_ogm` (all knowledge graph reads/writes), and `kapps_triplestore_interface` (raw triple store
 access, used directly where `kapps_ogm` has no equivalent yet, e.g. instance discovery).
 
 ## Language

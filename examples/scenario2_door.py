@@ -18,7 +18,7 @@ import time
 
 import httpx
 import uvicorn
-from graph_db_interface import GraphDB, IRI
+from kapps_triplestore_interface import GraphDB, IRI
 from rdflib.namespace import RDF
 
 from handlers import door_close, door_open, door_status, reset_door

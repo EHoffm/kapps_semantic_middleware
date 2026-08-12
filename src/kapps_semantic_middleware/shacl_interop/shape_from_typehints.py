@@ -84,7 +84,7 @@ def build_workflow_shape(
     elif isinstance(shape_iri, str):
         shape_iri = URIRef(shape_iri)
 
-    # Convert vocabulary IRIs (graph_db_interface.IRI) to rdflib.URIRef
+    # Convert vocabulary IRIs (kapps_triplestore_interface.IRI) to rdflib.URIRef
     precondition_iri = URIRef(str(SVC.precondition))
     outcome_iri = URIRef(str(SVC.outcome))
 

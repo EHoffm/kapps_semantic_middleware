@@ -38,7 +38,7 @@ from typing import (
 )
 
 from aas_middleware.middleware.sync.synced_connector import SyncDirection, SyncRole
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from kapps_semantic_middleware.vocabulary import INF, AccessMode
 

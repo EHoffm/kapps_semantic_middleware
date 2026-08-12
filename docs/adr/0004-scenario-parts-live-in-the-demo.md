@@ -106,7 +106,7 @@ both is precisely the drift a repository name must not suffer. A test reads the 
 is a stopgap for v0.1.0. It stops a stray variable reaching a real repository; it does not give a run
 a clean slate or leave no trace, because clearing still happens at the start of a run rather than the
 end. The full requirement needs a disposable repository created and dropped around each run — which
-`graph_db_interface` cannot express, having no repository lifecycle, and which would need
+`kapps_triplestore_interface` cannot express, having no repository lifecycle, and which would need
 `ROLE_ADMIN` if bolted on here.
 
 Ticket #149 moves that lifecycle onto the triplestore interface, where it belongs, and is blocked on

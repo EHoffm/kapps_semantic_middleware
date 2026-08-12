@@ -40,16 +40,32 @@ jobs:
           python-version: "3.12"
 
       # --- INTERIM, until #120 cuts the editable path sources -------------
-      # These three pins are the public GitHub sources proven on #116 to build
-      # the docs with nothing private involved. `aas_middleware` is pinned to
-      # 14aa60a, #111's chosen fork point --- NOT the `rest_generalization`
-      # tip, which has moved on to fb4b7a4 and carries the notification fanout
-      # #94 fixed. Once #120 lands, this whole block collapses to
-      # `pip install .`.
+      # Three pins that build the docs with nothing private involved, proven
+      # on #116. `aas_middleware` is pinned to 14aa60a, #111's chosen fork
+      # point --- NOT the `rest_generalization` tip, which has moved on to
+      # fb4b7a4 and carries the notification fanout #94 fixed. Once #120
+      # lands, this whole block collapses to `pip install .`.
+      #
+      # The triplestore interface is the one that is no longer a git pin. #133
+      # forked and renamed it and moved development to private GitLab, so there
+      # is no public git URL left to pin --- the only public source it will have
+      # is the index. The old line named `SAWeindel/graph_db_interface@da08373`,
+      # which is the commit 2.1.0 is cut from.
+      #
+      # **2.1.0 is not on PyPI yet.** #133's second workpackage uploads it, and
+      # until that lands this line cannot resolve. Nothing breaks meanwhile:
+      # this file is a template parked outside `.github/workflows/`, so it runs
+      # nowhere until #137 installs it in the release repo --- by which time
+      # the upload has either happened or #137 is blocked on it.
+      #
+      # `kapps-ogm` stays a git pin only until #119 releases it. Its manifest
+      # now asks for the triplestore interface by version, so pip resolves
+      # that from the index rather than from a second URL --- which is the
+      # whole reason #119 was blocked and now is not.
       - name: Install the library from public sources
         run: |
-          pip install "kapps-ogm @ git+https://github.com/SAWeindel/kapps_ogm@e447562"
-          pip install "graph-db-interface @ git+https://github.com/SAWeindel/graph_db_interface@da08373"
+          pip install "kapps-triplestore-interface>=2.1.0"
+          pip install "kapps-ogm @ git+https://github.com/SAWeindel/kapps_ogm@eec5297"
           pip install "aas-middleware @ git+https://github.com/sdm4fzi/aas_middleware@14aa60a"
           pip install "httpx>=0.27.0" "aiomqtt>=2.1.0"
           pip install --no-deps -e .

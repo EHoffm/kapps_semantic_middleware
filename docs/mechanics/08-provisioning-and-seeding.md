@@ -10,7 +10,7 @@ The order is fixed: construct the graph database, wrap it in an OGM, load the sh
 author and seed the domain data, then construct the middleware.
 
 ```python
-from graph_db_interface import GraphDB, IRI
+from kapps_triplestore_interface import GraphDB, IRI
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware, Mode
 from kapps_semantic_middleware.seeding import load_shared_ontologies, clear_repository

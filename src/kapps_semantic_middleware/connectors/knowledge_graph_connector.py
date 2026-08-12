@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import anyio
 
 if TYPE_CHECKING:
-    from graph_db_interface import IRI
+    from kapps_triplestore_interface import IRI
     from kapps_ogm import OGM
 
 

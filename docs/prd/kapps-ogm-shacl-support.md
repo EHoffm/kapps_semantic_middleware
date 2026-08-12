@@ -10,7 +10,7 @@ precondition/outcome representation. This needed SHACL. `kapps_ogm` has none.
 
 `kapps_ogm` has zero SHACL awareness today. Direct inspection confirmed this: no reference to
 `shacl`, `ValidationReport`, or the `sh:` namespace exists anywhere in `kapps_ogm` or
-`graph_db_interface`. Two independent needs in `kapps_semantic_middleware` want SHACL support.
+`kapps_triplestore_interface`. Two independent needs in `kapps_semantic_middleware` want SHACL support.
 Both currently cannot get it from `kapps_ogm`:
 
 1. **Reading workflow signatures.** Workflow/StateProperty classes carry a `sh:NodeShape`
@@ -25,7 +25,7 @@ Both currently cannot get it from `kapps_ogm`:
 2. **Interpretation of SHACL validation rejections.** When GraphDB rejects a commit because a
    SHACL constraint is violated (e.g. UC2's `:FlexConveyorModuleShape` `sh:maxCount`
    example from the paper), the rejection currently surfaces through
-   `graph_db_interface.GraphDbException` as an unparsed string: `f"Error while querying
+   `kapps_triplestore_interface.GraphDbException` as an unparsed string: `f"Error while querying
    GraphDB ({status_code}) - {response.text}"`. The SHACL `ValidationReport` (focus
    node, constraint, message) is embedded as raw, unstructured Turtle/RDF text inside that
    string. `kapps_ogm.OGM.commit()` wraps DB failures in a bare `Exception(...)` on top of
@@ -44,7 +44,7 @@ Both currently cannot get it from `kapps_ogm`:
   described in the SHACL Interop ADR referenced above) should map onto the existing
   nested-`ClassSpec`/`COMPLEX` handling.
 - **R2 — Structured SHACL validation errors.** A dedicated exception type exists (in
-  `graph_db_interface`, surfaced through `kapps_ogm`). It carries parsed `sh:focusNode`,
+  `kapps_triplestore_interface`, surfaced through `kapps_ogm`). It carries parsed `sh:focusNode`,
   `sh:resultPath`, `sh:sourceConstraintComponent`, `sh:resultMessage`,
   `sh:sourceShape`. Not a string to be re-parsed by every caller. GraphDB's SHACL
   validation reports are themselves RDF (see the paper's own Listing 2). This is a parsing

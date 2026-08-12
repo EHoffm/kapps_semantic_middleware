@@ -25,7 +25,7 @@ Three things had to be true at once for a local patch to be the right call. Only
   people who work on blank-node semantics on the author list. That decision belongs with the ontology
   engineer and the OGM owner, not in a downstream patch.
 
-The counterpart decision is that the **`graph_db_interface` half is** a bugfix. It is treated as one:
+The counterpart decision is that the **`kapps_triplestore_interface` half is** a bugfix. It is treated as one:
 `triples_update` builds two separate blank-node→variable maps. A blank node appearing on both sides
 of an update renders as two different variables. The INSERT side always mints a new store node. A
 node present on both sides *is* the same node. That is a local, self-contained correction. It is
