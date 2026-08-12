@@ -12,3 +12,6 @@ build/
 # Written by scripts/prepare_release.py: the reviewed branch tip that publish_release.py
 # refuses to move past. Local state about one release run, not a fact about the project.
 .release-state.json
+# Sphinx build output (#116). The docs site is deployed as a Pages artifact,
+# never committed -- the release repo keeps one clean commit of source only.
+docs/site/_build/
