@@ -15,7 +15,6 @@ the `GRAPHDB_*` env vars are absent.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +24,7 @@ from graph_db_interface import IRI
 
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware.credentials import graphdb_env_present, graphdb_for
 from kapps_semantic_middleware.registration import (
     mint_service_iri,
     services_of_resource,
@@ -34,10 +34,7 @@ from kapps_semantic_middleware.registration import (
 from kapps_semantic_middleware.vocabulary import SVC
 
 requires_graphdb = pytest.mark.skipif(
-    not all(
-        os.getenv(n)
-        for n in ("GRAPHDB_URL", "GRAPHDB_USERNAME", "GRAPHDB_PASSWORD", "GRAPHDB_REPOSITORY")
-    ),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 
@@ -96,7 +93,7 @@ def _hello_instance(graphdb, port: int) -> SemanticMiddleware:
         mode="resource",
         resource_iri=seed.HELLO_RESOURCE,
         service_class=seed.HELLO_SERVICE_CLASS,
-        ogm=OGM(db=graphdb.__class__.from_env()),
+        ogm=OGM(db=graphdb_for(graphdb.repository)),
         host="127.0.0.1",
         port=port,
     )

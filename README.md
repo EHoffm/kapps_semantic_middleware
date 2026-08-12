@@ -36,8 +36,19 @@ Docker is needed only for the examples and the demo, never for the library itsel
    ```bash
    cp .env.example .env
    ```
-   Or export the four `GRAPHDB_*` variables manually. The examples and demo read them to reach
-   GraphDB.
+   Or export the three `GRAPHDB_*` variables manually — in your shell, or in `~/.bashrc` to keep
+   them:
+   ```bash
+   export GRAPHDB_URL=http://localhost:7200
+   export GRAPHDB_USERNAME=admin
+   export GRAPHDB_PASSWORD=root
+   ```
+   Three, not four. `GraphDBCredentials.from_env()` in `graph_db_interface` reads a fourth,
+   `GRAPHDB_REPOSITORY`, and consumer code that connects to a repository of its own may still use
+   it. Nothing in this project does: the examples and demo use `kapps-demo`, and the test suite
+   uses `Tests`, each named in code (see `kapps_semantic_middleware.credentials`). A
+   `GRAPHDB_REPOSITORY` you already have set is ignored rather than obeyed, because these are the
+   parts that wipe and re-seed whatever they connect to.
 
 3. Reset or isolate the repository:
    ```bash
@@ -45,8 +56,13 @@ Docker is needed only for the examples and the demo, never for the library itsel
    ```
    This wipes the throwaway repository. The demo re-seeds it on the next run.
 
-**Warning:** Never point `GRAPHDB_URL` or `GRAPHDB_REPOSITORY` at a shared GraphDB instance.
-The demo wipes whatever repository you name.
+**Warning:** Never point `GRAPHDB_URL` at a shared GraphDB instance. The demo wipes and re-seeds the
+repository it uses on every run.
+
+The repository itself is not yours to choose: the demo and the examples pin `kapps-demo`, the one
+`docker compose` creates, and the test suite pins its own. A `GRAPHDB_REPOSITORY` in your environment
+is ignored by all of them, so a stray value cannot direct a wipe at a repository you care about
+(issue #146). Only `GRAPHDB_URL`, `GRAPHDB_USERNAME` and `GRAPHDB_PASSWORD` are read.
 
 ## Where things are
 

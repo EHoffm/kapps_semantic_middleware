@@ -9,7 +9,6 @@ service, and appears in its own discovery list.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -20,19 +19,12 @@ from kapps_ogm import OGM
 
 from demo.transferunits.controller import Controller, ResourceInfo
 from kapps_semantic_middleware.connectors.rest_binding import build_parameter_path
+from kapps_semantic_middleware.credentials import graphdb_env_present
 from kapps_semantic_middleware.registration import mint_service_iri, register_service
 from kapps_semantic_middleware.vocabulary import CFC, SVC
 
 requires_graphdb = pytest.mark.skipif(
-    not all(
-        os.getenv(n)
-        for n in (
-            "GRAPHDB_URL",
-            "GRAPHDB_USERNAME",
-            "GRAPHDB_PASSWORD",
-            "GRAPHDB_REPOSITORY",
-        )
-    ),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables are not set. The test skips live-GraphDB integration.",
 )
 

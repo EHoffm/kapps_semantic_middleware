@@ -13,7 +13,6 @@ Run from a debugger or as a script. The numbered functions are convenient breakp
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 
@@ -25,6 +24,7 @@ from rdflib.namespace import RDF
 from handlers import door_close, door_open, door_status, reset_door
 from kapps_ogm import OGM
 from kapps_semantic_middleware import Mode, SemanticMiddleware
+from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 from kapps_semantic_middleware.registration import (
     mint_capability_iri,
     mint_state_property_iri,
@@ -233,8 +233,8 @@ def step_6_shutdown(
 
 def main() -> None:
     """Run the complete Scenario 2 lifecycle."""
-    db = GraphDB.from_env()
-    print(f"Connected to GraphDB repository: {os.getenv('GRAPHDB_REPOSITORY')}")
+    db = graphdb_for(DEMO_REPOSITORY)
+    print(f"Connected to GraphDB repository: {db.repository}")
 
     step_1_seed_clean_repository(db)
     door_mw, server, thread = step_2_start_door_middleware(db)
@@ -249,7 +249,7 @@ def main() -> None:
             mode=Mode.RESOURCE,
             resource_iri=seed.MOBILE_ROBOT,
             service_class=seed.MOBILE_ROBOT_SERVICE_CLASS,
-            ogm=OGM(db=GraphDB.from_env()),
+            ogm=OGM(db=graphdb_for(DEMO_REPOSITORY)),
             host="127.0.0.1",
             port=ROBOT_PORT,
         )

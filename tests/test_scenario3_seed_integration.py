@@ -12,24 +12,16 @@ value itself, so a parameter node carries a unit and its connection metadata and
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import pytest
 
 from kapps_ogm import OGM
+from kapps_semantic_middleware.credentials import graphdb_env_present
 
 requires_graphdb = pytest.mark.skipif(
-    not all(
-        os.getenv(n)
-        for n in (
-            "GRAPHDB_URL",
-            "GRAPHDB_USERNAME",
-            "GRAPHDB_PASSWORD",
-            "GRAPHDB_REPOSITORY",
-        )
-    ),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 

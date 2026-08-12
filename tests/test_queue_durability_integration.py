@@ -11,7 +11,6 @@ are absent (see conftest).
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -19,6 +18,7 @@ import pytest
 
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware
+from kapps_semantic_middleware.credentials import graphdb_env_present, graphdb_for
 from kapps_semantic_middleware.registration import (
     create_operation,
     find_resource_operations,
@@ -32,10 +32,7 @@ from kapps_semantic_middleware.registration import (
 from kapps_semantic_middleware.vocabulary import CFC, OperationStatus, SVC
 
 requires_graphdb = pytest.mark.skipif(
-    not all(
-        os.getenv(n)
-        for n in ("GRAPHDB_URL", "GRAPHDB_USERNAME", "GRAPHDB_PASSWORD", "GRAPHDB_REPOSITORY")
-    ),
+    not graphdb_env_present(),
     reason="GRAPHDB_* environment variables not set; skipping live-GraphDB integration test",
 )
 
@@ -90,7 +87,7 @@ def _resource_middleware(graphdb):
         mode="resource",
         resource_iri=seed.HELLO_RESOURCE,
         service_class=seed.HELLO_SERVICE_CLASS,
-        ogm=OGM(db=graphdb.__class__.from_env()),
+        ogm=OGM(db=graphdb_for(graphdb.repository)),
         host="127.0.0.1",
         port=8993,
     )
@@ -147,7 +144,7 @@ def test_watchdog_sweeps_stranded_operations(graphdb):
     running_op = _create_op(ogm, cap_iri, OperationStatus.RUNNING)
 
     # The service advertised an address but never heartbeated -> stale. A watchdog sweeps it.
-    watchdog = SemanticMiddleware(mode="watchdog", ogm=OGM(db=graphdb.__class__.from_env()))
+    watchdog = SemanticMiddleware(mode="watchdog", ogm=OGM(db=graphdb_for(graphdb.repository)))
     swept = asyncio.run(watchdog.sweep())
 
     assert service_iri in swept

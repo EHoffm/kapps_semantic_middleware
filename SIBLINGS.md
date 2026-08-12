@@ -31,7 +31,7 @@ wrong commit produces a different failure**:
 
 | sibling on `main` | how it fails |
 |---|---|
-| `graph_db_interface` 2.0.1 | `mint_service_iri` rejects a `host:port` form |
+| `graph_db_interface` 2.0.1 | `mint_service_iri` rejects a `host:port` form; and `GraphDB` has no `close()`, so every live test session ends in `AttributeError` at fixture teardown — `close` arrived with `c90c940`, which is on `dev_semantic_middleware` and not on `main` |
 | `kapps_ogm` 0.1.2 | the seed step fails on the `isOccupied` range |
 | `aas_middleware_inf` | northbound sync goes deaf; ramping belts freeze short of their setpoint |
 

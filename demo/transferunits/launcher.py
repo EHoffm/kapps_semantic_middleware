@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
 from graph_db_interface import GraphDB
+from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 from kapps_semantic_middleware.vocabulary import SVC
 
 from . import seed
@@ -165,6 +166,11 @@ def _spawn_middleware(unit_index: int) -> ChildHandle:
         str(unit_index),
         "--port",
         "0",
+        # Named, not inherited: the child ignores GRAPHDB_REPOSITORY (issue #146), so a
+        # shared default is the only other thing that could keep parent and child in one
+        # graph -- and a default is exactly what drifts when one side changes.
+        "--repository",
+        DEMO_REPOSITORY,
     ]
     cmdline_str = " ".join(cmdline)
     print(cmdline_str, flush=True)
@@ -224,7 +230,7 @@ def probe_and_seed(units: int, force: bool = False) -> None:
     Raises:
         RuntimeError: A live factory exists, and force is False.
     """
-    db = GraphDB.from_env()
+    db = graphdb_for(DEMO_REPOSITORY)
     live_services = seed.factory_is_live(db)
 
     if live_services and not force:
@@ -319,7 +325,7 @@ class Factory:
 
     def __init__(self) -> None:
         self.children: List[ChildHandle] = []
-        self._db = GraphDB.from_env()
+        self._db = graphdb_for(DEMO_REPOSITORY)
 
     def start(self, units: int, force: bool = False) -> None:
         """Seed the graph and spawn every participant. Blocking; call once at startup.

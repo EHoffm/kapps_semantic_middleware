@@ -63,19 +63,22 @@ If it prints green ticks, you are ready. If not, it prints exactly what to run.
 
 ### 3. A GraphDB database
 
-GraphDB stores the knowledge graph. The demo reads and writes it. Put these four values in your
+GraphDB stores the knowledge graph. The demo reads and writes it. Put these three values in your
 environment (for example in a `.env` file, or with `export`):
 
 ```bash
 export GRAPHDB_URL=https://your-graphdb-server
 export GRAPHDB_USERNAME=your-username
 export GRAPHDB_PASSWORD=your-password
-export GRAPHDB_REPOSITORY=the-repository-name
 ```
 
-> **Warning.** The demo **writes into** the repository you name here, and `--force` **deletes and
-> rewrites** the demo's data in it. Use a repository you are allowed to overwrite. Do not point this
-> at anything you care about.
+There is no fourth value. The demo always uses the repository named **`kapps-demo`**, which is the
+one `docker compose` creates for you, and it names that in code rather than reading it from your
+environment. A `GRAPHDB_REPOSITORY` you happen to have set is ignored (issue #146).
+
+> **Warning.** The demo **writes into** `kapps-demo`, and `--force` **deletes and rewrites** the
+> demo's data in it. Point `GRAPHDB_URL` at a GraphDB you are allowed to overwrite — the repository
+> is pinned, but the server is not, and a `kapps-demo` on a shared server is still somebody's.
 
 You do **not** need to install an MQTT broker. Each machine starts its own, inside its own process.
 

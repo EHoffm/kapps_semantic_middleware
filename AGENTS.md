@@ -67,6 +67,7 @@ often *not* from `kapps_semantic_middleware`. Use this table rather than guessin
 | `SyncDirection` | `aas_middleware.middleware.sync.synced_connector` |
 | `ConnectionInfo` | `aas_middleware.middleware.registries` |
 | `INF` (the interface vocabulary) | `kapps_semantic_middleware.vocabulary` |
+| `graphdb_for`, `credentials_for` | `kapps_semantic_middleware.credentials` |
 | `DataModel`, `Reference`, `Identifier` | `kapps_semantic_middleware` (re-exported from `aas_middleware`) |
 
 Binding internals, if you are adding a protocol, live under
@@ -79,6 +80,15 @@ Binding internals, if you are adding a protocol, live under
 ## Consumption rules
 
 ### These fail silently
+
+**`GraphDB.from_env()` connects to whatever `GRAPHDB_REPOSITORY` names, and seeding destroys what it
+connects to.** `seeding.clear_repository` clears the default graph of the client's current
+repository, so a value left over in a shell — from another project, another checkout, a `.bashrc`
+written months ago — silently redirects a wipe. Nothing validates that the repository was the one you
+meant; it only has to exist. Use `credentials.graphdb_for("name")`, which names the repository in
+code and ignores the variable, for anything that seeds, clears, or re-seeds. Note this hazard belongs
+to the *variable*, not the server: pinning the repository does not stop `GRAPHDB_URL` pointing at a
+shared instance.
 
 **A `ClassScope` terminates at a Parameter and cannot select within one.** Any chain element below
 a complex property is silently discarded during fetch. A view that tries to reach inside a

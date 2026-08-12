@@ -19,11 +19,11 @@ import asyncio
 import socket
 import threading
 
-from graph_db_interface import GraphDB
 from kapps_ogm import OGM
 from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware import Mode, SemanticMiddleware
+from kapps_semantic_middleware.credentials import DEMO_REPOSITORY, graphdb_for
 
 from . import seed
 
@@ -127,6 +127,16 @@ async def main() -> None:
     )
     parser.add_argument("--host", type=str, default="127.0.0.1", help="The host to bind")
     parser.add_argument("--port", type=int, default=0, help="The port to bind (0 = free)")
+    parser.add_argument(
+        "--repository",
+        type=str,
+        default=DEMO_REPOSITORY,
+        help=(
+            f"The GraphDB repository to join (default: {DEMO_REPOSITORY}). A caller that "
+            "spawns this process must pass the repository it is itself using, since the "
+            "environment deliberately cannot name one (issue #146)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.port == 0:
@@ -141,7 +151,7 @@ async def main() -> None:
         else str(seed._mint_transfer_unit_iri(args.unit_index))
     )
 
-    db = GraphDB.from_env()
+    db = graphdb_for(args.repository)
     ogm = OGM(db=db)
     class_scope = ClassScope.from_property_chains(
         [
