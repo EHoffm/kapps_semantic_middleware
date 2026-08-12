@@ -2,6 +2,10 @@
 
 One of five contexts in this repo — see `/CONTEXT-MAP.md` at the repo root for the others.
 
+> This file defines the **vocabulary**. For how to *use* the mechanisms it names, read `AGENTS.md`
+> and the `docs/mechanics/` set beside it — workflow signatures and the shapes derived from them
+> are covered by `docs/mechanics/02-workflow-registration.md`.
+
 Temporary scaffolding (see
 `src/kapps_semantic_middleware/shacl_interop/docs/adr/0001-shacl-for-workflow-signatures.md`)
 that generates
