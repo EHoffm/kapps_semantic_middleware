@@ -51,10 +51,10 @@ backend, from poetry-core to hatchling, because poetry-core writes only the firs
 
 [kapps_ogm]
 path = "../kapps_ogm"
-url = "https://github.com/SAWeindel/kapps_ogm.git"
+url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/kapps_ogm.git"
 remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "eec5297"
+commit = "4f7ab73"
 why = """
 Conjunctive `rdfs:range`. `main` (0.1.2) raises on a class with several declared ranges, which
 blocks both additive extension of the fixed `tu:` properties and ranges on the interface
@@ -68,6 +68,28 @@ and it is the reason the pin could not simply be left behind: its git-branch pin
 library is gone, replaced by `kapps-triplestore-interface >= 2.1.0`. That is what unblocks
 #119 -- PyPI rejects a distribution whose metadata carries a direct URL -- and it is what let
 this project's `[tool.uv] override-dependencies` hack die a ticket early.
+
+**The URL above changed with #119, and it is the first time one of these has.** Development
+moved from `github.com/SAWeindel/kapps_ogm` to private KIT GitLab, which is what makes all
+three siblings the same kind of thing: private dev repository, public publish target under
+`circularfactory`. The old repository is public and carries 18 agent-coauthored commits.
+
+Moved from eec5297 to 4f7ab73 for #119 itself, which vendored the release mechanism into
+`scripts/` and `tests_release/` and migrated the manifest from poetry-core to hatchling.
+**Package code is untouched** -- `git diff eec5297..4f7ab73 -- kapps_ogm/` is empty -- so this
+project imports exactly what it imported before. What moved is everything around it.
+
+Two parts of that do reach this project, though, which is why this is not a pin catching up
+with a branch:
+
+1. **The manifest is PEP 621 now**, so a resolve re-reads it and rewrites `uv.lock`. That diff
+   is real and belongs in the same commit as this pin; do not `git restore` it.
+2. **The version is 0.2.0**, not 0.1.2. The floor in `pyproject.toml` here is unaffected while
+   the path source stands, but it stops being a path source in #120, and 0.2.0 is the number
+   that will be pinned then.
+
+The 0.2.0 wheel was built and this project's full `-m "not live"` tier was run against it as
+part of preparing the release: 462 passed, 1 skipped.
 """
 
 [aas_middleware_inf]

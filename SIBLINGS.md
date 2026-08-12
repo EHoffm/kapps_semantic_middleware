@@ -52,7 +52,7 @@ name in front of them, not a replacement for them.
 ```bash
 # 1. All four repositories side by side in one parent directory.
 git clone https://github.com/EHoffm/kapps_semantic_middleware.git
-git clone https://github.com/SAWeindel/kapps_ogm.git
+git clone git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/kapps_ogm.git
 git clone git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/kapps_triplestore_interface.git
 git clone git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/aas_middleware_inf.git
 
@@ -71,21 +71,27 @@ The exact commits, and the reason for each, are in
 [`siblings.lock.toml`](siblings.lock.toml). `check_siblings.py` reads that file — it is the single
 source of truth, and this document only explains it.
 
-## Two of the three are private
+## All three are private
 
-`aas_middleware_inf` and `kapps_triplestore_interface` both live on KIT's GitLab and neither has a
-public mirror. Without access to them the project cannot be built at all: the two sync-layer fixes
-`aas_middleware_inf` carries (#92 and #94) are in no released `aas-middleware`, and there is no
-workaround. It also carries the manifest fix for #103, which changes no behaviour.
+**Since #119, and it took three tickets to get here.** All three siblings now live on KIT's
+GitLab and none has a public mirror. Without access to them the project cannot be built at all:
+the two sync-layer fixes `aas_middleware_inf` carries (#92 and #94) are in no released
+`aas-middleware`, and there is no workaround. It also carries the manifest fix for #103, which
+changes no behaviour.
 
-`kapps_triplestore_interface` is the newer of the two and the reason the step that used to say
-*"its branch is on the SAWeindel FORK, not on origin"* is gone. #133 forked
-`JaFeKl/graph_db_interface`, renamed it, and gave it a home of its own -- so the branch and the
-repository finally agree, and there is one remote to add instead of two.
+`kapps_triplestore_interface` arrived second, and is the reason the step that used to say *"its
+branch is on the SAWeindel FORK, not on origin"* is gone. #133 forked `JaFeKl/graph_db_interface`,
+renamed it, and gave it a home of its own -- so the branch and the repository finally agree, and
+there is one remote to add instead of two.
 
-Its public counterpart, `kapps-triplestore-interface` on PyPI, is a **publish target and not a
-mirror**: it receives one commit per release, so it is not somewhere to clone from and develop
-against.
+`kapps_ogm` arrived last, in #119, and it is the only one that **moved** rather than being
+created. It was at `github.com/SAWeindel/kapps_ogm`, public, carrying 18 agent-coauthored
+commits. That repository still exists; it is not the one this project builds against, and a
+clone of it will not satisfy `check_siblings.py`.
+
+Their public counterparts on PyPI -- `kapps-triplestore-interface` and `kapps-ogm` -- are
+**publish targets and not mirrors**: each receives one commit per release, so neither is
+somewhere to clone from and develop against.
 
 > The GitLab group `semantic_middleware_dev` is expected to be renamed to `KAPPS_Dev`. When that
 > happens, both URLs above and both in `siblings.lock.toml` move together.
