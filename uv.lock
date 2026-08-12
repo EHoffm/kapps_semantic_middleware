@@ -25,7 +25,6 @@ dependencies = [
     { name = "exceptiongroup" },
     { name = "fastapi" },
     { name = "graphene-pydantic" },
-    { name = "httpx" },
     { name = "importlib-metadata" },
     { name = "mkdocstrings", extra = ["python-legacy"] },
     { name = "pydantic" },
@@ -48,7 +47,6 @@ requires-dist = [
     { name = "exceptiongroup", specifier = ">=1.2.2,<2.0.0" },
     { name = "fastapi", specifier = ">=0.111.0,<0.112.0" },
     { name = "graphene-pydantic", specifier = ">=0.6.1,<0.7.0" },
-    { name = "httpx", specifier = ">=0.27.0,<0.28.0" },
     { name = "importlib-metadata", specifier = ">=8.0.0,<9.0.0" },
     { name = "mkdocstrings", extras = ["python-legacy"], specifier = ">=0.25.1,<0.26.0" },
     { name = "pydantic", specifier = ">=2.7.1,<3.0.0" },
@@ -1624,16 +1622,22 @@ source = { editable = "." }
 dependencies = [
     { name = "aas-middleware" },
     { name = "aiomqtt" },
+    { name = "fastapi" },
     { name = "graph-db-interface" },
     { name = "httpx" },
     { name = "kapps-ogm" },
 ]
 
 [package.optional-dependencies]
-demonstrations = [
+examples = [
     { name = "amqtt" },
-    { name = "fastapi" },
+    { name = "rdflib" },
     { name = "uvicorn" },
+]
+notebooks = [
+    { name = "jupyter" },
+    { name = "jupytext" },
+    { name = "nbconvert" },
 ]
 
 [package.dev-dependencies]
@@ -1654,14 +1658,18 @@ dev = [
 requires-dist = [
     { name = "aas-middleware", editable = "../aas_middleware_inf" },
     { name = "aiomqtt", specifier = ">=2.1.0" },
-    { name = "amqtt", marker = "extra == 'demonstrations'", specifier = ">=0.11.0" },
-    { name = "fastapi", marker = "extra == 'demonstrations'", specifier = ">=0.111.0" },
+    { name = "amqtt", marker = "extra == 'examples'", specifier = ">=0.11.0" },
+    { name = "fastapi", specifier = ">=0.111.0" },
     { name = "graph-db-interface", editable = "../graph_db_interface" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "jupyter", marker = "extra == 'notebooks'", specifier = ">=1.1.1" },
+    { name = "jupytext", marker = "extra == 'notebooks'", specifier = ">=1.16.0" },
     { name = "kapps-ogm", editable = "../kapps_ogm" },
-    { name = "uvicorn", marker = "extra == 'demonstrations'", specifier = ">=0.29.0" },
+    { name = "nbconvert", marker = "extra == 'notebooks'", specifier = ">=7.16.0" },
+    { name = "rdflib", marker = "extra == 'examples'", specifier = ">=7.1.3" },
+    { name = "uvicorn", marker = "extra == 'examples'", specifier = ">=0.29.0" },
 ]
-provides-extras = ["demonstrations"]
+provides-extras = ["examples", "notebooks"]
 
 [package.metadata.requires-dev]
 dev = [
