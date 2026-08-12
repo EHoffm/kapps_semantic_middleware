@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import io
 import shutil
@@ -350,64 +351,57 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{DIM}[dry-run] Would copy staging tree and commit.{OFF}")
             tip_sha = "(not computed in dry-run)"
         else:
-            # Delete any existing local prepare-release branch.
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "branch", "-D", "prepare-release"],
-                capture_output=True,
-            )
+            # The branch is built with plumbing, so the developer's working tree is never
+            # touched. The obvious implementation -- checkout -b, `git rm -rf .`, copy the
+            # staging tree in, commit -- leaves the checkout sitting on `prepare-release` with
+            # the *filtered* tree in it. That is alarming on its own (half of `scripts/` and
+            # every decision record appear to have been deleted), and it is worse than
+            # alarming: the next command a developer runs, including `publish_release.py`, is
+            # read out of a tree that no longer contains it. Found by exactly that accident.
+            #
+            # Writing a tree from a scratch index costs three plumbing calls and cannot do any
+            # of it: nothing is checked out, nothing is removed, HEAD does not move.
+            index_file = staging.parent / f"{staging.name}.index"
+            git_env = {
+                **os.environ,
+                "GIT_INDEX_FILE": str(index_file),
+                "GIT_WORK_TREE": str(staging),
+            }
 
-            # Create fresh branch from --from.
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "checkout", "-b", "prepare-release", args.from_branch],
+            def git_plumbing(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-C", str(REPO_ROOT), *args],
+                    env=git_env,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+
+            git_plumbing("add", "-A")
+            tree_sha = git_plumbing("write-tree")
+
+            # Parent is the branch being released from, so the release branch reads as a diff
+            # against it -- which is the whole point of stopping here for review.
+            parent_sha = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "rev-parse", args.from_branch],
+                capture_output=True,
+                text=True,
                 check=True,
-                capture_output=True,
-            )
+            ).stdout.strip()
 
-            # Remove every tracked file from the working tree.
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "rm", "-rf", "."],
-                check=True,
-                capture_output=True,
+            tip_sha = git_plumbing(
+                "commit-tree", tree_sha, "-p", parent_sha, "-m", f"release: v{args.version}"
             )
+            git_plumbing("update-ref", "refs/heads/prepare-release", tip_sha)
+            index_file.unlink(missing_ok=True)
 
-            # Copy the staging tree in.
-            for item in staging.iterdir():
-                dest = REPO_ROOT / item.name
-                if item.is_dir():
-                    if dest.exists():
-                        shutil.rmtree(dest)
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
-
-            # git add -A and commit.
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "add", "-A"],
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "commit", "-m", f"release: v{args.version}"],
-                check=True,
-                capture_output=True,
-            )
-
-            # Step 9: Push prepare-release to origin.
+            # Step 9: push the review branch to the DEV repo. Force is acceptable here and
+            # only here: `prepare-release` is regenerated from scratch every release and holds
+            # nothing anyone should build on. Nothing in publish_release.py ever force-pushes.
             subprocess.run(
                 ["git", "-C", str(REPO_ROOT), "push", "-f", "origin", "prepare-release"],
                 check=True,
                 capture_output=True,
-            )
-
-            # Get the tip SHA.
-            tip_sha = (
-                subprocess.run(
-                    ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                .stdout.strip()
             )
 
         # Step 10: Record the tip.
