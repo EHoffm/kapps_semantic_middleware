@@ -1,3 +1,16 @@
+> ## This repository is an archive
+>
+> **Development of `kapps_semantic_middleware` has moved to a private KIT GitLab instance.**
+> The issue tracker here is frozen and read-only; every issue and pull request stays at the
+> number it has, because the published package cites those numbers 683 times and this
+> repository's permanent history cites them 441 more.
+>
+> See **[#170](../../issues/170)** for what moved where. The released package is
+> [`kapps-semantic-middleware` on PyPI](https://pypi.org/project/kapps-semantic-middleware/),
+> published from `github.com/circularfactory/kapps_semantic_middleware`.
+>
+> Nothing below this line is maintained here any more.
+
 # kapps_semantic_middleware
 
 Semantic middleware for industrial data integration, built on `aas_middleware`. A resource's state
