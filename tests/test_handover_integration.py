@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from rdflib.namespace import RDF
 
 from kapps_ogm import OGM

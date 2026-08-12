@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from demo.transferunits import seed
 from demo.transferunits.launcher import _spawn_plc, _strip_graphdb_env

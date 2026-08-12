@@ -4,7 +4,7 @@ A Workflow's precondition (arguments) and outcome (return value) are represented
 `NodeShape` targeting the Workflow's class (`sh:targetClass`, not `sh:targetNode`), built
 from the decorated Python function's type hints. This is scaffolding: `kapps_ogm` has no
 SHACL support today (confirmed: zero references to SHACL/`ValidationReport`/`sh:` anywhere
-in `kapps_ogm` or `graph_db_interface`), so the generation and parsing logic for these shapes
+in `kapps_ogm` or `kapps_triplestore_interface`), so the generation and parsing logic for these shapes
 lives temporarily inside `kapps_semantic_middleware` itself, clearly marked as a stopgap, in
 place of the natural long-term home for this logic.
 

@@ -4,7 +4,7 @@ This page describes every path by which a consumer causes data to change — wha
 
 ## All Graph Writes Go Through the OGM
 
-Every knowledge-graph write must go through `kapps_ogm.OGM`. Use `OGM.create` for new typed individuals. Use `OGM.commit` for adding, removing, or replacing properties. No write issues raw SPARQL UPDATE. No write calls `graph_db_interface` mutation methods directly. Reads may use the access module (`ogm.db`) directly; only writes are constrained.
+Every knowledge-graph write must go through `kapps_ogm.OGM`. Use `OGM.create` for new typed individuals. Use `OGM.commit` for adding, removing, or replacing properties. No write issues raw SPARQL UPDATE. No write calls `kapps_triplestore_interface` mutation methods directly. Reads may use the access module (`ogm.db`) directly; only writes are constrained.
 
 Writes that bypass the OGM skip validation and break atomicity guarantees. A replacement of a cardinality-constrained property requires the removal and insertion to apply in one transaction. The intermediate state — zero possessors during a handover, for example — fails validation without atomicity.
 

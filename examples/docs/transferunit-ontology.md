@@ -136,7 +136,7 @@ within `[0, maxSpeed]`) is explicitly out of map #24 scope.
 
 The `inf:` terms are authored under the existing CrcInterfaces IRI, which already defines `hasValue`,
 `hasMQTTTopic`, `hasMQTTBrokerIP` and the `isInterfaceAccessible*` hierarchy — so the TransferUnit stays
-vocabulary-compatible with the minimal example shared across `graph_db_interface` and `kapps_ogm`.
+vocabulary-compatible with the minimal example shared across `kapps_triplestore_interface` and `kapps_ogm`.
 CrcInterfaces is deprecated; the consolidation capstone (#39) re-homes these terms under the `inf:` name
 it mints, which is one constant in `vocabulary.py` plus this file (ADR 0021).
 

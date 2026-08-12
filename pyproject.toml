@@ -10,7 +10,7 @@ authors = [{ name = "Etienne Hoffmann", email = "etienne.hoffmann@kit.edu" }]
 maintainers = [{ name = "Etienne Hoffmann", email = "etienne.hoffmann@kit.edu" }]
 dependencies = [
     "kapps-ogm>=0.1.2",
-    "graph-db-interface>=2.0.1",
+    "kapps-triplestore-interface>=2.1.0",
     "aas-middleware>=0.2.6",
     "httpx>=0.27.0",
     # aas_middleware keeps aiomqtt in an optional "industrial" extra, but the MQTT semantic
@@ -47,7 +47,7 @@ examples = [
     # scenarios do not; the single umbrella covers both.
     "amqtt>=0.11.0",
     # scenario 2 imports rdflib.namespace directly. Declared here rather than leaned on
-    # transitively through kapps-ogm / graph-db-interface (#115).
+    # transitively through kapps-ogm / kapps-triplestore-interface (#115).
     "rdflib>=7.1.3",
 ]
 # The notebook toolchain is a separate, heavier opt-in -- only someone who opens the .ipynb
@@ -105,7 +105,7 @@ files = ["src", "demo", "scripts"]
 # unsilenced these produce 44 import-untyped errors that bury the real ones -- the whole
 # reason the milestone-1 review found only one genuine type error under the noise.
 # This suppresses the missing marker, not our own annotations.
-module = ["aas_middleware.*", "kapps_ogm.*", "graph_db_interface.*", "amqtt.*"]
+module = ["aas_middleware.*", "kapps_ogm.*", "kapps_triplestore_interface.*", "amqtt.*"]
 ignore_missing_imports = true
 
 [build-system]
@@ -157,11 +157,10 @@ dev-mode-dirs = ["src", "."]
 [tool.uv.sources]
 aas-middleware = { path = "../aas_middleware_inf", editable = true }
 kapps-ogm = { path = "../kapps_ogm", editable = true }
-graph-db-interface = { path = "../graph_db_interface", editable = true }
-
-[tool.uv]
-# kapps_ogm's Poetry manifest pins graph_db_interface to a git branch (SAWeindel/kapps_ogm#22,
-# a temporary dev pin for the unreleased triples_update fix). uv sees that git URL and this
-# project's editable path source as conflicting URLs for one package and refuses to resolve.
-# The two are the same commit; the editable checkout is the one we develop against.
-override-dependencies = ["graph-db-interface"]
+kapps-triplestore-interface = { path = "../kapps_triplestore_interface", editable = true }
+# There is deliberately no `[tool.uv] override-dependencies` here any more. It existed for one
+# reason: kapps_ogm's manifest pinned the triplestore interface to a git URL, uv saw that URL
+# and this project's editable path source as two conflicting sources for one package, and
+# refused to resolve. #133 replaced that pin with `kapps-triplestore-interface >= 2.1.0`, a
+# plain version, so there is nothing left to conflict and nothing left to override. #120 was
+# expected to retire the hack; the rename got there first.

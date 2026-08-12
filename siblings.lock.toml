@@ -17,18 +17,30 @@
 # Verify a machine with:  python scripts/check_siblings.py
 # Set one up with:        see SIBLINGS.md
 
-[graph_db_interface]
-path = "../graph_db_interface"
-url = "https://github.com/SAWeindel/graph_db_interface.git"
-remote = "saweindel"
+[kapps_triplestore_interface]
+path = "../kapps_triplestore_interface"
+url = "git@gitlab.kit.edu:kit/ifl/opensource/circular_factory/inf/semantic_middleware_dev/kapps_triplestore_interface.git"
+remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "da08373"
+commit = "c096ba6"
 why = """
-Blank-node identity in `triples_update`. `main` (2.0.1) mints a fresh blank node per
+Blank-node identity in `triples_update`. The pre-fork 2.0.1 mints a fresh blank node per
 serialization, which orphans a parameter's connection metadata, and rejects a host:port form in
 `mint_service_iri`. Root ADR 0003 (anonymous node identity is specified, not patched) is the
-record. Note the branch lives on the SAWeindel fork, NOT on origin (JaFeKl) -- a clone of origin
-alone will not find it.
+record.
+
+**This entry replaces `graph_db_interface`, which no longer exists as a sibling.** #133 forked
+`JaFeKl/graph_db_interface`, renamed it to `kapps_triplestore_interface` and gave it a home on
+private KIT GitLab. Two lines that used to be here are gone with it: the branch is no longer on
+a personal fork that a clone of origin cannot see, and there is no second remote to add. Access
+to the GitLab group is now required -- the same position `aas_middleware_inf` has always been in.
+
+The rename is applied in the dev tree rather than at release time (unlike the sibling fork), so
+this commit is what both consumers import: `kapps_semantic_middleware` and `kapps_ogm` were both
+swept in the same change, because a half-swept tree does not import.
+
+> The GitLab group `semantic_middleware_dev` is expected to be renamed to `KAPPS_Dev`. The URL
+> above and the one below move together when it happens.
 """
 
 [kapps_ogm]
@@ -36,12 +48,20 @@ path = "../kapps_ogm"
 url = "https://github.com/SAWeindel/kapps_ogm.git"
 remote = "origin"
 branch = "dev_semantic_middleware"
-commit = "e447562"
+commit = "eec5297"
 why = """
 Conjunctive `rdfs:range`. `main` (0.1.2) raises on a class with several declared ranges, which
 blocks both additive extension of the fixed `tu:` properties and ranges on the interface
 superproperties -- the seed step fails on `isOccupied`. Root ADR 0002 records this as a kapps_ogm
 defect; this branch is the fix.
+
+Moved from e447562 to eec5297 for #133, which swept this repo's imports onto the triplestore
+interface's released name. **No behaviour changed** -- `GraphDB`, `GraphDBCredentials` and
+`use_gdb_token` all keep their names, so only the import path moved. The manifest did change,
+and it is the reason the pin could not simply be left behind: its git-branch pin on the old
+library is gone, replaced by `kapps-triplestore-interface >= 2.1.0`. That is what unblocks
+#119 -- PyPI rejects a distribution whose metadata carries a direct URL -- and it is what let
+this project's `[tool.uv] override-dependencies` hack die a ticket early.
 """
 
 [aas_middleware_inf]

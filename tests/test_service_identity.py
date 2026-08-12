@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from kapps_ogm import OGM
 from kapps_semantic_middleware import SemanticMiddleware

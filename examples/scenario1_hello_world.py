@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 
 import uvicorn
-from graph_db_interface import GraphDB, IRI
+from kapps_triplestore_interface import GraphDB, IRI
 from rdflib.namespace import RDF
 
 from handlers import hello_world

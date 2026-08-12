@@ -43,7 +43,7 @@ Docker is needed only for the examples and the demo, never for the library itsel
    export GRAPHDB_USERNAME=admin
    export GRAPHDB_PASSWORD=root
    ```
-   Three, not four. `GraphDBCredentials.from_env()` in `graph_db_interface` reads a fourth,
+   Three, not four. `GraphDBCredentials.from_env()` in `kapps_triplestore_interface` reads a fourth,
    `GRAPHDB_REPOSITORY`, and consumer code that connects to a repository of its own may still use
    it. Nothing in this project does: the examples and demo use `kapps-demo`, and the test suite
    uses `Tests`, each named in code (see `kapps_semantic_middleware.credentials`). A

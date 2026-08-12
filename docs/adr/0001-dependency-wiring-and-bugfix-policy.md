@@ -1,6 +1,6 @@
 # Local editable dependencies, with a bugfix-only policy on siblings
 
-`kapps_ogm` and `graph_db_interface` are wired as local editable path dependencies
+`kapps_ogm` and `kapps_triplestore_interface` are wired as local editable path dependencies
 (`[tool.uv.sources]`), alongside the already-local `aas_middleware`, rather than consumed
 from PyPI. Genuine correctness bugs found in any of the three sibling repos during the build of
 `kapps_semantic_middleware` may be fixed directly in that sibling's checkout. New

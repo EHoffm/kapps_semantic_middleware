@@ -30,7 +30,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from aas_middleware.middleware.sync.synced_connector import SyncDirection
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from kapps_ogm import OGM
 
 from kapps_semantic_middleware import Mode, SemanticMiddleware

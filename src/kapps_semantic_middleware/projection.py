@@ -44,7 +44,7 @@ import copy
 import logging
 from typing import Any, Collection, Dict, Optional, Set
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 from kapps_semantic_middleware.vocabulary import INF
 

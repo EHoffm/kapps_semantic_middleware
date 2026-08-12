@@ -31,7 +31,7 @@ from typing import Annotated, Any, Optional
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from pydantic import BaseModel, BeforeValidator, ConfigDict, conlist, create_model
 
 from kapps_semantic_middleware.connectors.semantic import AccessMode

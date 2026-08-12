@@ -35,7 +35,7 @@ import logging
 from typing import Annotated, Any, Dict, List, Sequence, Set, Tuple
 
 from fastapi import APIRouter, Body, HTTPException
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from pydantic import BaseModel
 
 from aas_middleware.model.data_model import DataModel

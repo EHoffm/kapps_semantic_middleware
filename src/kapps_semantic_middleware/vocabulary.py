@@ -21,7 +21,7 @@ It is domain-facing. It covers possession and handover-ability vocabulary.
 
 `inf:` is the interface vocabulary. It defines what makes a domain parameter reachable
 over a protocol. It is authored for now under the existing CrcInterfaces IRI, so scenario
-3 stays vocabulary-compatible with the minimal example shared across `graph_db_interface`
+3 stays vocabulary-compatible with the minimal example shared across `kapps_triplestore_interface`
 and `kapps_ogm`. CrcInterfaces is deprecated. The consolidation capstone (#39) re-homes
 these terms under the `inf:` name it mints. Code must therefore reach these terms only
 through `class INF`, never inline at a use site. A rename is then one constant
@@ -32,7 +32,7 @@ here, plus a find-and-replace.
 
 from __future__ import annotations
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 
 CORE_NS = "https://w3id.org/circularfactory/Core#"
 SVC_NS = "https://w3id.org/circularfactory/Service#"

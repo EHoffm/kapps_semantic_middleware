@@ -44,7 +44,7 @@ This project needs three other projects next to it, in the **same parent folder*
 ```
 your-code-folder/
 ├── kapps_semantic_middleware/   <- this project
-├── graph_db_interface/
+├── kapps_triplestore_interface/
 ├── kapps_ogm/
 └── aas_middleware_inf/
 ```

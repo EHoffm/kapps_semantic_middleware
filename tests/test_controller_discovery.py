@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from graph_db_interface import IRI
+from kapps_triplestore_interface import IRI
 from kapps_ogm import OGM
 
 from demo.transferunits.controller import Controller, ResourceInfo

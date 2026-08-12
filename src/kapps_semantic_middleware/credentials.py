@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 
-from graph_db_interface import GraphDB, GraphDBCredentials
+from kapps_triplestore_interface import GraphDB, GraphDBCredentials
 
 # The variables a client genuinely needs. GRAPHDB_REPOSITORY is absent on purpose.
 REQUIRED_GRAPHDB_ENV = (

@@ -21,8 +21,8 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
-from graph_db_interface import IRI
-from graph_db_interface.exceptions import InvalidIRIError
+from kapps_triplestore_interface import IRI
+from kapps_triplestore_interface.exceptions import InvalidIRIError
 from kapps_ogm.utils.class_scope import ClassScope
 
 from kapps_semantic_middleware.vocabulary import CFC, MES, OperationStatus, SVC
@@ -540,7 +540,7 @@ def revert_operation(
     Literal properties receive clear through the OGM commit path first (commit needs the
     ``rdf:type`` triple present to resolve the class). The ``cfc:implementsCapability`` and
     ``rdf:type`` triples then receive removal via the low-level ``ogm.db.triple_delete`` (a
-    sanctioned graph_db_interface write).
+    sanctioned kapps_triplestore_interface write).
     """
     # ADR: 0008, 0010, 0011
     clear_literals: dict = {str(SVC.operationStatus): []}
@@ -792,7 +792,7 @@ def create_possession(
     # ADR: 0008, 0011
     ps_iri = mint_possession_state_iri(workpiece_iri)
     # A resource may possess several workpieces at once (ADR 0011 — possession is not
-    # universally maxCount 1), so `cfc:hasPossessor` is APPENDED via the graph_db_interface
+    # universally maxCount 1), so `cfc:hasPossessor` is APPENDED via the kapps_triplestore_interface
     # atomic insertion. A workpiece has exactly one possession, so `cfc:hasPossessedWorkpiece`
     # is SET through the OGM commit path (an atomic replace). The PossessionState node comes
     # into being as their shared object (inferably a cfc:PossessionState via rdfs:range).
@@ -859,7 +859,7 @@ def switch_possession(
     """Atomically change possession of a workpiece to a new possessor.
 
     A fresh ``cfc:PossessionState`` receives mint for the new possessor. The new possessor
-    ``cfc:hasPossessor`` receives APPEND as an atomic insertion (graph_db_interface). A resource
+    ``cfc:hasPossessor`` receives APPEND as an atomic insertion (kapps_triplestore_interface). A resource
     may possess several workpieces. This must not disturb its existing possessions, because
     possession is not universally maxCount 1. The workpiece ``cfc:hasPossessedWorkpiece`` then
     receives re-point via a single ``OGM.commit``. This is the update path, an atomic
