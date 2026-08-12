@@ -104,6 +104,13 @@ A reader who follows this sequence reaches a running middleware without leaving 
 Why a knowledge graph sits in the middle, what the three modes mean, and why the reasoner is not optional.
 :::
 
+:::{grid-item-card} {octicon}`book;1.5em;sd-mr-1` Guide
+:link: guide/index
+:link-type: doc
+
+Nine pages in construction order: instantiation, registration, parameters, connectors, coordination, views, writes, and the bootstrap that precedes them.
+:::
+
 :::{grid-item-card} {octicon}`beaker;1.5em;sd-mr-1` Scenarios
 :link: scenarios/index
 :link-type: doc
@@ -125,6 +132,7 @@ Fourteen modules, generated from the docstrings in `src/`.
 :maxdepth: 2
 
 concepts
+guide/index
 scenarios/index
 reference/index
 ```
