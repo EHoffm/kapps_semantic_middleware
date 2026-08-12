@@ -8,3 +8,7 @@ build/
 *.egg-info/
 .ipynb_checkpoints/
 .env
+
+# Sphinx build output (#116). The docs site is deployed as a Pages artifact,
+# never committed -- the release repo keeps one clean commit of source only.
+docs/site/_build/
